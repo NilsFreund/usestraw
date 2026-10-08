@@ -1,0 +1,15 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+    - name: typecheck
+      run: bun run typecheck
+    - name: test
+      run: bunx vitest run --passWithNoTests
+
+pre-push:
+  jobs:
+    - name: build
+      run: bun run build
