@@ -7,7 +7,7 @@ pre-commit:
     - name: typecheck
       run: bun run typecheck
     - name: test
-      run: bunx vitest run --passWithNoTests
+      run: bunx vitest run
 
 pre-push:
   jobs:

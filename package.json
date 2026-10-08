@@ -37,11 +37,12 @@
     "typecheck": "tsc",
     "lint": "biome check",
     "format": "biome check --write",
-    "check": "biome check && tsc && vitest run --passWithNoTests",
+    "check": "biome check && tsc && vitest run",
     "prepublishOnly": "bun run check && bun run build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@types/node": "^26.6.4",
     "lefthook": "^2.2.1",
     "publint": "^0.3.25",
     "tsdown": "^0.23.0",
