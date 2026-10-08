@@ -78,4 +78,39 @@ describe("parseMessage", () => {
       error: 'Invalid display name "Bob, Builder"',
     })
   })
+
+  const via = "Via: SIP/2.0/UDP 192.0.2.1:5060;branch=z9hG4bK776asdhds;rport\r\n"
+
+  it.each([
+    ["SIP/2.0 OK", 'Invalid status line "SIP/2.0 OK"'],
+    ["INV@ITE sip:example.com SIP/2.0", 'Invalid method "INV@ITE"'],
+  ])("rejects the start line %s", (line, error) => {
+    const message = register.replace("REGISTER sip:example.com SIP/2.0", line)
+    expect(parseMessage(message)).toEqual({ ok: false, error })
+  })
+
+  it.each([
+    ["a continuation line before any header", via, ` ${via}`, "Header continuation without header"],
+    [
+      "a header line without colon",
+      "Max-Forwards: 70",
+      "Max-Forwards 70",
+      'Invalid header line "Max-Forwards 70"',
+    ],
+    ["a missing Via", via, "", "Missing Via header"],
+    [
+      "a Call-ID with whitespace",
+      "Call-ID: 843817637684230@998sdasdh09",
+      "Call-ID: a b",
+      'Invalid Call-ID "a b"',
+    ],
+    ["an empty Call-ID", "Call-ID: 843817637684230@998sdasdh09", "Call-ID:", 'Invalid Call-ID ""'],
+    ["a duplicate Call-ID", "CSeq:", "Call-ID: second\r\nCSeq:", "Multiple Call-ID headers"],
+  ])("rejects %s", (_, search, replacement, error) => {
+    expect(parseMessage(register.replace(search, replacement))).toEqual({ ok: false, error })
+  })
+
+  it("lets programming errors escape instead of hiding them as parse errors", () => {
+    expect(() => parseMessage(undefined as unknown as string)).toThrow(TypeError)
+  })
 })

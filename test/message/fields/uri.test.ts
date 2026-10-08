@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isRequestUri, isUri } from "../../../src/message/fields/uri"
+import { isRequestUri, isSipUri, isUri } from "../../../src/message/fields/uri"
 
 describe("isUri", () => {
   it.each(["sip:alice@example.com", "tel:+4930123456", "urn:uuid:f81d4fae", "soap.beep://h:1"])(
@@ -28,5 +28,18 @@ describe("isRequestUri", () => {
 
   it("allows ? in other schemes", () => {
     expect(isRequestUri("http://example.com/?q=1")).toBe(true)
+  })
+})
+
+describe("isSipUri", () => {
+  it.each(["sip:alice@example.com", "sips:alice@example.com", "SIP:alice@example.com"])(
+    "accepts %s",
+    (value) => {
+      expect(isSipUri(value)).toBe(true)
+    },
+  )
+
+  it.each(["tel:+4930123456", "sipx:alice", "http://example.com"])("rejects %s", (value) => {
+    expect(isSipUri(value)).toBe(false)
   })
 })

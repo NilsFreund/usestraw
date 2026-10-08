@@ -26,6 +26,26 @@ export function parseVia(input: string): Via {
   return { ...via, port: number }
 }
 
+export function withReceived(via: Via, host: string, port: number): Via {
+  const params = new Map(via.params)
+  const rport = params.has("rport")
+  if (rport || !sameHost(via.host, host)) params.set("received", bareHost(host))
+  if (rport) params.set("rport", String(port))
+  return { ...via, params }
+}
+
+export function formatHost(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
+}
+
+export function bareHost(host: string): string {
+  return host.startsWith("[") ? host.slice(1, -1) : host
+}
+
+export function sameHost(a: string, b: string): boolean {
+  return bareHost(a).toLowerCase() === bareHost(b).toLowerCase()
+}
+
 export function formatVia(via: Via): string {
   const port = via.port === undefined ? "" : `:${via.port}`
   return `SIP/2.0/${via.transport} ${via.host}${port}${formatParams(via.params)}`

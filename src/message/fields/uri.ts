@@ -4,10 +4,14 @@ export function isUri(value: string): boolean {
   return URI.test(value)
 }
 
+export function isSipUri(value: string): boolean {
+  return /^sips?:/i.test(value)
+}
+
 export function isRequestUri(value: string): boolean {
   return isUri(value) && !hasHeaders(value)
 }
 
 function hasHeaders(uri: string): boolean {
-  return /^sips?:/i.test(uri) && uri.slice(uri.indexOf("@") + 1).includes("?")
+  return isSipUri(uri) && uri.slice(uri.indexOf("@") + 1).includes("?")
 }

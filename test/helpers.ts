@@ -1,4 +1,9 @@
-import { parseMessage, type SipMessage } from "../src"
+import { readFileSync } from "node:fs"
+import { type Address, type CoreEvent, parseMessage, type SipMessage } from "../src"
+
+export function fixture(name: string): Uint8Array {
+  return new Uint8Array(readFileSync(new URL(`fixtures/rfc4475/${name}.dat`, import.meta.url)))
+}
 
 export const register: string = [
   "REGISTER sip:example.com SIP/2.0",
@@ -15,8 +20,19 @@ export const register: string = [
   "",
 ].join("\r\n")
 
+export const alice: Address = { transport: "UDP", host: "192.0.2.10", port: 5060 }
+export const bob: Address = { transport: "UDP", host: "192.0.2.20", port: 5060 }
+
 export function parsed(data: Uint8Array | string): SipMessage {
   const result = parseMessage(data)
   if (!result.ok) throw new Error(result.error)
   return result.message
+}
+
+export function eventTypes(events: readonly CoreEvent[]): string[] {
+  return events.map((event) => event.type)
+}
+
+export function bytes(text: string): Uint8Array {
+  return new TextEncoder().encode(text)
 }

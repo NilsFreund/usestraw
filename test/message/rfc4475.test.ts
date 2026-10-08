@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { getHeader, isRequest, parseMessage, serializeMessage } from "../../src"
-import { parsed } from "../helpers"
+import { fixture, parsed } from "../helpers"
 
 const valid = [
   "wsinv",
@@ -56,10 +55,6 @@ const invalid = {
   insuf: "Missing From header",
   multi01: "Multiple From headers",
   mcl01: "Multiple Content-Length headers",
-}
-
-function fixture(name: string): Uint8Array {
-  return new Uint8Array(readFileSync(new URL(`../fixtures/rfc4475/${name}.dat`, import.meta.url)))
 }
 
 describe("RFC 4475 torture tests", () => {

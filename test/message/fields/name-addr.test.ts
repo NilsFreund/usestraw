@@ -35,6 +35,9 @@ describe("parseNameAddr", () => {
     "< sip:alice@example.com >",
     "sip:alice@example.com?Route=x",
     "alice",
+    "<sip:alice@example.com",
+    '"Alice" sip:alice@example.com',
+    "<sip:alice@example.com> tag=1",
   ])("rejects %s", (value) => {
     expect(() => parseNameAddr(value)).toThrow(ParseError)
   })
