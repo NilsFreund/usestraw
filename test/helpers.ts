@@ -1,5 +1,14 @@
 import { readFileSync } from "node:fs"
-import { type Address, type CoreEvent, parseMessage, type SipMessage } from "../src"
+import {
+  type Address,
+  type Command,
+  type Core,
+  type CoreEvent,
+  createCore,
+  parseMessage,
+  type Random,
+  type SipMessage,
+} from "../src"
 
 export function fixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(new URL(`fixtures/rfc4475/${name}.dat`, import.meta.url)))
@@ -33,6 +42,18 @@ export function eventTypes(events: readonly CoreEvent[]): string[] {
   return events.map((event) => event.type)
 }
 
+export function outcomes(events: readonly CoreEvent[]): string[] {
+  return eventTypes(events).filter((type) => type === "response" || type === "timeout")
+}
+
 export function bytes(text: string): Uint8Array {
   return new TextEncoder().encode(text)
+}
+
+export function userAgent(user: string, address: Address): (random: Random) => Core {
+  return (random) => createCore({ address, aor: `sip:${user}@example.com`, random })
+}
+
+export function options(to: Address, uri = "sip:bob@example.com"): Command {
+  return { type: "options", uri, to }
 }

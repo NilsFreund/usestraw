@@ -1,14 +1,16 @@
 import type { Core } from "../core/core"
 import { earliest } from "../core/time"
 import type { Address, Command, CoreEvent, Output, Random } from "../core/types"
-import { createNetwork, type Packet } from "./network"
-import { createRandom } from "./random"
-import { summarize, type TraceEntry } from "./trace"
+import { createAgenda } from "./network/agenda"
+import type { LinkConditions } from "./network/conditions"
+import type { HostOptions } from "./network/hosts"
+import { createNetwork, type Network } from "./network/network"
+import type { Delivery, PacketRecord } from "./network/types"
+import { createRandom, deriveSeed } from "./random"
 
 export interface SimulationOptions {
   readonly seed: number
-  readonly latency?: readonly [min: number, max: number]
-  readonly loss?: number
+  readonly internet?: LinkConditions
   readonly maxSteps?: number
 }
 
@@ -21,9 +23,16 @@ export interface SimulationNode {
 
 export interface Simulation {
   readonly now: number
-  readonly trace: readonly TraceEntry[]
-  addNode(name: string, address: Address, create: (random: Random) => Core): SimulationNode
+  readonly network: Network
+  readonly trace: readonly PacketRecord[]
+  addNode(
+    name: string,
+    address: Address,
+    create: (random: Random) => Core,
+    options?: HostOptions,
+  ): SimulationNode
   command(node: SimulationNode, command: Command): void
+  at(time: number, action: () => void): void
   run(until?: number): void
 }
 
@@ -33,23 +42,40 @@ interface NodeState extends SimulationNode {
 
 export function createSimulation(options: SimulationOptions): Simulation {
   const { seed, maxSteps = 100_000, ...conditions } = options
-  const random = createRandom(seed)
-  const network = createNetwork({ random, ...conditions })
+  const network = createNetwork({ seed, ...conditions })
+  const timeline = createAgenda<() => void>()
   const nodes = new Map<string, NodeState>()
-  const trace: TraceEntry[] = []
   let now = 0
 
-  function addNode(name: string, address: Address, create: (random: Random) => Core): NodeState {
-    if (nodes.has(key(address))) throw new Error(`Address ${key(address)} is already taken`)
-    const node = { name, address, core: create(createRandom(random() * 2 ** 32)), events: [] }
-    nodes.set(key(address), node)
+  function addNode(
+    name: string,
+    address: Address,
+    create: (random: Random) => Core,
+    hostOptions: HostOptions = {},
+  ): NodeState {
+    const core = create(createRandom(deriveSeed(seed, `core:${name}`)))
+    network.attach(name, address, hostOptions)
+    const node: NodeState = {
+      name,
+      core,
+      events: [],
+      get address() {
+        return network.addressOf(name)
+      },
+    }
+    nodes.set(name, node)
     return node
   }
 
   function command(node: SimulationNode, command: Command): void {
-    const target = nodes.get(key(node.address))
+    const target = nodes.get(node.name)
     if (target !== node) throw new Error(`Unknown node ${node.name}`)
     process(target, target.core.handle({ type: "command", command }, now))
+  }
+
+  function at(time: number, action: () => void): void {
+    if (time < now) throw new RangeError(`Cannot schedule at ${time}ms, the clock is at ${now}ms`)
+    timeline.push(time, action)
   }
 
   function run(until = Number.POSITIVE_INFINITY): void {
@@ -61,7 +87,8 @@ export function createSimulation(options: SimulationOptions): Simulation {
       }
       if (step === maxSteps) throw new Error(`Simulation did not settle after ${maxSteps} steps`)
       now = Math.max(now, next)
-      for (const packet of network.deliver(now)) receive(packet)
+      for (let action = timeline.take(now); action; action = timeline.take(now)) action()
+      for (const delivery of network.step(now)) receive(delivery)
       for (const node of nodes.values()) {
         const deadline = node.core.nextDeadline()
         if (deadline !== undefined && deadline <= now) {
@@ -73,29 +100,18 @@ export function createSimulation(options: SimulationOptions): Simulation {
 
   function nextEvent(): number | undefined {
     const deadlines = Array.from(nodes.values(), (node) => node.core.nextDeadline())
-    return earliest([network.nextDelivery(), ...deadlines])
+    return earliest([network.nextEvent(), timeline.next(), ...deadlines])
   }
 
-  function receive(packet: Packet): void {
-    const node = nodes.get(key(packet.to))
-    if (!node) return
-    process(node, node.core.handle({ type: "receive", data: packet.data, from: packet.from }, now))
+  function receive({ host, from, data }: Delivery): void {
+    const node = nodes.get(host)
+    if (node) process(node, node.core.handle({ type: "receive", data, from }, now))
   }
 
   function process(node: NodeState, outputs: Output[]): void {
     for (const output of outputs) {
-      if (output.type === "event") {
-        node.events.push(output.event)
-        continue
-      }
-      const packet = network.send(node.address, output.to, output.data, now)
-      trace.push({
-        sentAt: packet.sentAt,
-        deliverAt: packet.deliverAt,
-        from: node.name,
-        to: nodes.get(key(output.to))?.name ?? key(output.to),
-        summary: summarize(output.data),
-      })
+      if (output.type === "event") node.events.push(output.event)
+      else network.send(node.name, output.to, output.data, now)
     }
   }
 
@@ -103,13 +119,11 @@ export function createSimulation(options: SimulationOptions): Simulation {
     get now() {
       return now
     },
-    trace,
+    network,
+    trace: network.trace,
     addNode,
     command,
+    at,
     run,
   }
-}
-
-function key(address: Address): string {
-  return `${address.transport}:${address.host}:${address.port}`
 }

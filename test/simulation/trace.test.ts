@@ -1,29 +1,57 @@
 import { describe, expect, it } from "vitest"
-import { formatTrace, summarize } from "../../src/simulation/trace"
-import { bytes } from "../helpers"
+import type { Fate, PacketRecord } from "../../src/simulation/network/types"
+import { describeFate, formatTrace } from "../../src/simulation/trace"
 
-describe("summarize", () => {
-  it("returns the start line", () => {
-    expect(summarize(bytes("SIP/2.0 200 OK\r\nVia: x\r\n\r\nbody"))).toBe("SIP/2.0 200 OK")
-  })
+function packet(fates: Fate[], overrides: Partial<PacketRecord> = {}): PacketRecord {
+  return {
+    id: 1,
+    sentAt: 100,
+    from: "alice",
+    to: "bob",
+    size: 50,
+    copies: 1,
+    summary: "OPTIONS sip:bob SIP/2.0",
+    fates,
+    ...overrides,
+  }
+}
 
-  it("returns everything without a line break", () => {
-    expect(summarize(bytes("garbage"))).toBe("garbage")
+describe("describeFate", () => {
+  const record = packet([])
+
+  it.each<[Fate, string]>([
+    [{ type: "delivered", at: 123, host: "bob", corrupted: false }, "+23ms"],
+    [{ type: "delivered", at: 130, host: "phone", corrupted: false }, "+30ms at phone"],
+    [{ type: "delivered", at: 110, host: "bob", corrupted: true }, "+10ms corrupted"],
+    [{ type: "dropped", at: 100, reason: "loss", hop: "internet" }, "lost"],
+    [{ type: "dropped", at: 120, reason: "nat", hop: "ingress" }, "dropped: nat"],
+  ])("describes %o as %s", (fate, text) => {
+    expect(describeFate(record, fate)).toBe(text)
   })
 })
 
 describe("formatTrace", () => {
-  it("aligns times and shows latency or loss", () => {
+  it("aligns times and lists every fate of a packet", () => {
     expect(
       formatTrace([
-        { sentAt: 0, deliverAt: 23, from: "alice", to: "bob", summary: "OPTIONS sip:bob SIP/2.0" },
-        { sentAt: 23, deliverAt: null, from: "bob", to: "alice", summary: "SIP/2.0 200 OK" },
+        packet([
+          { type: "delivered", at: 123, host: "bob", corrupted: false },
+          { type: "dropped", at: 140, reason: "outage", hop: "downlink" },
+        ]),
+        packet([], { sentAt: 2500, from: "bob", to: "alice", summary: "SIP/2.0 200 OK" }),
       ]),
     ).toBe(
       [
-        "     0ms  alice → bob  OPTIONS sip:bob SIP/2.0  (+23ms)",
-        "    23ms  bob → alice  SIP/2.0 200 OK  (lost)",
+        "   100ms  alice → bob  OPTIONS sip:bob SIP/2.0  (+23ms, dropped: outage)",
+        "  2500ms  bob → alice  SIP/2.0 200 OK  (in flight)",
       ].join("\n"),
+    )
+  })
+
+  it("rounds fractional times from bandwidth-limited links", () => {
+    const fate: Fate = { type: "delivered", at: 131.25, host: "bob", corrupted: false }
+    expect(formatTrace([packet([fate], { sentAt: 100.4 })])).toBe(
+      "   100ms  alice → bob  OPTIONS sip:bob SIP/2.0  (+31ms)",
     )
   })
 

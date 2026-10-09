@@ -1,24 +1,18 @@
-export interface TraceEntry {
-  readonly sentAt: number
-  readonly deliverAt: number | null
-  readonly from: string
-  readonly to: string
-  readonly summary: string
+import type { Fate, PacketRecord } from "./network/types"
+
+export function describeFate(packet: PacketRecord, fate: Fate): string {
+  if (fate.type === "dropped") return fate.reason === "loss" ? "lost" : `dropped: ${fate.reason}`
+  const receiver = fate.host === packet.to ? "" : ` at ${fate.host}`
+  const corrupted = fate.corrupted ? " corrupted" : ""
+  return `+${Math.round(fate.at - packet.sentAt)}ms${receiver}${corrupted}`
 }
 
-const CR = 13
-const decoder = new TextDecoder()
-
-export function summarize(data: Uint8Array): string {
-  const end = data.indexOf(CR)
-  return decoder.decode(end === -1 ? data : data.subarray(0, end))
-}
-
-export function formatTrace(trace: readonly TraceEntry[]): string {
+export function formatTrace(trace: readonly PacketRecord[]): string {
   return trace
-    .map(({ sentAt, deliverAt, from, to, summary }) => {
-      const arrival = deliverAt === null ? "lost" : `+${deliverAt - sentAt}ms`
-      return `${String(sentAt).padStart(6)}ms  ${from} → ${to}  ${summary}  (${arrival})`
+    .map((packet) => {
+      const fates = packet.fates.map((fate) => describeFate(packet, fate)).join(", ")
+      const time = `${String(Math.round(packet.sentAt)).padStart(6)}ms`
+      return `${time}  ${packet.from} → ${packet.to}  ${packet.summary}  (${fates || "in flight"})`
     })
     .join("\n")
 }
