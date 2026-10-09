@@ -5,7 +5,7 @@ import { type AddressInfo, isIP } from "node:net"
 import { connect } from "node:tls"
 import type { Address } from "../transport/address"
 import { createStreamFramer } from "../transport/stream"
-import type { Server, TlsOptions } from "./options"
+import type { Server } from "./options"
 
 export interface LinkHandlers {
   receive(data: Uint8Array, from: Address): void
@@ -20,6 +20,11 @@ export interface Link {
   close(): void
 }
 
+export interface TlsSettings {
+  readonly ca?: string
+  readonly rejectUnauthorized?: boolean
+}
+
 export interface Peer {
   readonly address: string
   readonly family: number
@@ -32,7 +37,7 @@ const PONG = new Uint8Array([13, 10])
 
 export async function openLink(
   server: Server,
-  tls?: TlsOptions,
+  tls?: TlsSettings,
   signal?: AbortSignal,
 ): Promise<Link> {
   if (server.transport === "TLS") return openTls(server, tls, signal)
@@ -76,7 +81,7 @@ export async function openUdp(peer: Peer): Promise<Link> {
 // RFC 3261 §18.3: messages on streams are framed by Content-Length; RFC 5626 §3.5.1: answer a ping with CRLF
 export async function openTls(
   server: Server,
-  options: TlsOptions = {},
+  options: TlsSettings = {},
   signal?: AbortSignal,
 ): Promise<Link> {
   const { rejectUnauthorized = true, ca } = options

@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { getHeader } from "../../src"
-import { type Phone, type RegisterOptions, RegistrationError, register } from "../../src/node"
-import { resolveOptions } from "../../src/node/options"
-import { connectPhone } from "../../src/node/phone"
+import { ConnectError, type ConnectOptions, connect, type Phone } from "../../src/node"
+import { type PhoneSettings, resolveOptions } from "../../src/node/options"
+import { connectPhone, type PhoneHandle } from "../../src/node/phone"
 import {
   certificate,
   closedPort,
@@ -24,7 +24,7 @@ async function serve(server: Promise<TestServer>): Promise<TestServer> {
   return started
 }
 
-function options(server: TestServer, transport: "udp" | "tls"): RegisterOptions {
+function options(server: TestServer, transport: "udp" | "tls"): ConnectOptions {
   return {
     uri: "sip:alice@example.com",
     password: "secret",
@@ -33,24 +33,29 @@ function options(server: TestServer, transport: "udp" | "tls"): RegisterOptions 
   }
 }
 
-async function phoneFor(settings: RegisterOptions): Promise<Phone> {
-  const phone = await register(settings)
+async function phoneFor(
+  settings: ConnectOptions,
+  internal: Partial<PhoneSettings> = {},
+): Promise<PhoneHandle> {
+  const phone = await connectPhone({ ...resolveOptions(settings), ...internal })
   cleanups.push(() => phone.close())
   return phone
 }
 
-async function failure(settings: RegisterOptions): Promise<RegistrationError> {
-  const error = await register(settings).then(
+async function failure(settings: ConnectOptions): Promise<ConnectError> {
+  const error = await connect(settings).then(
     () => undefined,
     (thrown: unknown) => thrown,
   )
-  if (!(error instanceof RegistrationError)) throw new Error(`Expected a RegistrationError`)
+  if (!(error instanceof ConnectError)) throw new Error(`Expected a ConnectError`)
   return error
 }
 
-async function collect<T>(changes: AsyncIterable<T>): Promise<T[]> {
-  const seen: T[] = []
-  for await (const change of changes) seen.push(change)
+function watch(phone: Phone): { status: string; error?: string }[] {
+  const seen: { status: string; error?: string }[] = []
+  phone.subscribe(() =>
+    seen.push({ status: phone.status, ...(phone.error ? { error: phone.error.message } : {}) }),
+  )
   return seen
 }
 
@@ -65,23 +70,24 @@ function expiries(server: TestServer): (string | undefined)[] {
   })
 }
 
-describe.each(["udp", "tls"] as const)("register over %s", (transport) => {
+describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
   const start = (settings = {}) =>
     serve(transport === "tls" ? tlsRegistrar(settings) : udpRegistrar(settings))
 
   it("resolves once registered and unregisters on close", async () => {
     const server = await start({ algorithm: "SHA-256" })
-    const phone = await phoneFor({ ...options(server, transport), expires: 120 })
-    const changes = collect(phone.changes)
-    expect(phone.state).toBe("registered")
+    const phone = await phoneFor(options(server, transport), { expires: 120 })
+    const seen = watch(phone)
+    expect(phone.status).toBe("online")
+    expect(phone.error).toBeUndefined()
     expect(server.registrar.bindings.size).toBe(1)
     const started = performance.now()
     await phone.close()
     expect(performance.now() - started).toBeLessThan(1000)
-    expect(phone.state).toBe("closed")
+    expect(phone.status).toBe("offline")
     expect(server.registrar.bindings.size).toBe(0)
     expect(expiries(server)).toStrictEqual(["120", "120", "0", "0"])
-    expect(await changes).toStrictEqual([{ state: "closed" }])
+    expect(seen).toStrictEqual([{ status: "offline" }])
   })
 
   it("registers its real local address", async () => {
@@ -106,30 +112,28 @@ describe.each(["udp", "tls"] as const)("register over %s", (transport) => {
     const server = await start()
     const { password: _, ...settings } = options(server, transport)
     const error = await failure(settings)
-    expect(error.failure).toStrictEqual({ reason: "no-credentials" })
+    expect(error.reason).toBe("password-missing")
     expect(error.message).toMatch(/ asks for a password, but none was given$/)
   })
 
   it("refuses to register with a wrong password", async () => {
     const server = await start()
     const error = await failure({ ...options(server, transport), password: "wrong" })
-    expect(error.failure).toStrictEqual({ reason: "unauthorized", status: 401 })
+    expect([error.reason, error.sip]).toStrictEqual(["wrong-password", { status: 401 }])
     expect(error.message).toContain('refused the password for "alice" with 401')
   })
 
   it("refuses to register when the registrar rejects the first attempt", async () => {
     const server = await start({ script: [503], retryAfter: 60 })
     const error = await failure(options(server, transport))
-    expect(error.failure).toStrictEqual({ reason: "rejected", status: 503, phrase: "Scripted" })
+    expect([error.reason, error.sip]).toStrictEqual(["unavailable", { status: 503 }])
+    expect(error.message).toMatch(/ rejected the registration with 503 "Scripted"$/)
   })
 
   it("refuses invalid options before it connects", async () => {
     const server = await start()
-    await expect(register({ ...options(server, transport), password: "a\r\nb" })).rejects.toThrow(
+    await expect(connect({ ...options(server, transport), password: "a\r\nb" })).rejects.toThrow(
       TypeError,
-    )
-    await expect(register({ ...options(server, transport), expires: 0 })).rejects.toThrow(
-      "Invalid expires 0",
     )
     await pause(50)
     expect(server.received).toBe(0)
@@ -138,18 +142,18 @@ describe.each(["udp", "tls"] as const)("register over %s", (transport) => {
 
   it("gives up waiting for the unregister after the close timeout", async () => {
     const server = await start()
-    const phone = await phoneFor({ ...options(server, transport), closeTimeout: 50 })
+    const phone = await phoneFor(options(server, transport), { closeTimeout: 50 })
     server.mute()
     const started = performance.now()
     await phone.close()
     expect(performance.now() - started).toBeGreaterThanOrEqual(45)
     expect(performance.now() - started).toBeLessThan(1000)
-    expect(phone.state).toBe("closed")
+    expect(phone.status).toBe("offline")
   })
 
   it("rejects pings after close and pings still waiting at close", async () => {
     const server = await start()
-    const phone = await phoneFor({ ...options(server, transport), closeTimeout: 50 })
+    const phone = await phoneFor(options(server, transport), { closeTimeout: 50 })
     server.mute()
     const waiting = phone.ping()
     const closing = phone.close()
@@ -163,7 +167,7 @@ describe.each(["udp", "tls"] as const)("register over %s", (transport) => {
     const server = await start()
     server.mute()
     const signal = AbortSignal.timeout(50)
-    await expect(register({ ...options(server, transport), signal })).rejects.toMatchObject({
+    await expect(connect({ ...options(server, transport), signal })).rejects.toMatchObject({
       name: "TimeoutError",
     })
     const received = server.received
@@ -171,21 +175,24 @@ describe.each(["udp", "tls"] as const)("register over %s", (transport) => {
     expect(server.received).toBe(received)
   })
 
-  it("keeps running when the signal aborts after the registration", async () => {
+  it("closes and unregisters when the signal aborts after connecting", async () => {
     const server = await start()
     const controller = new AbortController()
     const phone = await phoneFor({ ...options(server, transport), signal: controller.signal })
+    const seen = watch(phone)
     controller.abort()
-    expect(phone.state).toBe("registered")
-    expect((await phone.ping()).status).toBe(200)
+    await vi.waitFor(() => expect(phone.status).toBe("offline"))
+    expect(phone.error).toBeUndefined()
+    expect(seen).toStrictEqual([{ status: "offline" }])
+    await vi.waitFor(() => expect(server.registrar.bindings.size).toBe(0))
   })
 })
 
-describe("register", () => {
+describe("connect", () => {
   it("derives a UDP server from a sip uri", async () => {
     const server = await serve(udpRegistrar())
     const phone = await phoneFor({ uri: `sip:alice@127.0.0.1:${server.port}`, password: "secret" })
-    expect(phone.state).toBe("registered")
+    expect(phone.status).toBe("online")
   })
 
   it("derives a TLS server from a sips uri", async () => {
@@ -195,19 +202,34 @@ describe("register", () => {
       password: "secret",
       tls: { ca: certificate },
     })
-    expect(phone.state).toBe("registered")
+    expect(phone.status).toBe("online")
     expect(server.registrar.registers[0]?.uri).toBe(`sips:localhost:${server.port}`)
   })
 
   it("uses the username instead of the user part of the uri", async () => {
     const server = await serve(udpRegistrar({ users: { a1: "secret" } }))
-    const phone = await phoneFor({ ...options(server, "udp"), username: "a1" })
-    expect(phone.state).toBe("registered")
+    const phone = await phoneFor({ ...options(server, "udp"), authUser: "a1" })
+    expect(phone.status).toBe("online")
+  })
+
+  it("asks for a URL when the variable behind it is unset", async () => {
+    await expect(connect(process.env["STRAW_URL_THAT_IS_NOT_SET"])).rejects.toThrow(
+      "Missing connection URL: pass tls://user:password@host[:port]",
+    )
+  })
+
+  it("lets go of its signal once it is offline", async () => {
+    const server = await serve(udpRegistrar())
+    const controller = new AbortController()
+    const removed = vi.spyOn(controller.signal, "removeEventListener")
+    const phone = await phoneFor({ ...options(server, "udp"), signal: controller.signal })
+    await phone.close()
+    expect(removed).toHaveBeenCalledWith("abort", expect.any(Function))
   })
 
   it("refuses invalid options", async () => {
-    await expect(register({ uri: "alice" })).rejects.toThrow('Invalid uri "alice"')
-    await expect(register({ uri: "sip:alice@example.com", server: "x" })).rejects.toThrow(
+    await expect(connect({ uri: "alice" })).rejects.toThrow('Invalid uri "alice"')
+    await expect(connect({ uri: "sip:alice@example.com", server: "x" })).rejects.toThrow(
       'Invalid server "x"',
     )
   })
@@ -215,7 +237,7 @@ describe("register", () => {
   it("does not start when the signal has already aborted", async () => {
     const server = await serve(udpRegistrar())
     const signal = AbortSignal.abort()
-    await expect(register({ ...options(server, "udp"), signal })).rejects.toBe(signal.reason)
+    await expect(connect({ ...options(server, "udp"), signal })).rejects.toBe(signal.reason)
     await pause(50)
     expect(server.received).toBe(0)
   })
@@ -226,7 +248,7 @@ describe("register", () => {
       uri: "sip:alice@example.com",
       server: `tls://localhost:${server.port}`,
     })
-    expect(error.failure).toStrictEqual({ reason: "network" })
+    expect(error.reason).toBe("network")
     expect(error.cause).toBeInstanceOf(Error)
     expect(error.message).toMatch(
       /^Network error with tls:\/\/localhost:\d+: .*certificate.* \(pass tls\.ca if the server uses a private CA\)$/,
@@ -251,18 +273,15 @@ describe("register", () => {
     const error = await connectPhone({ ...settings, connectTimeout: 50 }).catch(
       (thrown: unknown) => thrown,
     )
-    expect(error).toBeInstanceOf(RegistrationError)
-    expect(error).toMatchObject({
-      failure: { reason: "network" },
-      cause: { name: "TimeoutError" },
-    })
+    expect(error).toBeInstanceOf(ConnectError)
+    expect(error).toMatchObject({ reason: "network", cause: { name: "TimeoutError" } })
   })
 
   it("passes a user abort during the handshake through unchanged", async () => {
     const server = await silentServer()
     cleanups.push(() => server.close())
     const signal = AbortSignal.timeout(50)
-    const error = await register({
+    const error = await connect({
       uri: "sip:alice@example.com",
       server: `tls://127.0.0.1:${server.port}`,
       signal,
@@ -274,18 +293,16 @@ describe("register", () => {
   it("closes with the reason when the server closes the connection", async () => {
     const server = await serve(tlsRegistrar())
     const phone = await phoneFor(options(server, "tls"))
-    const changes = collect(phone.changes)
+    const seen = watch(phone)
     server.sockets[0]?.end()
-    expect(await changes).toStrictEqual([
+    await vi.waitFor(() => expect(phone.status).toBe("offline"))
+    expect(seen).toStrictEqual([
       {
-        state: "closed",
-        error: new RegistrationError(
-          { reason: "network" },
-          { label: `tls://localhost:${server.port}`, username: "alice" },
-        ),
+        status: "offline",
+        error: `Network error with tls://localhost:${server.port}: the server closed the connection`,
       },
     ])
-    expect(phone.state).toBe("closed")
+    expect(phone.error?.reason).toBe("network")
     await expect(phone.ping()).rejects.toThrow("The phone is closed")
     await phone.close()
   })
@@ -293,29 +310,26 @@ describe("register", () => {
   it("closes with the cause when the stream breaks", async () => {
     const server = await serve(tlsRegistrar())
     const phone = await phoneFor(options(server, "tls"))
-    const changes = collect(phone.changes)
     server.sockets[0]?.write("OPTIONS sip:a@b SIP/2.0\r\n\r\n")
-    const [change] = await changes
-    expect(change).toMatchObject({
-      state: "closed",
-      error: {
-        message: `Network error with tls://localhost:${server.port}: Missing Content-Length on a stream`,
-        cause: { message: "Missing Content-Length on a stream" },
-      },
+    await vi.waitFor(() => expect(phone.status).toBe("offline"))
+    expect(phone.error).toMatchObject({
+      reason: "network",
+      message: `Network error with tls://localhost:${server.port}: Missing Content-Length on a stream`,
+      cause: { message: "Missing Content-Length on a stream" },
     })
   })
 
   it("closes cleanly when the connection drops during close", async () => {
     const server = await serve(tlsRegistrar())
-    const phone = await phoneFor({ ...options(server, "tls"), closeTimeout: 2000 })
-    const changes = collect(phone.changes)
+    const phone = await phoneFor(options(server, "tls"), { closeTimeout: 2000 })
+    const seen = watch(phone)
     server.mute()
     const started = performance.now()
     const closing = phone.close()
     server.sockets[0]?.destroy()
     await closing
     expect(performance.now() - started).toBeLessThan(1000)
-    expect(await changes).toStrictEqual([{ state: "closed" }])
+    expect(seen).toStrictEqual([{ status: "offline" }])
   })
 
   it("refuses an invalid ping target", async () => {
@@ -335,16 +349,34 @@ describe("register", () => {
   it("unregisters through await using", async () => {
     const server = await serve(udpRegistrar())
     {
-      await using phone = await register(options(server, "udp"))
-      expect(phone.state).toBe("registered")
+      await using phone = await connect(options(server, "udp"))
+      expect(phone.status).toBe("online")
     }
     expect(server.registrar.bindings.size).toBe(0)
   })
 
-  it("exposes its changes only as an async iterable", async () => {
+  it("connects with a connection URL", async () => {
+    const server = await serve(udpRegistrar())
+    const phone = await connect(`udp://alice:secret@127.0.0.1:${server.port}`)
+    cleanups.push(() => phone.close())
+    expect(phone.status).toBe("online")
+    expect(server.registrar.registers[0]?.uri).toBe("sip:127.0.0.1")
+  })
+
+  it("takes the password beside a connection URL", async () => {
+    const server = await serve(udpRegistrar())
+    const phone = await connect(`udp://alice@127.0.0.1:${server.port}`, { password: "secret" })
+    cleanups.push(() => phone.close())
+    expect(phone.status).toBe("online")
+  })
+
+  it("stops notifying a listener that unsubscribed", async () => {
     const server = await serve(udpRegistrar())
     const phone = await phoneFor(options(server, "udp"))
-    expect(Object.keys(phone.changes)).toStrictEqual([])
-    expect(Object.getOwnPropertySymbols(phone.changes)).toStrictEqual([Symbol.asyncIterator])
+    const seen: string[] = []
+    const off = phone.subscribe(() => seen.push(phone.status))
+    off()
+    await phone.close()
+    expect(seen).toStrictEqual([])
   })
 })

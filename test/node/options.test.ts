@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { resolveOptions } from "../../src/node/options"
 
-const resolve = (uri: string, server?: string) =>
-  resolveOptions({ uri, ...(server === undefined ? {} : { server }) })
+const SECRET = "S3CRET"
+const resolve = (uri: string, server?: string) => resolveOptions({ uri, server })
 
 describe("resolveOptions", () => {
   it.each([
@@ -35,16 +35,13 @@ describe("resolveOptions", () => {
 
   it("resolves everything the phone needs", () => {
     const signal = new AbortController().signal
-    const tls = { ca: "pem" }
     expect(
       resolveOptions({
         uri: "sip:alice@example.com",
         password: "secret",
         server: "tls://[2001:db8::1]",
-        expires: 600,
-        closeTimeout: 0,
         signal,
-        tls,
+        tls: { ca: "pem" },
       }),
     ).toStrictEqual({
       aor: "sip:alice@example.com",
@@ -52,17 +49,25 @@ describe("resolveOptions", () => {
       username: "alice",
       server: { transport: "TLS", host: "2001:db8::1", port: 5061 },
       label: "tls://[2001:db8::1]:5061",
-      closeTimeout: 0,
+      closeTimeout: 5000,
       connectTimeout: 10_000,
       credentials: { username: "alice", password: "secret" },
-      expires: 600,
       signal,
-      tls,
+      tls: { ca: "pem" },
     })
   })
 
-  it("leaves out what was not given and defaults the close timeout", () => {
-    expect(resolve("sip:alice@example.com")).toStrictEqual({
+  it("treats options set to undefined as not given", () => {
+    expect(
+      resolveOptions({
+        uri: "sip:alice@example.com",
+        password: undefined,
+        authUser: undefined,
+        server: undefined,
+        signal: undefined,
+        tls: { ca: undefined },
+      }),
+    ).toStrictEqual({
       aor: "sip:alice@example.com",
       registrar: "sip:example.com",
       username: "alice",
@@ -73,10 +78,10 @@ describe("resolveOptions", () => {
     })
   })
 
-  it("prefers the given username over the user part of the uri", () => {
+  it("logs in as authUser when the provider has a separate auth user", () => {
     const settings = resolveOptions({
       uri: "sip:+4930123@example.com",
-      username: "a1",
+      authUser: "a1",
       password: "secret",
     })
     expect(settings.username).toBe("a1")
@@ -92,24 +97,33 @@ describe("resolveOptions", () => {
     "sip:alice@",
     "sip:alice@exa_mple.com",
     "sip:alice@example.com:0",
-    "sip:alice@ example.com",
   ])("refuses the uri %j", (uri) => {
+    const shown = uri.includes("@") ? `…${uri.slice(uri.lastIndexOf("@"))}` : uri
     expect(() => resolve(uri)).toThrow(
-      new TypeError(`Invalid uri ${JSON.stringify(uri)}: use sip:user@domain`),
+      new TypeError(`Invalid uri ${JSON.stringify(shown)}: use sip:user@domain`),
     )
   })
 
-  it("refuses a password in the uri without repeating it", () => {
-    expect(() => resolve("sip:alice:secret@example.com")).toThrow(
-      new TypeError("Pass the password as password, not in the uri"),
+  it("refuses a uri whose domain cannot be a registrar, even with a server", () => {
+    expect(() => resolve("sip:a@b@example.com", "udp://example.com")).toThrow(
+      new TypeError('Invalid uri "…@example.com": use sip:user@domain'),
     )
+  })
+
+  it.each([
+    `sip:agent:${SECRET}@example.com`,
+    `sip:agent:${SECRET}@exa mple.com`,
+    ` sip:agent:${SECRET}@example.com`,
+  ])("never repeats a password written into the uri %j", (uri) => {
+    expect(() => resolve(uri)).toThrow(TypeError)
+    expect(() => resolve(uri)).not.toThrow(SECRET)
   })
 
   it.each(["tcp", "ws", ""])("refuses the transport %j", (transport) => {
     const uri = `sip:alice@example.com;transport=${transport}`
     expect(() => resolve(uri)).toThrow(
       new TypeError(
-        `Unsupported transport ${JSON.stringify(transport)} in ${JSON.stringify(uri)}: use udp or tls`,
+        `Unsupported transport ${JSON.stringify(transport)} in "…@example.com;transport=${transport}": use udp or tls`,
       ),
     )
   })
@@ -140,26 +154,81 @@ describe("resolveOptions", () => {
     )
   })
 
-  it.each([
-    ["a password with a line break", { password: "a\r\nb" }, TypeError],
-    ["an expiry of 0", { expires: 0 }, RangeError],
-    ["a fractional expiry", { expires: 1.5 }, RangeError],
-  ])("refuses %s before connecting", (_, options, type) => {
-    expect(() => resolveOptions({ uri: "sip:alice@example.com", ...options })).toThrow(type)
+  it("never repeats credentials pasted into the server", () => {
+    expect(() => resolve("sip:agent@example.com", `tls://agent:${SECRET}@example.com`)).toThrow(
+      new TypeError('Invalid server "…@example.com": use udp://host[:port] or tls://host[:port]'),
+    )
   })
 
-  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31])(
-    "refuses the close timeout %s",
-    (closeTimeout) => {
-      expect(() => resolveOptions({ uri: "sip:alice@example.com", closeTimeout })).toThrow(
-        new RangeError(`Invalid closeTimeout ${JSON.stringify(closeTimeout)}`),
-      )
-    },
-  )
+  it("refuses a password with a line break before connecting", () => {
+    expect(() => resolveOptions({ uri: "sip:alice@example.com", password: "a\r\nb" })).toThrow(
+      TypeError,
+    )
+  })
 
-  it("accepts the largest close timeout", () => {
-    expect(
-      resolveOptions({ uri: "sip:alice@example.com", closeTimeout: 2 ** 31 - 1 }).closeTimeout,
-    ).toBe(2 ** 31 - 1)
+  it("asks for a connection URL when it got none, as from an unset variable", () => {
+    expect(() => resolveOptions(undefined)).toThrow(
+      new TypeError("Missing connection URL: pass tls://user:password@host[:port]"),
+    )
+  })
+
+  it("reads a connection URL and takes the remaining options beside it", () => {
+    const signal = new AbortController().signal
+    expect(resolveOptions("tls://agent:secret@sip.carrier.example", { signal })).toStrictEqual({
+      aor: "sip:agent@sip.carrier.example",
+      registrar: "sip:sip.carrier.example",
+      username: "agent",
+      server: { transport: "TLS", host: "sip.carrier.example", port: 5061 },
+      label: "tls://sip.carrier.example:5061",
+      closeTimeout: 5000,
+      connectTimeout: 10_000,
+      credentials: { username: "agent", password: "secret" },
+      signal,
+    })
+  })
+
+  it("lets a separate auth user log in for the user in the URL", () => {
+    const settings = resolveOptions("udp://+4930123:secret@127.0.0.1:5070", { authUser: "a1" })
+    expect(settings.aor).toBe("sip:+4930123@127.0.0.1")
+    expect(settings.credentials).toStrictEqual({ username: "a1", password: "secret" })
+    expect(settings.server).toStrictEqual({ transport: "UDP", host: "127.0.0.1", port: 5070 })
+  })
+
+  it("logs in with the decoded URL user even where the SIP address needs escaping", () => {
+    const settings = resolveOptions("tls://alice%40corp.example:pw@sip.carrier.example")
+    expect(settings.aor).toBe("sip:alice%40corp.example@sip.carrier.example")
+    expect(settings.credentials).toStrictEqual({ username: "alice@corp.example", password: "pw" })
+  })
+
+  it("connects without credentials when the URL has no password", () => {
+    expect(resolveOptions("udp://dev@127.0.0.1").credentials).toBeUndefined()
+  })
+
+  it("takes the password beside a URL so the secret stays out of it", () => {
+    expect(resolveOptions("tls://agent@sip.carrier.example", { password: "secret" })).toMatchObject(
+      {
+        aor: "sip:agent@sip.carrier.example",
+        credentials: { username: "agent", password: "secret" },
+      },
+    )
+  })
+
+  it("refuses a password in both places", () => {
+    expect(() =>
+      resolveOptions("tls://agent:one@sip.carrier.example", { password: "two" }),
+    ).toThrow(new TypeError("Pass the password in the URL or as password, not both"))
+  })
+
+  it("keeps the URL in charge of where to connect", () => {
+    const extra = { uri: "sip:mallory@evil.example", server: "udp://evil.example" }
+    const settings = resolveOptions("tls://agent@sip.carrier.example", extra as never)
+    expect(settings.aor).toBe("sip:agent@sip.carrier.example")
+    expect(settings.label).toBe("tls://sip.carrier.example:5061")
+  })
+
+  it("refuses a broken URL without repeating its password", () => {
+    expect(() => resolveOptions(`tls://agent:${SECRET}@`)).toThrow(
+      new TypeError("Invalid connection URL: use tls://user:password@host[:port]"),
+    )
   })
 })

@@ -1,4 +1,3 @@
-export { RegistrationError } from "./errors"
-export type { RegisterOptions, TlsOptions } from "./options"
-export { type Phone, type PhoneState, register, type StateChange } from "./phone"
-export type { Ping } from "./pings"
+export { ConnectError, type ConnectErrorOptions, type ConnectReason } from "./errors"
+export type { ConnectOptions, ConnectUrlOptions, TlsOptions } from "./options"
+export { connect, type Phone, type PhoneStatus } from "./phone"

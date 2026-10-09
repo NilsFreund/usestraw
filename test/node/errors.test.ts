@@ -1,9 +1,44 @@
 import { describe, expect, it } from "vitest"
-import { type PhoneFailure, RegistrationError } from "../../src/node/errors"
+import { ConnectError, connectError, type PhoneFailure } from "../../src/node/errors"
 
 const context = { label: "tls://sip.example.com:5061", username: "alice" }
 
-describe("RegistrationError", () => {
+describe("ConnectError", () => {
+  it.each<[PhoneFailure, string, number | undefined]>([
+    [{ reason: "unauthorized", status: 407 }, "wrong-password", 407],
+    [{ reason: "no-credentials" }, "password-missing", undefined],
+    [{ reason: "unsupported-challenge", offered: [] }, "unsupported-auth", undefined],
+    [{ reason: "rejected", status: 403, phrase: "Forbidden" }, "refused", 403],
+    [{ reason: "rejected", status: 404, phrase: "Not Found" }, "refused", 404],
+    [{ reason: "rejected", status: 503, phrase: "Busy" }, "unavailable", 503],
+    [{ reason: "rejected", status: 408, phrase: "Timeout" }, "unavailable", 408],
+    [{ reason: "not-bound" }, "refused", undefined],
+    [{ reason: "timeout" }, "no-answer", undefined],
+    [{ reason: "network" }, "network", undefined],
+  ])("names %j in app words", (failure, reason, status) => {
+    const error = connectError(failure, context)
+    expect(error.reason).toBe(reason)
+    expect(error.sip).toStrictEqual(status === undefined ? undefined : { status })
+  })
+
+  it("can be built from plain data, for example after crossing a MessagePort", () => {
+    const cause = new Error("gone")
+    const error = new ConnectError("Network error", {
+      reason: "network",
+      sip: { status: 503 },
+      cause,
+    })
+    expect(error).toBeInstanceOf(Error)
+    expect(error).toMatchObject({
+      name: "ConnectError",
+      message: "Network error",
+      reason: "network",
+    })
+    expect(error.sip).toStrictEqual({ status: 503 })
+    expect(error.cause).toBe(cause)
+    expect("cause" in new ConnectError("x", { reason: "refused" })).toBe(false)
+  })
+
   it.each<[PhoneFailure, string]>([
     [
       { reason: "timeout" },
@@ -15,7 +50,7 @@ describe("RegistrationError", () => {
     ],
     [
       { reason: "not-bound" },
-      "tls://sip.example.com:5061 accepted the registration but kept no binding",
+      "tls://sip.example.com:5061 accepted the registration but did not keep it: a NAT or SIP ALG may have rewritten our address",
     ],
     [
       { reason: "no-credentials" },
@@ -34,18 +69,17 @@ describe("RegistrationError", () => {
     ],
     [
       { reason: "unauthorized", status: 401 },
-      'tls://sip.example.com:5061 refused the password for "alice" with 401: check the password, or pass username if your provider uses a separate auth user',
+      'tls://sip.example.com:5061 refused the password for "alice" with 401: check the password, or pass authUser if your provider uses a separate auth user',
     ],
     [
       { reason: "network" },
       "Network error with tls://sip.example.com:5061: the server closed the connection",
     ],
   ])("explains %j", (failure, message) => {
-    const error = new RegistrationError(failure, context)
+    const error = connectError(failure, context)
     expect(error).toBeInstanceOf(Error)
-    expect(error.name).toBe("RegistrationError")
+    expect(error.name).toBe("ConnectError")
     expect(error.message).toBe(message)
-    expect(error.failure).toBe(failure)
     expect("cause" in error).toBe(false)
   })
 
@@ -53,7 +87,7 @@ describe("RegistrationError", () => {
     const cause = Object.assign(new Error("connect ECONNREFUSED 192.0.2.1:5061"), {
       code: "ECONNREFUSED",
     })
-    const error = new RegistrationError({ reason: "network" }, context, cause)
+    const error = connectError({ reason: "network" }, context, cause)
     expect(error.cause).toBe(cause)
     expect(error.message).toBe(
       "Network error with tls://sip.example.com:5061: connect ECONNREFUSED 192.0.2.1:5061",
@@ -67,7 +101,7 @@ describe("RegistrationError", () => {
     "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
   ])("points to tls.ca for %s", (code) => {
     const cause = Object.assign(new Error("untrusted"), { code })
-    expect(new RegistrationError({ reason: "network" }, context, cause).message).toBe(
+    expect(connectError({ reason: "network" }, context, cause).message).toBe(
       "Network error with tls://sip.example.com:5061: untrusted (pass tls.ca if the server uses a private CA)",
     )
   })
@@ -75,8 +109,8 @@ describe("RegistrationError", () => {
   it("escapes and cuts what the server sent", () => {
     const phrase = `For‮bidden\u009b${"x".repeat(2000)}`
     const offered = Array.from({ length: 50 }, (_, index) => ({ scheme: `S ${index}` }))
-    const rejected = new RegistrationError({ reason: "rejected", status: 403, phrase }, context)
-    const unsupported = new RegistrationError({ reason: "unsupported-challenge", offered }, context)
+    const rejected = connectError({ reason: "rejected", status: 403, phrase }, context)
+    const unsupported = connectError({ reason: "unsupported-challenge", offered }, context)
     expect(rejected.message).toMatch(/^[\x20-\x7e]+$/)
     expect(rejected.message.length).toBeLessThan(200)
     expect(rejected.message).toContain("For\\u202ebidden\\u009b")
@@ -90,13 +124,13 @@ describe("RegistrationError", () => {
     [4, '"S0", "S1", "S2", …'],
   ])("lists at most three of %i offers", (count, list) => {
     const offered = Array.from({ length: count }, (_, index) => ({ scheme: `S${index}` }))
-    expect(
-      new RegistrationError({ reason: "unsupported-challenge", offered }, context).message,
-    ).toBe(`tls://sip.example.com:5061 asks for authentication Straw does not support: ${list}`)
+    expect(connectError({ reason: "unsupported-challenge", offered }, context).message).toBe(
+      `tls://sip.example.com:5061 asks for authentication Straw does not support: ${list}`,
+    )
   })
 
   it("escapes the username", () => {
-    const error = new RegistrationError(
+    const error = connectError(
       { reason: "unauthorized", status: 403 },
       { ...context, username: "a‮b" },
     )

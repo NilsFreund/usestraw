@@ -1,51 +1,62 @@
 import { createCore } from "../core/core"
 import { createCallId } from "../core/ids"
 import type { CoreEvent, Input, Output } from "../core/types"
-import { createBroadcast } from "./broadcast"
 import { createClock } from "./clock"
-import { RegistrationError } from "./errors"
+import { type ConnectError, connectError } from "./errors"
 import { type Link, openLink } from "./links"
-import { type PhoneSettings, type RegisterOptions, resolveOptions } from "./options"
+import { createListeners } from "./listeners"
+import {
+  type ConnectOptions,
+  type ConnectUrlOptions,
+  type PhoneSettings,
+  resolveOptions,
+} from "./options"
 import { createPings, type Ping } from "./pings"
 import { secureRandom } from "./random"
 
-export type PhoneState = "registered" | "retrying" | "closed"
-
-export type StateChange =
-  | { readonly state: "registered"; readonly expires: number }
-  | { readonly state: "retrying"; readonly error: RegistrationError; readonly retryIn: number }
-  | { readonly state: "closed"; readonly error?: RegistrationError }
+export type PhoneStatus = "connecting" | "online" | "reconnecting" | "offline"
 
 export interface Phone extends AsyncDisposable {
-  readonly state: PhoneState
-  readonly changes: AsyncIterable<StateChange>
-  ping(uri?: string): Promise<Ping>
+  readonly status: PhoneStatus
+  readonly error: ConnectError | undefined
+  readonly retryAt: number | undefined
+  subscribe(listener: () => void): () => void
   close(): Promise<void>
 }
 
-export async function register(options: RegisterOptions): Promise<Phone> {
-  return connectPhone(resolveOptions(options))
+export interface PhoneHandle extends Phone {
+  ping(uri?: string): Promise<Ping>
 }
 
-export async function connectPhone(settings: PhoneSettings): Promise<Phone> {
-  const { server, tls, signal, connectTimeout } = settings
+export function connect(url: string | undefined, options?: ConnectUrlOptions): Promise<Phone>
+export function connect(options: ConnectOptions): Promise<Phone>
+export async function connect(
+  target: string | ConnectOptions | undefined,
+  options?: ConnectUrlOptions,
+): Promise<Phone> {
+  return connectPhone(resolveOptions(target, options))
+}
+
+export async function connectPhone(settings: PhoneSettings): Promise<PhoneHandle> {
+  const { server, tls, signal, connectTimeout, label, username } = settings
   signal?.throwIfAborted()
   const timeout = AbortSignal.timeout(connectTimeout)
   const connecting = signal ? AbortSignal.any([signal, timeout]) : timeout
   const link = await openLink(server, tls, connecting).catch((error: Error) => {
     signal?.throwIfAborted()
     const cause = timeout.aborted ? (timeout.reason as Error) : error
-    throw new RegistrationError({ reason: "network" }, settings, cause)
+    throw connectError({ reason: "network" }, { label, username }, cause)
   })
   return startPhone(link, settings)
 }
 
-export async function startPhone(link: Link, settings: PhoneSettings): Promise<Phone> {
-  const { aor, registrar, credentials, expires, closeTimeout, signal } = settings
+export async function startPhone(link: Link, settings: PhoneSettings): Promise<PhoneHandle> {
+  const { aor, registrar, credentials, expires, closeTimeout, signal, label, username } = settings
   if (signal?.aborted) {
     link.close()
     throw signal.reason
   }
+  const context = { label, username }
   const core = createCore({
     address: link.local,
     aor,
@@ -53,10 +64,13 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     ...(credentials ? { credentials } : {}),
   })
   const clock = createClock()
-  const changes = createBroadcast<StateChange>()
+  const listeners = createListeners()
   const pings = createPings()
   const starting = Promise.withResolvers<void>()
-  let state: PhoneState = "retrying"
+  let status: PhoneStatus = "connecting"
+  let error: ConnectError | undefined
+  let retryAt: number | undefined
+  let started = false
   let leaving: (() => void) | undefined
   let closing: Promise<void> | undefined
 
@@ -69,42 +83,56 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
   }
 
   function run(input: Input): void {
-    if (state !== "closed") deliver(core.handle(input, clock.now()))
+    if (status !== "offline") deliver(core.handle(input, clock.now()))
   }
 
   function notice(event: CoreEvent): void {
     pings.settle(event, clock.now())
     if (event.type !== "registration") return
     if (leaving || event.state === "unregistered") leaving?.()
-    else if (event.state === "registered") update({ state: "registered", expires: event.expires })
+    else if (event.state === "registered") update("online")
     else {
-      const error = new RegistrationError(event.failure, settings)
-      if (event.retryIn === undefined) stop(error)
-      else update({ state: "retrying", error, retryIn: event.retryIn })
+      const failure = connectError(event.failure, context)
+      if (event.retryIn === undefined) stop(failure)
+      else update("reconnecting", failure, Date.now() + event.retryIn)
     }
   }
 
-  function update(change: Exclude<StateChange, { readonly state: "closed" }>): void {
-    if (change.state !== "registered" || state !== "registered") changes.publish(change)
-    state = change.state
-    if (change.state === "registered") starting.resolve()
-    else starting.reject(change.error)
+  function update(next: "online" | "reconnecting", failure?: ConnectError, at?: number): void {
+    const changed = next !== status || failure !== error || at !== retryAt
+    status = next
+    error = failure
+    retryAt = at
+    if (changed) listeners.notify()
+    if (next === "online") starting.resolve()
+    else starting.reject(failure)
   }
 
   function lost(cause?: Error): void {
-    stop(leaving ? undefined : new RegistrationError({ reason: "network" }, settings, cause))
+    stop(leaving ? undefined : connectError({ reason: "network" }, context, cause))
   }
 
-  function stop(error?: RegistrationError): void {
-    if (state === "closed") return
-    state = "closed"
+  function stop(failure?: ConnectError): void {
+    if (status === "offline") return
+    status = "offline"
+    error = failure
+    retryAt = undefined
     clock.cancel()
     link.close()
+    signal?.removeEventListener("abort", abort)
     pings.abort(new DOMException("The phone is closed", "InvalidStateError"))
-    changes.publish(error ? { state: "closed", error } : { state: "closed" })
-    changes.end()
+    listeners.notify()
     leaving?.()
-    starting.reject(error)
+    starting.reject(failure)
+  }
+
+  function abort(): void {
+    if (started) {
+      void close()
+      return
+    }
+    starting.reject(signal?.reason)
+    stop()
   }
 
   async function leave(): Promise<void> {
@@ -112,7 +140,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     leaving = resolve
     const timer = setTimeout(resolve, closeTimeout)
     try {
-      if (state !== "closed") {
+      if (status !== "offline") {
         run({ type: "command", command: { type: "unregister" } })
         await promise
       }
@@ -128,7 +156,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
   }
 
   async function ping(uri = registrar): Promise<Ping> {
-    if (leaving || state === "closed") {
+    if (leaving || status === "offline") {
       throw new DOMException("The phone is closed", "InvalidStateError")
     }
     const callId = createCallId(secureRandom)
@@ -137,31 +165,32 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     return pings.wait(callId, started)
   }
 
-  const abort = () => {
-    starting.reject(signal?.reason)
-    stop()
-  }
   signal?.addEventListener("abort", abort, { once: true })
-  link.start({ receive: (data, from) => run({ type: "receive", data, from }), close: lost })
-  const registration = {
-    to: link.remote,
-    registrar,
-    ...(expires === undefined ? {} : { expires }),
-  }
-  run({ type: "command", command: { type: "register", ...registration } })
   try {
+    link.start({ receive: (data, from) => run({ type: "receive", data, from }), close: lost })
+    const registration = {
+      to: link.remote,
+      registrar,
+      ...(expires === undefined ? {} : { expires }),
+    }
+    run({ type: "command", command: { type: "register", ...registration } })
     await starting.promise
-  } catch (error) {
+  } catch (thrown) {
     stop()
-    throw error
-  } finally {
-    signal?.removeEventListener("abort", abort)
+    throw thrown
   }
+  started = true
   return {
-    get state() {
-      return state
+    get status() {
+      return status
     },
-    changes: { [Symbol.asyncIterator]: () => changes[Symbol.asyncIterator]() },
+    get error() {
+      return error
+    },
+    get retryAt() {
+      return retryAt
+    },
+    subscribe: listeners.subscribe,
     ping,
     close,
     [Symbol.asyncDispose]: close,

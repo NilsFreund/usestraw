@@ -1,14 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { getHeader } from "../../src"
-import { RegistrationError } from "../../src/node"
-import { type RegisterOptions, resolveOptions } from "../../src/node/options"
+import { ConnectError, connectError } from "../../src/node/errors"
+import { type ConnectOptions, type PhoneSettings, resolveOptions } from "../../src/node/options"
 import { type Phone, startPhone } from "../../src/node/phone"
 import { type MemoryNetwork, memoryNetwork } from "./memory"
 
 const account = { uri: "sip:alice@example.com", password: "secret" }
 const context = { label: "udp://example.com:5060", username: "alice" }
-const options = (network: MemoryNetwork, extra: Partial<RegisterOptions> = {}) =>
-  startPhone(network.link, resolveOptions({ ...account, expires: 60, ...extra }))
+const options = (
+  network: MemoryNetwork,
+  extra: Partial<ConnectOptions> = {},
+  internal: Partial<PhoneSettings> = {},
+) =>
+  startPhone(network.link, {
+    ...resolveOptions({ ...account, ...extra }),
+    expires: 60,
+    ...internal,
+  })
+
+function watch(phone: Phone) {
+  const seen: { status: string; reason?: string; retryAt?: number }[] = []
+  phone.subscribe(() =>
+    seen.push({
+      status: phone.status,
+      ...(phone.error ? { reason: phone.error.reason } : {}),
+      ...(phone.retryAt === undefined ? {} : { retryAt: phone.retryAt }),
+    }),
+  )
+  return seen
+}
 
 async function closeNow(phone: Phone): Promise<void> {
   const closing = phone.close()
@@ -39,67 +59,76 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe("phone state", () => {
+describe("phone status", () => {
   it("stays quiet while refreshes succeed", async () => {
     const network = memoryNetwork()
     const phone = await options(network)
-    const changes = phone.changes[Symbol.asyncIterator]()
+    const seen = watch(phone)
     await vi.advanceTimersByTimeAsync(300_000)
     expect(network.registrar.registers.length).toBeGreaterThanOrEqual(20)
-    expect(phone.state).toBe("registered")
+    expect(phone.status).toBe("online")
+    expect(seen).toStrictEqual([])
     await closeNow(phone)
-    expect(await changes.next()).toStrictEqual({ value: { state: "closed" }, done: false })
-    expect(await changes.next()).toStrictEqual({ value: undefined, done: true })
+    expect(seen).toStrictEqual([{ status: "offline" }])
   })
 
-  it("reports retrying while the registrar is gone and registered once it is back", async () => {
+  it("reports reconnecting while the registrar is gone and online once it is back", async () => {
     const network = memoryNetwork()
     const phone = await options(network)
-    const first = phone.changes[Symbol.asyncIterator]()
-    const second = phone.changes[Symbol.asyncIterator]()
+    const first = watch(phone)
+    const second = watch(phone)
+    let failedAt = 0
+    phone.subscribe(() => {
+      failedAt = Date.now()
+    })
     network.online = false
     await vi.advanceTimersByTimeAsync(70_000)
-    expect(phone.state).toBe("retrying")
-    const retrying = {
-      state: "retrying",
-      error: new RegistrationError({ reason: "timeout" }, context),
-      retryIn: expect.any(Number),
-    }
-    expect((await first.next()).value).toStrictEqual(retrying)
-    expect((await second.next()).value).toStrictEqual(retrying)
+    expect(phone.status).toBe("reconnecting")
+    expect(phone.error).toStrictEqual(connectError({ reason: "timeout" }, context))
+    expect(phone.error?.reason).toBe("no-answer")
+    const retryAt = phone.retryAt ?? 0
+    expect(retryAt - failedAt).toBeGreaterThanOrEqual(30_000)
+    expect(retryAt - failedAt).toBeLessThanOrEqual(60_000)
+    expect(first).toStrictEqual([{ status: "reconnecting", reason: "no-answer", retryAt }])
+    expect(second).toStrictEqual(first)
     network.online = true
     await vi.advanceTimersByTimeAsync(120_000)
-    expect(phone.state).toBe("registered")
-    expect((await first.next()).value).toStrictEqual({ state: "registered", expires: 60 })
+    expect(phone.status).toBe("online")
+    expect(phone.error).toBeUndefined()
+    expect(phone.retryAt).toBeUndefined()
+    expect(first.at(-1)).toStrictEqual({ status: "online" })
     await closeNow(phone)
   })
 
   it("closes for good when a refresh is refused", async () => {
     const network = memoryNetwork()
     const phone = await options(network)
-    const changes = phone.changes[Symbol.asyncIterator]()
+    const seen = watch(phone)
     network.replace({ users: { alice: "changed" } })
     await vi.advanceTimersByTimeAsync(40_000)
-    expect(phone.state).toBe("closed")
+    expect(phone.status).toBe("offline")
     expect(network.closed).toBe(true)
-    expect((await changes.next()).value).toStrictEqual({
-      state: "closed",
-      error: new RegistrationError({ reason: "unauthorized", status: 401 }, context),
-    })
-    expect((await changes.next()).done).toBe(true)
+    expect(phone.error).toStrictEqual(
+      connectError({ reason: "unauthorized", status: 401 }, context),
+    )
+    expect(seen).toStrictEqual([{ status: "offline", reason: "wrong-password" }])
     await expect(phone.ping()).rejects.toThrow("The phone is closed")
     await phone.close()
+    expect(phone.error?.reason).toBe("wrong-password")
+    expect(seen).toHaveLength(1)
     expect(network.registrar.registers).toHaveLength(2)
   })
 
-  it("unregisters on close while retrying", async () => {
+  it("unregisters on close while reconnecting", async () => {
     const network = memoryNetwork()
     const phone = await options(network)
     network.online = false
     await vi.advanceTimersByTimeAsync(70_000)
-    expect(phone.state).toBe("retrying")
+    expect(phone.status).toBe("reconnecting")
     network.online = true
     await phone.close()
+    expect(phone.error).toBeUndefined()
+    expect(phone.retryAt).toBeUndefined()
     const expires = network.registrar.registers.map((request) => getHeader(request, "Expires"))
     expect(expires.slice(-2)).toStrictEqual(["0", "0"])
     expect(network.registrar.bindings.size).toBe(0)
@@ -122,7 +151,7 @@ describe("phone state", () => {
 
   it("stops sending once closed", async () => {
     const network = memoryNetwork()
-    const phone = await options(network, { closeTimeout: 100 })
+    const phone = await options(network, {}, { closeTimeout: 100 })
     network.online = false
     const closing = phone.close()
     await vi.advanceTimersByTimeAsync(100)
@@ -165,26 +194,24 @@ describe("phone state", () => {
     await closing
   })
 
-  it("waits as long as Retry-After asks while retrying", async () => {
+  it("waits as long as Retry-After asks while reconnecting", async () => {
     const network = memoryNetwork()
     const phone = await options(network)
-    const changes = phone.changes[Symbol.asyncIterator]()
     network.replace({ script: [503], retryAfter: 120 })
-    await vi.advanceTimersByTimeAsync(40_000)
-    expect((await changes.next()).value).toStrictEqual({
-      state: "retrying",
-      error: new RegistrationError(
-        { reason: "rejected", status: 503, phrase: "Scripted" },
-        context,
-      ),
-      retryIn: 120_000,
+    let failedAt = 0
+    phone.subscribe(() => {
+      failedAt = Date.now()
     })
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(phone.status).toBe("reconnecting")
+    expect([phone.error?.reason, phone.error?.sip]).toStrictEqual(["unavailable", { status: 503 }])
+    expect(phone.retryAt).toBe(failedAt + 120_000)
     await closeNow(phone)
   })
 
   it("measures the round trip from when the ping was sent", async () => {
     const network = memoryNetwork()
-    const phone = await options(network, { expires: 3600 })
+    const phone = await options(network, {}, { expires: 3600 })
     await vi.advanceTimersByTimeAsync(10_000)
     network.online = false
     const ping = phone.ping("sip:bob@example.com")
@@ -212,13 +239,13 @@ describe("phone state", () => {
     network.online = false
     const starting = options(network).catch((thrown: unknown) => thrown)
     await vi.advanceTimersByTimeAsync(32_000)
-    expect(await starting).toStrictEqual(new RegistrationError({ reason: "timeout" }, context))
+    expect(await starting).toStrictEqual(connectError({ reason: "timeout" }, context))
     expect(network.closed).toBe(true)
   })
 
   it("closes the link when the first registration fails", async () => {
     const network = memoryNetwork()
-    await expect(options(network, { password: "wrong" })).rejects.toThrow(RegistrationError)
+    await expect(options(network, { password: "wrong" })).rejects.toThrow(ConnectError)
     expect(network.closed).toBe(true)
   })
 
@@ -232,7 +259,7 @@ describe("phone state", () => {
 
   it("times out a ping nobody answers", async () => {
     const network = memoryNetwork()
-    const phone = await options(network, { expires: 3600 })
+    const phone = await options(network, {}, { expires: 3600 })
     network.online = false
     const pinging = phone.ping().catch((thrown: unknown) => thrown)
     await vi.advanceTimersByTimeAsync(32_000)
@@ -254,5 +281,20 @@ describe("phone state", () => {
     const closedSent = network.sent
     network.inject(incoming())
     expect(network.sent).toBe(closedSent)
+  })
+
+  it("tells about every new failure while it stays reconnecting", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network)
+    const seen = watch(phone)
+    network.online = false
+    await vi.advanceTimersByTimeAsync(70_000 + 60_000 + 32_000)
+    expect(seen.map(({ status, reason }) => [status, reason])).toStrictEqual([
+      ["reconnecting", "no-answer"],
+      ["reconnecting", "no-answer"],
+    ])
+    expect(seen[1]?.retryAt).toBeGreaterThan(seen[0]?.retryAt ?? 0)
+    network.online = true
+    await closeNow(phone)
   })
 })
