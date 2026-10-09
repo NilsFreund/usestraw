@@ -35,6 +35,26 @@ describe("createServerInvite (RFC 3261 §17.2.1, RFC 6026)", () => {
     expect(transaction.nextDeadline()).toBe(40)
   })
 
+  it("copies Timestamp into 100 Trying with the delay in seconds (RFC 3261 §8.2.6.1)", () => {
+    const stamped = request("INVITE", "z9hG4bKinvite", ["Timestamp: 54.3 0.1"])
+    const transaction = createServerInvite(stamped, udp)
+    transaction.start(1000)
+    const [trying] = sends(transaction.expire(1200))
+    expect(trying?.headers).toEqual([{ name: "Timestamp", value: "54.3 0.2" }])
+  })
+
+  it("measures the delay anew for each resent 100 Trying", () => {
+    const stamped = request("INVITE", "z9hG4bKinvite", ["Timestamp: 54"])
+    const transaction = createServerInvite(stamped, udp)
+    transaction.start(0)
+    expect(sends(transaction.receive(stamped, udp, 150))[0]?.headers).toEqual([
+      { name: "Timestamp", value: "54 0.15" },
+    ])
+    expect(sends(transaction.receive(stamped, udp, 900))[0]?.headers).toEqual([
+      { name: "Timestamp", value: "54 0.9" },
+    ])
+  })
+
   it("skips 100 Trying when the application answers within 200 ms", () => {
     const transaction = createServerInvite(invite, udp)
     transaction.start(0)
@@ -141,6 +161,45 @@ describe("createServerInvite (RFC 3261 §17.2.1, RFC 6026)", () => {
     expect(transaction.respond(response(invite, 486), 600)).toEqual([])
     expect(transaction.receive(invite, udp, 700)).toEqual([])
     expect(run(transaction)).toEqual([[32_000, []]])
+  })
+
+  it("sends later 2xx retransmissions to the source of the latest INVITE", () => {
+    const transaction = createServerInvite(invite, udp)
+    transaction.start(0)
+    transaction.respond(response(invite, 200), 0)
+    expect(transaction.receive(invite, moved, 300)).toEqual([])
+    expect(transaction.respond(response(invite, 200), 500)).toMatchObject([
+      { type: "send", message: { status: 200 }, to: moved },
+    ])
+  })
+
+  it("treats 299 as success and 300 as failure", () => {
+    const success = createServerInvite(invite, udp)
+    success.start(0)
+    success.respond(response(invite, 299), 0)
+    expect(success.state).toBe("accepted")
+    const failure = createServerInvite(invite, udp)
+    failure.start(0)
+    failure.respond(response(invite, 300), 0)
+    expect(failure.state).toBe("completed")
+  })
+
+  it("ignores retransmissions once terminated", () => {
+    const transaction = createServerInvite(invite, tcp)
+    transaction.start(0)
+    transaction.respond(response(invite, 486), 0)
+    transaction.receive(ack, tcp, 10)
+    expect(transaction.state).toBe("terminated")
+    expect(transaction.receive(invite, tcp, 20)).toEqual([])
+  })
+
+  it("ignores retransmissions once confirmed", () => {
+    const transaction = createServerInvite(invite, udp)
+    transaction.start(0)
+    transaction.respond(response(invite, 486), 0)
+    transaction.receive(ack, udp, 100)
+    expect(transaction.receive(invite, moved, 200)).toEqual([])
+    expect(transaction.expire(500)).toEqual([])
   })
 
   it("ignores responses after the transaction completed", () => {

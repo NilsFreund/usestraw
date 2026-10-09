@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  type Address,
   type Core,
   createCore,
   createResponse,
@@ -47,13 +48,17 @@ const options = (uri = "sip:bob@example.com") =>
 
 const receive = (data: Uint8Array, from = bob) => ({ type: "receive", data, from }) as const
 
-function incoming(method: string, via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK1") {
+function incoming(
+  method: string,
+  via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK1",
+  to = "To: <sip:alice@example.com>",
+) {
   return bytes(
     [
       `${method} sip:alice@example.com SIP/2.0`,
       via,
       "From: <sip:bob@example.com>;tag=b1",
-      "To: <sip:alice@example.com>",
+      to,
       "Call-ID: ping-1",
       `CSeq: 7 ${method}`,
       "Content-Length: 0",
@@ -63,6 +68,10 @@ function incoming(method: string, via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch
   )
 }
 
+function ackFor(rejection: SipMessage, via?: string): Uint8Array {
+  return incoming("ACK", via, `To: <sip:alice@example.com>;tag=${rejection.to.params.get("tag")}`)
+}
+
 function responseTo(request: SipRequest, status = 200): Uint8Array {
   return serializeMessage(createResponse(request, status, "Reason", { toTag: "b1" }))
 }
@@ -70,6 +79,7 @@ function responseTo(request: SipRequest, status = 200): Uint8Array {
 function drain(ua: Core): { at: number; outputs: Output[] }[] {
   const log: { at: number; outputs: Output[] }[] = []
   for (let at = ua.nextDeadline(); at !== undefined; at = ua.nextDeadline()) {
+    if (log.length === 1000) throw new Error("The core keeps firing")
     log.push({ at, outputs: ua.handle({ type: "timeout" }, at) })
   }
   return log
@@ -175,9 +185,14 @@ describe("createCore", () => {
   })
 
   describe("incoming requests", () => {
-    it("answers OPTIONS with 200 OK to the source address", () => {
-      const outputs = core().handle(receive(incoming("OPTIONS")), 0)
-      expect(events(outputs)).toMatchObject([{ type: "request", from: bob }])
+    it("answers OPTIONS statelessly with 200 OK to the source address", () => {
+      const ua = core()
+      const outputs = ua.handle(receive(incoming("OPTIONS")), 0)
+      expect(outputs.map((output) => output.type)).toEqual(["event", "send"])
+      expect(events(outputs)).toMatchObject([
+        { type: "answered", request: { method: "OPTIONS" }, from: bob, status: 200 },
+      ])
+      expect(ua.nextDeadline()).toBeUndefined()
       const [reply] = sent(outputs)
       expect(reply?.to).toEqual(bob)
       const response = message(reply)
@@ -186,16 +201,16 @@ describe("createCore", () => {
         reason: "OK",
         callId: "ping-1",
         cseq: { seq: 7, method: "OPTIONS" },
-        headers: [{ name: "Allow", value: "OPTIONS" }],
+        headers: [{ name: "Allow", value: "ACK, CANCEL, OPTIONS" }],
       })
-      expect(response.to.params.get("tag")).toMatch(/^[a-z0-9]{10}$/)
+      expect(response.to.params.get("tag")).toMatch(/^[a-z0-9]+$/)
     })
 
-    it("absorbs retransmitted requests and resends the same response", () => {
+    it("answers a retransmitted OPTIONS with the same response and reports it again", () => {
       const ua = core()
       const [reply] = sent(ua.handle(receive(incoming("OPTIONS")), 0))
       const repeat = ua.handle(receive(incoming("OPTIONS")), 500)
-      expect(events(repeat)).toEqual([])
+      expect(events(repeat)).toMatchObject([{ type: "answered", status: 200 }])
       expect(sent(repeat)).toEqual([reply])
     })
 
@@ -204,25 +219,132 @@ describe("createCore", () => {
       expect(response).toMatchObject({
         status: 405,
         reason: "Method Not Allowed",
-        headers: [{ name: "Allow", value: "OPTIONS" }],
+        headers: [{ name: "Allow", value: "ACK, CANCEL, OPTIONS" }],
       })
     })
 
-    it("answers INVITE with 405 right away and repeats it until the ACK arrives", () => {
-      const ua = core()
-      expect(statuses(ua.handle(receive(incoming("INVITE")), 0))).toEqual([405])
-      expect(statuses(ua.handle({ type: "timeout" }, 500))).toEqual([405])
-      expect(ua.handle(receive(incoming("ACK")), 600)).toEqual([])
-      expect(drain(ua).flatMap(({ outputs }) => outputs)).toEqual([])
+    it("rejects unknown methods with 501", () => {
+      const response = message(sent(core().handle(receive(incoming("FOO")), 0))[0])
+      expect(response).toMatchObject({ status: 501, reason: "Not Implemented", headers: [] })
     })
 
-    it("reports an INVITE rejection that is never acknowledged", () => {
+    it("rejects INVITE statelessly without retransmissions (RFC 3261 §8.2.7)", () => {
+      const ua = core()
+      const outputs = ua.handle(receive(incoming("INVITE")), 0)
+      expect(outputs.map((output) => output.type)).toEqual(["event", "send"])
+      expect(events(outputs)).toMatchObject([
+        { type: "answered", request: { method: "INVITE" }, from: bob, status: 405 },
+      ])
+      expect(statuses(outputs)).toEqual([405])
+      expect(ua.nextDeadline()).toBeUndefined()
+    })
+
+    it("reports every copy of a rejected request again", () => {
+      const ua = core()
+      ua.handle(receive(incoming("MESSAGE")), 0)
+      expect(events(ua.handle(receive(incoming("MESSAGE")), 500))).toMatchObject([
+        { type: "answered", status: 405 },
+      ])
+    })
+
+    it("sends a stateless rejection to the sent-by port without rport", () => {
+      const via = "Via: SIP/2.0/UDP 192.0.2.20:5070;branch=z9hG4bK1"
+      const source = { ...bob, port: 40123 }
+      const [reply] = sent(core().handle(receive(incoming("INVITE", via), source), 0))
+      expect(reply?.to).toEqual({ ...bob, port: 5070 })
+    })
+
+    it("regenerates the same rejection with the same To tag for a retransmission", () => {
+      const ua = core()
+      const [first] = sent(ua.handle(receive(incoming("INVITE")), 0))
+      const [again] = sent(ua.handle(receive(incoming("INVITE")), 500))
+      expect(again).toEqual(first)
+      expect(message(first).to.params.get("tag")).toMatch(/^[a-z0-9]+$/)
+    })
+
+    it("gives different requests different stateless tags", () => {
+      const ua = core()
+      const via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK2"
+      const tag = (data: Uint8Array) =>
+        message(sent(ua.handle(receive(data), 0))[0]).to.params.get("tag")
+      expect(tag(incoming("INVITE"))).not.toBe(tag(incoming("INVITE", via)))
+    })
+
+    it("swallows the ACK for a stateless rejection", () => {
+      const ua = core()
+      const rejection = message(sent(ua.handle(receive(incoming("INVITE")), 0))[0])
+      expect(ua.handle(receive(ackFor(rejection)), 100)).toEqual([])
+    })
+
+    it("swallows the ACK for a stateless rejection of an RFC 2543 INVITE", () => {
+      const ua = core()
+      const via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=legacy"
+      const rejection = message(sent(ua.handle(receive(incoming("INVITE", via)), 0))[0])
+      expect(ua.handle(receive(ackFor(rejection, via)), 100)).toEqual([])
+    })
+
+    it("passes an ACK with a foreign To tag to the application", () => {
       const ua = core()
       ua.handle(receive(incoming("INVITE")), 0)
-      expect(drain(ua).at(-1)).toMatchObject({
-        at: 32_000,
-        outputs: [{ type: "event", event: { type: "unacknowledged", response: { status: 405 } } }],
+      const ack = incoming("ACK", undefined, "To: <sip:alice@example.com>;tag=dialog")
+      expect(events(ua.handle(receive(ack), 100))).toMatchObject([{ type: "request" }])
+    })
+
+    it("cannot recognize the ACK for a rejected request that already had a To tag", () => {
+      const ua = core()
+      const to = "To: <sip:alice@example.com>;tag=dialog"
+      const rejection = message(sent(ua.handle(receive(incoming("INVITE", undefined, to)), 0))[0])
+      expect(rejection.to.params.get("tag")).toBe("dialog")
+      expect(events(ua.handle(receive(incoming("ACK", undefined, to)), 100))).toMatchObject([
+        { type: "request", request: { method: "ACK" } },
+      ])
+    })
+
+    it("schedules nothing for a flood of distinct requests", () => {
+      const ua = core()
+      for (let index = 0; index < 1000; index++) {
+        const via = `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK${index}`
+        ua.handle(receive(incoming(index % 2 === 0 ? "OPTIONS" : "INVITE", via)), 0)
+      }
+      expect(ua.nextDeadline()).toBeUndefined()
+    })
+
+    it("keeps the To tag when a retransmission comes from another port", () => {
+      const ua = core()
+      const via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK1;rport"
+      const tag = (port: number) =>
+        message(
+          sent(ua.handle(receive(incoming("INVITE", via), { ...bob, port }), 0))[0],
+        ).to.params.get("tag")
+      expect(tag(40_000)).toBe(tag(40_001))
+    })
+
+    it("answers OPTIONS with a body with 415 and an empty Accept (RFC 3261 §8.2.3)", () => {
+      const data = bytes(
+        new TextDecoder()
+          .decode(incoming("OPTIONS"))
+          .replace(
+            "Content-Length: 0\r\n\r\n",
+            "Content-Type: application/x-unknown\r\nContent-Length: 3\r\n\r\nv=0",
+          ),
+      )
+      expect(message(sent(core().handle(receive(data), 0))[0])).toMatchObject({
+        status: 415,
+        headers: [{ name: "Accept", value: "" }],
       })
+    })
+
+    it("answers but sends nothing when the reply would exceed 65535 bytes", () => {
+      const named = (name: string) =>
+        new TextDecoder()
+          .decode(incoming("OPTIONS"))
+          .replace("From: <", `From: "${name}" <`)
+          .replace("To: <", `To: "${name}" <`)
+      const data = bytes(named("\t".repeat(Math.floor((65_530 - named("").length) / 2))))
+      expect(data.length).toBeGreaterThan(65_500)
+      const outputs = core().handle(receive(data), 0)
+      expect(events(outputs)).toMatchObject([{ type: "answered", status: 200 }])
+      expect(sent(outputs)).toEqual([])
     })
 
     it("passes an ACK without transaction to the application", () => {
@@ -268,17 +390,15 @@ describe("createCore", () => {
       expect(response).toMatchObject({ status: 416, reason: "Unsupported URI Scheme" })
     })
 
-    it("answers CANCEL for a known INVITE with 200 and leaves the INVITE alone", () => {
-      const ua = core()
-      ua.handle(receive(incoming("INVITE")), 0)
-      const cancel = incoming("CANCEL").slice()
-      expect(statuses(ua.handle(receive(cancel), 100))).toEqual([200])
-      expect(statuses(ua.handle({ type: "timeout" }, 500))).toEqual([405])
-    })
-
     it("answers CANCEL without a transaction with 481", () => {
       const response = message(sent(core().handle(receive(incoming("CANCEL")), 0))[0])
       expect(response).toMatchObject({ status: 481 })
+    })
+
+    it("answers CANCEL for a statelessly rejected INVITE with 481", () => {
+      const ua = core()
+      ua.handle(receive(incoming("INVITE")), 0)
+      expect(statuses(ua.handle(receive(incoming("CANCEL")), 100))).toEqual([481])
     })
 
     it("replies to the sent-by port when the client did not ask for rport", () => {
@@ -290,6 +410,62 @@ describe("createCore", () => {
   })
 
   describe("input validation", () => {
+    const invalidAddresses: Address[] = [
+      { ...alice, host: "evil host" },
+      { ...alice, host: "a\r\nb" },
+      { ...alice, port: 70_000 },
+      { ...alice, port: 1.5 },
+      { ...alice, transport: "SCTP" as Address["transport"] },
+    ]
+
+    it.each(invalidAddresses)("rejects the local address %o", (address) => {
+      expect(() => createCore({ address, aor: "sip:a@x", random: createRandom(1) })).toThrow(
+        TypeError,
+      )
+    })
+
+    it("requires the source to be an IP address", () => {
+      const from = { ...bob, host: "client.example.com" }
+      expect(() => core().handle(receive(incoming("OPTIONS"), from), 0)).toThrow(
+        'The source must be an IP address, got "client.example.com"',
+      )
+    })
+
+    it("rejects an invalid source address", () => {
+      const from = { ...bob, host: "192.0.2.20\r\nX: y" }
+      expect(() => core().handle(receive(incoming("OPTIONS"), from), 0)).toThrow(
+        `Invalid address ${JSON.stringify(from)}`,
+      )
+    })
+
+    const inputs = [
+      ["timeout", { type: "timeout" }],
+      ["receive", receive(incoming("OPTIONS"))],
+      ["command", options()],
+    ] as const
+
+    it.each(inputs)("rejects invalid times for %s inputs", (_, input) => {
+      for (const now of [Number.NaN, Number.POSITIVE_INFINITY, 1e20, -1e20]) {
+        expect(() => core().handle(input, now)).toThrow(new RangeError(`Invalid time ${now}`))
+      }
+    })
+
+    it("accepts fractional and negative times", () => {
+      expect(core().handle({ type: "timeout" }, -1.5)).toEqual([])
+    })
+
+    it("refuses to send a message that would inject headers", () => {
+      const request = parsed(incoming("OPTIONS"))
+      if (!isRequest(request)) throw new Error("Expected a request")
+      const response = createResponse(request, 200, "OK\r\nX: y")
+      expect(() =>
+        core().handle(
+          { type: "command", command: { type: "send", message: response, to: bob } },
+          0,
+        ),
+      ).toThrow(TypeError)
+    })
+
     it("rejects an invalid address of record", () => {
       expect(() => createCore({ address: alice, aor: "alice", random: createRandom(1) })).toThrow(
         'Invalid address of record "alice"',
@@ -302,12 +478,48 @@ describe("createCore", () => {
       )
     })
 
+    it.each([
+      ["options", options()],
+      [
+        "send",
+        {
+          type: "command",
+          command: { type: "send", message: parsed(incoming("OPTIONS")), to: bob },
+        },
+      ],
+    ] as const)("rejects an invalid destination for the %s command", (_, input) => {
+      const command = { ...input.command, to: { ...bob, port: 70_000 } }
+      expect(() => core().handle({ type: "command", command }, 0)).toThrow("Invalid address")
+    })
+
     it("refuses OPTIONS targets with URI headers", () => {
       expect(() => core().handle(options("sip:b@x?Route=evil"), 0)).toThrow(TypeError)
     })
   })
 
   describe("IPv6", () => {
+    it("uses a zoned local address without the zone in Via and matches the response", () => {
+      const local = { transport: "UDP", host: "fe80::1%en0", port: 5060 } as const
+      const ua = createCore({
+        address: local,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+      })
+      const request = sentRequest(ua.handle(options(), 0)[0])
+      expect(request.via[0]?.host).toBe("[fe80::1]")
+      expect(events(ua.handle(receive(responseTo(request)), 10))).toMatchObject([
+        { type: "response" },
+      ])
+    })
+
+    it("answers a link-local peer with a zone and leaves the zone out of received", () => {
+      const via = "Via: SIP/2.0/UDP [fe80::2]:5060;branch=z9hG4bK1;rport"
+      const from = { transport: "UDP", host: "fe80::2%en0", port: 5060 } as const
+      const [reply] = sent(core().handle(receive(incoming("OPTIONS", via), from), 0))
+      expect(reply?.to).toEqual(from)
+      expect(message(reply).via[0]?.params.get("received")).toBe("fe80::2")
+    })
+
     const v6 = { transport: "UDP", host: "2001:db8::10", port: 5060 } as const
 
     it("brackets the host in Via and matches the response", () => {

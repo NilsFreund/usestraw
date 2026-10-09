@@ -7,6 +7,7 @@ import {
   deriveSeed,
   gaussian,
 } from "../../src/simulation/random"
+import { tolerance } from "./support"
 
 const take = (seed: number, count: number) => Array.from({ length: count }, createRandom(seed))
 const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length
@@ -63,6 +64,15 @@ describe("between", () => {
     const values = Array.from({ length: 1000 }, () => between(random, 10, 12))
     expect(new Set(values)).toEqual(new Set([10, 11, 12]))
   })
+
+  it("picks every value equally often", () => {
+    const random = createRandom(5)
+    const values = Array.from({ length: 30_000 }, () => between(random, 0, 2))
+    for (const value of [0, 1, 2]) {
+      const share = values.filter((drawn) => drawn === value).length / values.length
+      expect(Math.abs(share - 1 / 3)).toBeLessThan(tolerance(1 / 3, values.length))
+    }
+  })
 })
 
 describe("chance", () => {
@@ -75,18 +85,19 @@ describe("chance", () => {
   it("fires at roughly the given rate", () => {
     const random = createRandom(2)
     const hits = Array.from({ length: 20_000 }, () => chance(random, 0.25)).filter(Boolean)
-    expect(hits.length / 20_000).toBeCloseTo(0.25, 1)
+    expect(Math.abs(hits.length / 20_000 - 0.25)).toBeLessThan(tolerance(0.25, 20_000))
   })
 })
 
 describe("gaussian", () => {
   it("matches mean and deviation", () => {
     const random = createRandom(4)
-    const values = Array.from({ length: 20_000 }, () => gaussian(random, 100, 15))
+    const samples = 100_000
+    const values = Array.from({ length: samples }, () => gaussian(random, 100, 15))
     const average = mean(values)
     const deviation = Math.sqrt(mean(values.map((value) => (value - average) ** 2)))
-    expect(Math.abs(average - 100)).toBeLessThan(0.5)
-    expect(Math.abs(deviation - 15)).toBeLessThan(0.5)
+    expect(Math.abs(average - 100)).toBeLessThan((4 * 15) / Math.sqrt(samples))
+    expect(Math.abs(deviation - 15)).toBeLessThan((4 * 15) / Math.sqrt(2 * samples))
   })
 
   it("returns the mean without deviation", () => {

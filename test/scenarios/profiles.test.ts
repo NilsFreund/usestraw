@@ -34,14 +34,18 @@ function median(values: number[]): number {
 }
 
 describe("every network profile", () => {
-  it.each(names)("ends every ping with exactly one outcome on %s", (name) => {
+  it.each(names)("ends every ping with one outcome and answers 36 of 40 pings on %s", (name) => {
+    let answered = 0
     for (let seed = 1; seed <= 40; seed++) {
       const { simulation, caller, callee } = ping(profiles[name], seed)
       const outcome = outcomes(caller.events)
+      const response = outcome[0] === "response"
       const context = `${name} seed ${seed}\n${formatTrace(simulation.trace)}`
       expect(outcome, context).toHaveLength(1)
-      if (outcome[0] === "response") expect(eventTypes(callee.events), context).toContain("request")
+      expect(!response || eventTypes(callee.events).includes("answered"), context).toBe(true)
+      if (response) answered++
     }
+    expect(answered).toBeGreaterThanOrEqual(36)
   })
 
   it.each(["perfect", "lan", "fiber"] as const)("always gets an answer on loss-free %s", (name) => {

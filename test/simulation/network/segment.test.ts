@@ -37,8 +37,17 @@ describe("createSegment", () => {
     [{ down: true }, "outage", 100],
     [{ mtu: 1400 }, "mtu", 1401],
     [{ loss: loss.random(1) }, "loss", 100],
+    [{ down: true, mtu: 1400, loss: loss.random(1) }, "outage", 1401],
+    [{ mtu: 1400, loss: loss.random(1) }, "mtu", 1401],
   ])("drops with %o as %s", (conditions, reason, size) => {
     expect(segment(conditions).traverse(data, size, 0)).toEqual({ type: "dropped", reason })
+  })
+
+  it("loses packets before they take up the queue", () => {
+    const link = segment({ bandwidth: 8000, buffer: 1500, loss: loss.random(1) })
+    expect(link.traverse(data, 1000, 0)).toEqual({ type: "dropped", reason: "loss" })
+    expect(link.traverse(data, 1000, 0)).toEqual({ type: "dropped", reason: "loss" })
+    expect(exits(link.retune({ bandwidth: 8000 }).traverse(data, 1000, 0))).toEqual([1000])
   })
 
   it("lets packets of exactly the MTU through", () => {
@@ -51,9 +60,9 @@ describe("createSegment", () => {
     expect(link.traverse(data, 1000, 0)).toEqual({ type: "dropped", reason: "congestion" })
   })
 
-  it("duplicates packets", () => {
+  it("duplicates packets with a delay of their own", () => {
     const result = segment({ duplicate: 1, latency: latency.uniform(0, 50) }).traverse(data, 100, 0)
-    expect(exits(result)).toHaveLength(2)
+    expect(new Set(exits(result)).size).toBe(2)
   })
 
   it("corrupts packets and marks them", () => {
@@ -78,12 +87,16 @@ describe("createSegment", () => {
     expect(sorted(send({ ordered: true }))).toBe(true)
   })
 
-  it("keeps the queue and ordering state when retuned", () => {
-    const link = segment({ bandwidth: 8000, ordered: true, latency: latency.uniform(0, 300) }, 4)
-    const first = exits(link.traverse(data, 1000, 0))[0] ?? 0
-    const retuned = link.retune({ bandwidth: 8000, ordered: true })
-    const [second] = exits(retuned.traverse(data, 1000, 0))
-    expect(second).toBeGreaterThanOrEqual(Math.max(first, 2000))
+  it("keeps the queue when retuned", () => {
+    const link = segment({ bandwidth: 8000 })
+    link.traverse(data, 1000, 0)
+    expect(exits(link.retune({ bandwidth: 8000 }).traverse(data, 1000, 0))).toEqual([2000])
+  })
+
+  it("keeps packets in order across a retune", () => {
+    const link = segment({ ordered: true, latency: latency.fixed(500) })
+    expect(exits(link.traverse(data, 100, 0))).toEqual([500])
+    expect(exits(link.retune({ ordered: true }).traverse(data, 100, 10))).toEqual([500])
   })
 
   it("validates retuned conditions", () => {

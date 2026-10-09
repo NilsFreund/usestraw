@@ -1,4 +1,5 @@
-import { sameHost, type Via } from "../message/fields/via"
+import { sameHost } from "../message/fields/host"
+import type { Via } from "../message/fields/via"
 import type { SipResponse } from "../message/types"
 import { type Address, defaultPort, isReliable } from "./address"
 

@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
-  bareHost,
-  formatHost,
   formatVia,
+  isVia,
   parseVia,
   parseVias,
-  sameHost,
   withReceived,
 } from "../../../src/message/fields/via"
 import { ParseError } from "../../../src/message/syntax"
@@ -32,12 +30,19 @@ describe("parseVia", () => {
     })
   })
 
-  it.each(["SIP/3.0/UDP host", "SIP/2.0/UDP", "SIP/2.0/UDP host:70000", "SIP/2.0/UDP host;;"])(
-    "rejects %s",
-    (value) => {
-      expect(() => parseVia(value)).toThrow(ParseError)
-    },
-  )
+  it("accepts the highest port", () => {
+    expect(parseVia("SIP/2.0/UDP host:65535").port).toBe(65535)
+  })
+
+  it.each([
+    "SIP/3.0/UDP host",
+    "SIP/2.0/UDP",
+    "SIP/2.0/UDP host:70000",
+    "SIP/2.0/UDP host:65536",
+    "SIP/2.0/UDP host;;",
+  ])("rejects %s", (value) => {
+    expect(() => parseVia(value)).toThrow(ParseError)
+  })
 })
 
 describe("parseVias", () => {
@@ -45,6 +50,38 @@ describe("parseVias", () => {
     expect(
       parseVias(["SIP/2.0/UDP a, SIP/2.0/TCP b", "SIP/2.0/TLS c"]).map((via) => via.host),
     ).toEqual(["a", "b", "c"])
+  })
+})
+
+describe("parseVias limits", () => {
+  it("accepts up to 70 entries and rejects more", () => {
+    const vias = (count: number) => [Array.from({ length: count }, () => "SIP/2.0/UDP a").join(",")]
+    expect(parseVias(vias(70))).toHaveLength(70)
+    expect(() => parseVias(vias(71))).toThrow("Too many Via entries (limit 70)")
+  })
+})
+
+describe("isVia", () => {
+  const valid = parseVia("SIP/2.0/UDP host:5060;branch=z9hG4bK1;rport")
+
+  it.each([
+    valid,
+    { ...valid, port: 0 },
+    { ...valid, port: 65535 },
+    { transport: "TLS", host: "[2001:db8::1]", params: new Map() },
+  ])("accepts %o", (via) => {
+    expect(isVia(via)).toBe(true)
+  })
+
+  it.each([
+    { ...valid, transport: "U DP" },
+    { ...valid, host: "evil host" },
+    { ...valid, host: "2001:db8::1" },
+    { ...valid, port: 65536 },
+    { ...valid, port: -1 },
+    { ...valid, params: new Map([["branch", "a\r\nX: y"]]) },
+  ])("rejects %o", (via) => {
+    expect(isVia(via)).toBe(false)
   })
 })
 
@@ -86,45 +123,15 @@ describe("withReceived", () => {
     )
   })
 
+  it("leaves the zone of a link-local source out of received", () => {
+    const via = withReceived(parseVia("SIP/2.0/UDP [fe80::2];rport"), "fe80::1%en0", 5060)
+    expect(via.params.get("received")).toBe("fe80::1")
+  })
+
   it("does not mutate the original Via", () => {
     const original = parseVia("SIP/2.0/UDP 10.0.0.5;rport")
     withReceived(original, "192.0.2.20", 5060)
     expect(original.params).toEqual(new Map([["rport", null]]))
-  })
-})
-
-describe("formatHost", () => {
-  it.each([
-    ["192.0.2.1", "192.0.2.1"],
-    ["host.example.com", "host.example.com"],
-    ["2001:db8::1", "[2001:db8::1]"],
-    ["[2001:db8::1]", "[2001:db8::1]"],
-  ])("formats %s as %s", (host, expected) => {
-    expect(formatHost(host)).toBe(expected)
-  })
-})
-
-describe("bareHost", () => {
-  it.each([
-    ["[2001:db8::1]", "2001:db8::1"],
-    ["2001:db8::1", "2001:db8::1"],
-    ["192.0.2.1", "192.0.2.1"],
-  ])("strips brackets from %s", (host, expected) => {
-    expect(bareHost(host)).toBe(expected)
-  })
-})
-
-describe("sameHost", () => {
-  it.each([
-    ["Host.Example.com", "host.example.com"],
-    ["[2001:DB8::1]", "2001:db8::1"],
-    ["192.0.2.1", "192.0.2.1"],
-  ])("treats %s and %s as the same host", (a, b) => {
-    expect(sameHost(a, b)).toBe(true)
-  })
-
-  it("tells different hosts apart", () => {
-    expect(sameHost("192.0.2.1", "192.0.2.2")).toBe(false)
   })
 })
 

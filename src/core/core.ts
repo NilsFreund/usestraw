@@ -1,15 +1,20 @@
+import { isIp } from "../message/fields/host"
 import { isRequestUri, isUri } from "../message/fields/uri"
 import { withReceived } from "../message/fields/via"
+import { MAX_MESSAGE_SIZE } from "../message/limits"
 import { parseMessage } from "../message/parse"
-import { createResponse } from "../message/response"
 import { serializeMessage } from "../message/serialize"
+import { show } from "../message/syntax"
 import { isRequest, type SipMessage, type SipRequest } from "../message/types"
+import { checkTime } from "../support/time"
+import { topVia } from "../transaction/keys"
 import { defaultTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
-import type { TransactionEvent, TransactionOutput } from "../transaction/types"
-import type { Address } from "../transport/address"
-import { createTag } from "./ids"
+import type { TransactionOutput } from "../transaction/types"
+import { type Address, isAddress } from "../transport/address"
+import { replyAddress } from "../transport/routing"
 import { createOptionsRequest } from "./requests"
+import { createStateless } from "./stateless"
 import type { Command, CoreEvent, Input, Output, Random } from "./types"
 import { answer } from "./uas"
 
@@ -27,60 +32,68 @@ export interface Core {
 
 export function createCore(options: CoreOptions): Core {
   const { address, aor, random } = options
-  if (!isUri(aor)) throw new TypeError(`Invalid address of record "${aor}"`)
+  checkAddress(address)
+  if (!isUri(aor)) throw new TypeError(`Invalid address of record ${show(aor)}`)
   const timers = options.timers ?? defaultTimers
   const transactions = createTransactions({ local: address, timers })
+  const stateless = createStateless(random)
 
   function handle(input: Input, now: number): Output[] {
+    checkTime(now)
     switch (input.type) {
       case "receive":
         return receive(input.data, input.from, now)
       case "timeout":
-        return translate(transactions.expire(now), now)
+        return translate(transactions.expire(now))
       case "command":
         return execute(input.command, now)
     }
   }
 
   function receive(data: Uint8Array, from: Address, now: number): Output[] {
+    checkAddress(from)
+    if (!isIp(from.host))
+      throw new TypeError(`The source must be an IP address, got ${show(from.host)}`)
     const result = parseMessage(data)
     if (!result.ok) return [event({ type: "invalid", error: result.error, from })]
     const { message } = result
-    if (!isRequest(message)) return translate(transactions.receive(message, from, now), now)
+    if (!isRequest(message)) return translate(transactions.receive(message, from, now))
     const via = message.via.map((entry, index) =>
       index === 0 ? withReceived(entry, from.host, from.port) : entry,
     )
-    return translate(transactions.receive({ ...message, via }, from, now), now)
+    return receiveRequest({ ...message, via }, from)
+  }
+
+  function receiveRequest(request: SipRequest, from: Address): Output[] {
+    if (request.method === "ACK") {
+      return stateless.acknowledges(request) ? [] : [event({ type: "request", request, from })]
+    }
+    const reply = answer(request)
+    const answered = event({ type: "answered", request, from, status: reply.status })
+    const data = serializeMessage(stateless.reply(request, reply))
+    if (data.length > MAX_MESSAGE_SIZE) return [answered]
+    return [answered, { type: "send", data, to: replyAddress(topVia(request), from) }]
   }
 
   function execute(command: Command, now: number): Output[] {
+    checkAddress(command.to)
     if (command.type === "send") return [send(command.message, command.to)]
-    if (!isRequestUri(command.uri)) throw new TypeError(`Invalid Request-URI "${command.uri}"`)
+    if (!isRequestUri(command.uri)) throw new TypeError(`Invalid Request-URI ${show(command.uri)}`)
     const request = createOptionsRequest(command.uri, { address, aor, random })
-    return translate(transactions.send(request, command.to, now), now)
+    return translate(transactions.send(request, command.to, now))
   }
 
-  function translate(outputs: TransactionOutput[], now: number): Output[] {
-    return outputs.flatMap((output) =>
-      output.type === "send" ? [send(output.message, output.to)] : react(output.event, now),
+  function translate(outputs: TransactionOutput[]): Output[] {
+    return outputs.map((output) =>
+      output.type === "send" ? send(output.message, output.to) : event(output.event),
     )
   }
 
-  function react(happened: TransactionEvent, now: number): Output[] {
-    if (happened.type !== "request") return [event(happened)]
-    const { request, from, transaction } = happened
-    const received = event({ type: "request", request, from })
-    if (transaction === undefined) return [received]
-    return [received, ...translate(transactions.respond(transaction, reply(request), now), now)]
-  }
-
-  function reply(request: SipRequest) {
-    const situation = { cancelsInvite: transactions.hasInvite(request) }
-    const { status, reason, headers } = answer(request, situation)
-    return createResponse(request, status, reason, { toTag: createTag(random), headers })
-  }
-
   return { handle, nextDeadline: () => transactions.nextDeadline() }
+}
+
+function checkAddress(address: Address): void {
+  if (!isAddress(address)) throw new TypeError(`Invalid address ${show(address)}`)
 }
 
 function send(message: SipMessage, to: Address): Output {

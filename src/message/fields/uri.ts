@@ -1,7 +1,9 @@
-const URI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\s<>"]+$/
+import { isText } from "../syntax"
+
+const URI = /^[A-Za-z][A-Za-z0-9+.-]*:[^\s\p{Cc}<>"]+$/u
 
 export function isUri(value: string): boolean {
-  return URI.test(value)
+  return isText(value) && URI.test(value)
 }
 
 export function isSipUri(value: string): boolean {

@@ -63,6 +63,13 @@ describe("createNat", () => {
       expect(box.inbound(udp, server, 1)).toEqual(phone)
       expect(box.inbound({ ...udp, transport: "TCP" }, server, 1)).toBeUndefined()
     })
+
+    it("lets each transport use the same public port", () => {
+      const box = nat({ ports: "preserve" })
+      const tcp = { transport: "TCP", host: "203.0.113.1", port: 5060 } as const
+      expect(box.outbound(phone, server, 0).port).toBe(5060)
+      expect(box.outbound({ ...phone, transport: "TCP" }, server, 0)).toEqual(tcp)
+    })
   })
 
   describe("filtering behavior", () => {
@@ -111,6 +118,14 @@ describe("createNat", () => {
       expect(refreshing.inbound(external, server, 50_000)).toEqual(phone)
     })
 
+    it("frees the ports of expired mappings for new ones", () => {
+      const box = nat({ timeout: 1000, ports: "preserve" })
+      const laptop = { ...phone, host: "192.168.1.11" }
+      box.outbound(phone, server, 0)
+      expect(box.outbound(laptop, server, 1000).port).toBe(49152)
+      expect(box.outbound({ ...laptop, host: "192.168.1.12" }, server, 1001).port).toBe(5060)
+    })
+
     it("expires mappings that were already expired when looked up outbound", () => {
       const box = nat({ timeout: 1000 })
       box.outbound(phone, server, 0)
@@ -127,10 +142,13 @@ describe("createNat", () => {
 
   it("defaults to a port-restricted cone with random ports and a 30 s timeout", () => {
     const box = createNat({ host: "203.0.113.1" }, createRandom(3))
+    const random = createNat({ host: "203.0.113.1", ports: "random" }, createRandom(3))
     const external = box.outbound(phone, server, 0)
+    expect(external).toEqual(random.outbound(phone, server, 0))
+    expect(box.outbound(phone, stranger, 0)).toEqual(external)
     expect(box.inbound(external, serverOtherPort, 1)).toBeUndefined()
     expect(box.inbound(external, server, 30_000)).toEqual(phone)
-    expect(box.inbound(external, server, 60_001)).toBeUndefined()
+    expect(box.inbound(external, server, 30_001)).toBeUndefined()
   })
 })
 

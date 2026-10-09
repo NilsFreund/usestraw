@@ -39,6 +39,42 @@ describe("createClientInvite (RFC 3261 §17.1.1, RFC 6026)", () => {
     expect(kinds(transaction.receive(response(invite, 200), bob, 400_000))).toEqual(["response"])
   })
 
+  it("times out with Timer B at 64*T1 even when Timer D is longer", () => {
+    const transaction = createClientInvite(invite, udp, {
+      t1: 100,
+      t2: 4000,
+      t4: 5000,
+      d: 32_000,
+      trying: 200,
+    })
+    transaction.start(0)
+    expect(run(transaction).at(-1)).toEqual([6400, ["timeout"]])
+  })
+
+  it("waits Timer D and not 64*T1 after a failure", () => {
+    const transaction = createClientInvite(invite, udp, {
+      t1: 100,
+      t2: 4000,
+      t4: 5000,
+      d: 32_000,
+      trying: 200,
+    })
+    transaction.start(0)
+    transaction.receive(response(invite, 486), bob, 10)
+    expect(run(transaction)).toEqual([[32_010, []]])
+  })
+
+  it("treats 299 as success and 300 as failure", () => {
+    const success = createClientInvite(invite, udp)
+    success.start(0)
+    success.receive(response(invite, 299), bob, 0)
+    expect(success.state).toBe("accepted")
+    const failure = createClientInvite(invite, udp)
+    failure.start(0)
+    expect(kinds(failure.receive(response(invite, 300), bob, 0))).toEqual(["ACK", "response"])
+    expect(failure.state).toBe("completed")
+  })
+
   it("does nothing when no timer is due", () => {
     const transaction = createClientInvite(invite, udp)
     transaction.start(0)

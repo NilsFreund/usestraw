@@ -21,43 +21,47 @@ function request(method: string, uri = "sip:alice@example.com", extra: string[] 
   return message
 }
 
-const allow = { name: "Allow", value: "OPTIONS" }
-const idle = { cancelsInvite: false }
+const allow = { name: "Allow", value: "ACK, CANCEL, OPTIONS" }
 
 describe("answer (RFC 3261 §8.2)", () => {
   it("accepts OPTIONS with 200 and Allow", () => {
-    expect(answer(request("OPTIONS"), idle)).toEqual({
-      status: 200,
-      reason: "OK",
+    expect(answer(request("OPTIONS"))).toEqual({ status: 200, reason: "OK", headers: [allow] })
+  })
+
+  it("accepts sips URIs", () => {
+    expect(answer(request("OPTIONS", "sips:alice@example.com")).status).toBe(200)
+  })
+
+  it.each([
+    "INVITE",
+    "BYE",
+    "INFO",
+    "MESSAGE",
+    "NOTIFY",
+    "PRACK",
+    "PUBLISH",
+    "REFER",
+    "REGISTER",
+    "SUBSCRIBE",
+    "UPDATE",
+  ])("rejects the known method %s with 405 and Allow (§8.2.1)", (method) => {
+    expect(answer(request(method))).toEqual({
+      status: 405,
+      reason: "Method Not Allowed",
       headers: [allow],
     })
   })
 
-  it("accepts sips URIs", () => {
-    expect(answer(request("OPTIONS", "sips:alice@example.com"), idle).status).toBe(200)
-  })
-
-  it.each(["INVITE", "BYE", "MESSAGE", "NOTIFY", "REGISTER", "X-CUSTOM"])(
-    "rejects %s with 405 and Allow",
-    (method) => {
-      expect(answer(request(method), idle)).toEqual({
-        status: 405,
-        reason: "Method Not Allowed",
-        headers: [allow],
-      })
-    },
-  )
-
-  it("answers CANCEL for a known INVITE with 200 (RFC 3261 §9.2)", () => {
-    expect(answer(request("CANCEL"), { cancelsInvite: true })).toEqual({
-      status: 200,
-      reason: "OK",
+  it.each(["X-CUSTOM", "invite", "FOO"])("rejects the unknown method %s with 501", (method) => {
+    expect(answer(request(method))).toEqual({
+      status: 501,
+      reason: "Not Implemented",
       headers: [],
     })
   })
 
-  it("answers CANCEL without a transaction with 481", () => {
-    expect(answer(request("CANCEL"), idle)).toEqual({
+  it("rejects CANCEL with 481 because no INVITE keeps state yet", () => {
+    expect(answer(request("CANCEL"))).toEqual({
       status: 481,
       reason: "Call/Transaction Does Not Exist",
       headers: [],
@@ -65,28 +69,46 @@ describe("answer (RFC 3261 §8.2)", () => {
   })
 
   it("rejects unsupported URI schemes with 416", () => {
-    expect(answer(request("OPTIONS", "tel:+4930123456"), idle)).toEqual({
+    expect(answer(request("OPTIONS", "tel:+4930123456"))).toEqual({
       status: 416,
       reason: "Unsupported URI Scheme",
       headers: [],
     })
   })
 
+  it("rejects OPTIONS with a body with 415 and an empty Accept", () => {
+    const options = { ...request("OPTIONS"), body: new Uint8Array([1]) }
+    expect(answer(options)).toEqual({
+      status: 415,
+      reason: "Unsupported Media Type",
+      headers: [{ name: "Accept", value: "" }],
+    })
+  })
+
   it("rejects required extensions with 420 and lists them as Unsupported", () => {
     const required = ["Require: 100rel, timer", "Require: replaces"]
-    expect(answer(request("OPTIONS", undefined, required), idle)).toEqual({
+    expect(answer(request("OPTIONS", undefined, required))).toEqual({
       status: 420,
       reason: "Bad Extension",
       headers: [{ name: "Unsupported", value: "100rel, timer, replaces" }],
     })
   })
 
+  it("answers a Require with non-token option tags with 400", () => {
+    const required = ['Require: timer, "evil" <x>']
+    expect(answer(request("OPTIONS", undefined, required))).toEqual({
+      status: 400,
+      reason: "Bad Request",
+      headers: [],
+    })
+  })
+
   it("ignores an empty Require and Proxy-Require", () => {
-    const extra = ["Require:", "Proxy-Require: noProxiesSupportThis"]
-    expect(answer(request("OPTIONS", undefined, extra), idle).status).toBe(200)
+    const extra = ["Require: , ", "Proxy-Require: noProxiesSupportThis"]
+    expect(answer(request("OPTIONS", undefined, extra)).status).toBe(200)
   })
 
   it("checks the method before the URI scheme", () => {
-    expect(answer(request("INVITE", "tel:+4930123456"), idle).status).toBe(405)
+    expect(answer(request("INVITE", "tel:+4930123456")).status).toBe(405)
   })
 })

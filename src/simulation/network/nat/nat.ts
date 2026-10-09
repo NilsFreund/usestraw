@@ -36,7 +36,7 @@ export function createNat(options: NatOptions, random: Random): Nat {
   function outbound(internal: Address, remote: Address, now: number): Address {
     const key = mappingKey(mapping, internal, remote)
     const existing = byKey.get(key)
-    const entry = existing && alive(existing, now) ? existing : open(key, internal)
+    const entry = existing && alive(existing, now) ? existing : open(key, internal, now)
     entry.lastActive = now
     entry.hosts.add(remote.host)
     entry.endpoints.add(endpointKey(remote))
@@ -50,7 +50,8 @@ export function createNat(options: NatOptions, random: Random): Nat {
     return entry.internal
   }
 
-  function open(key: string, internal: Address): Mapping {
+  function open(key: string, internal: Address, now: number): Mapping {
+    sweep(now)
     const port = allocate(internal.port, (candidate) =>
       byPort.has(portKey(internal.transport, candidate)),
     )
@@ -65,6 +66,10 @@ export function createNat(options: NatOptions, random: Random): Nat {
     byKey.set(key, entry)
     byPort.set(portKey(internal.transport, port), entry)
     return entry
+  }
+
+  function sweep(now: number): void {
+    for (const entry of byKey.values()) alive(entry, now)
   }
 
   function alive(entry: Mapping, now: number): boolean {

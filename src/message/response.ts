@@ -13,7 +13,7 @@ export function createResponse(
 ): SipResponse {
   const { toTag, headers = [] } = options
   const to =
-    toTag === undefined || request.to.params.has("tag")
+    toTag === undefined || request.to.params.get("tag")
       ? request.to
       : { ...request.to, params: new Map([...request.to.params, ["tag", toTag]]) }
   return {

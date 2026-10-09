@@ -1,4 +1,4 @@
-import { formatHost } from "../message/fields/via"
+import { formatHost } from "../message/fields/host"
 import type { SipRequest } from "../message/types"
 import type { Address } from "../transport/address"
 import { createBranch, createCallId, createTag } from "./ids"

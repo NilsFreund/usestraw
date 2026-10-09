@@ -103,11 +103,13 @@ describe("createHosts", () => {
       expect(registry.find(alice, undefined)?.id).toBe("alice")
     })
 
-    it("can stay on the same address", () => {
+    it("can stay on the same address and still free it when leaving later", () => {
       const registry = hosts()
       registry.add("alice", alice, {})
       registry.move("alice", alice, {})
       expect(registry.find(alice, undefined)?.id).toBe("alice")
+      registry.move("alice", bob, {})
+      expect(registry.uses(alice.host, undefined)).toBe(false)
     })
   })
 

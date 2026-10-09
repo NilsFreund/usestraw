@@ -27,6 +27,11 @@ describe("createResponse", () => {
     expect(request.to.params.has("tag")).toBe(false)
   })
 
+  it("replaces a To tag without value", () => {
+    const flagged = { ...request, to: { ...request.to, params: new Map([["tag", null]]) } }
+    expect(createResponse(flagged, 200, "OK", { toTag: "abc" }).to.params.get("tag")).toBe("abc")
+  })
+
   it("keeps an existing To tag", () => {
     const tagged = { ...request, to: { ...request.to, params: new Map([["tag", "old"]]) } }
     expect(createResponse(tagged, 200, "OK", { toTag: "new" }).to.params.get("tag")).toBe("old")

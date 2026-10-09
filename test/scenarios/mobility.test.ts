@@ -43,8 +43,8 @@ describe("mobility", () => {
     ping(2000)
     simulation.run()
     expect(outcomes(caller.events)).toEqual(["response"])
-    const request = callee.events.find((event) => event.type === "request")
-    expect(request?.type === "request" && request.from.host).toBe("198.51.100.1")
+    const request = callee.events.find((event) => event.type === "answered")
+    expect(request?.type === "answered" && request.from.host).toBe("198.51.100.1")
   })
 
   it("rides through short coverage gaps thanks to retransmissions", () => {

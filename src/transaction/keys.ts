@@ -1,4 +1,5 @@
-import { bareHost, type Via } from "../message/fields/via"
+import { bareHost } from "../message/fields/host"
+import type { Via } from "../message/fields/via"
 import type { SipMessage, SipRequest, SipResponse } from "../message/types"
 import { defaultPort } from "../transport/address"
 

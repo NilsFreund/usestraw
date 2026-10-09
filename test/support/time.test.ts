@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { earliest } from "../../src/support/time"
+import { checkTime, earliest } from "../../src/support/time"
 
 describe("earliest", () => {
   it("returns the smallest time", () => {
@@ -17,5 +17,21 @@ describe("earliest", () => {
 
   it("accepts any iterable", () => {
     expect(earliest(new Set([3, 1]).values())).toBe(1)
+  })
+})
+
+describe("checkTime", () => {
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER])("accepts %d", (now) => {
+    expect(() => checkTime(now)).not.toThrow()
+  })
+
+  it.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 2,
+    -Number.MAX_SAFE_INTEGER - 2,
+  ])("rejects %d", (now) => {
+    expect(() => checkTime(now)).toThrow(new RangeError(`Invalid time ${now}`))
   })
 })

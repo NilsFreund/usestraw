@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { isToken, quote, readQuoted, splitOutside } from "../../src/message/syntax"
+import {
+  hasControl,
+  hasLineBreak,
+  hasRawControl,
+  isText,
+  isToken,
+  quote,
+  readQuoted,
+  show,
+  splitOutside,
+} from "../../src/message/syntax"
 
 describe("splitOutside", () => {
   it("ignores separators inside quotes and angle brackets", () => {
@@ -18,17 +28,98 @@ describe("readQuoted", () => {
 })
 
 describe("quote", () => {
-  it("escapes quotes, backslashes and control characters", () => {
-    expect(quote('a"b\\c\x00')).toBe('"a\\"b\\\\c\\\x00"')
+  it("escapes quotes, backslashes and control characters but keeps tabs", () => {
+    expect(quote('a"b\\c\x00\t\x7f')).toBe('"a\\"b\\\\c\\\x00\t\\\x7f"')
+  })
+
+  it.each(["a\rb", "a\nb", "a\r\nX-Injected: yes"])("refuses line breaks in %j", (text) => {
+    expect(() => quote(text)).toThrow(TypeError)
+  })
+})
+
+const sneaky = { toString: () => "INVITE" } as unknown as string
+
+describe("isText", () => {
+  it("accepts only primitive strings", () => {
+    expect(isText("")).toBe(true)
+    expect(isText(sneaky)).toBe(false)
+    expect(isText(1)).toBe(false)
   })
 })
 
 describe("isToken", () => {
+  it("rejects objects that only look like tokens", () => {
+    expect(isToken(sneaky)).toBe(false)
+  })
+
   it.each(["INVITE", "z9hG4bK-.!%*_+`'~"])("accepts %s", (value) => {
     expect(isToken(value)).toBe(true)
   })
 
-  it.each(["", "a b", "a,b", "a;b", "a:b"])("rejects %s", (value) => {
+  it.each(["", "a b", "a,b", "a;b", "a:b", "a\r\nb", "ä"])("rejects %j", (value) => {
     expect(isToken(value)).toBe(false)
+  })
+})
+
+describe("hasControl", () => {
+  it.each(["\x00", "\x07", "\r", "\n", "\x1b", "\x7f"])("finds %j", (char) => {
+    expect(hasControl(`a${char}b`)).toBe(true)
+  })
+
+  it.each(["plain text", "tab\tseparated", "ümlaut", "line\u2028separator", "c1\x85\x9f"])(
+    "accepts %j",
+    (value) => {
+      expect(hasControl(value)).toBe(false)
+    },
+  )
+})
+
+describe("hasLineBreak", () => {
+  it.each([
+    ["a\rb", true],
+    ["a\nb", true],
+    ["a\x00b", false],
+    ["a\u2028b", false],
+  ])("checks %j", (value, expected) => {
+    expect(hasLineBreak(value)).toBe(expected)
+  })
+})
+
+describe("hasRawControl", () => {
+  it.each([
+    ['"BEL:\\\x07 NUL:\\\x00 DEL:\\\x7f" <sip:x@y>', false],
+    ["tab\tseparated", false],
+    ['"a\\"b" <sip:x@y>', false],
+    ["raw\x00nul", true],
+    ['"unescaped\x00inside quotes"', true],
+    ['"escaped CR\\\r"', true],
+    ['"escaped LF\\\n"', true],
+    ['comment (it"s) \\\x00', false],
+    ["lone\rcarriage return", true],
+    ["trailing backslash\\", false],
+  ])("checks %j", (value, expected) => {
+    expect(hasRawControl(value)).toBe(expected)
+  })
+})
+
+describe("show", () => {
+  it.each([
+    ["plain", '"plain"'],
+    ["a\r\nb\x00\x1b", '"a\\r\\nb\\u0000\\u001b"'],
+    [42, "42"],
+    [undefined, "undefined"],
+  ])("renders %j as %s", (value, shown) => {
+    expect(show(value)).toBe(shown)
+  })
+
+  it("escapes characters that log tools treat as line breaks or controls", () => {
+    expect(show("a\x7fb\x85c\x9bd\u2028e\u2029f")).toBe(
+      '"a\\u007fb\\u0085c\\u009bd\\u2028e\\u2029f"',
+    )
+  })
+
+  it("cuts long values", () => {
+    expect(show("x".repeat(500))).toBe(`"${"x".repeat(96)}...`)
+    expect(show("x".repeat(98))).toHaveLength(100)
   })
 })

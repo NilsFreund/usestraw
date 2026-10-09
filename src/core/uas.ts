@@ -1,4 +1,5 @@
 import { isSipUri } from "../message/fields/uri"
+import { isToken } from "../message/syntax"
 import type { Header, SipRequest } from "../message/types"
 
 export interface Answer {
@@ -7,31 +8,49 @@ export interface Answer {
   readonly headers: readonly Header[]
 }
 
-const ALLOW: Header = { name: "Allow", value: "OPTIONS" }
+const KNOWN_METHODS: ReadonlySet<string> = new Set([
+  "ACK",
+  "BYE",
+  "CANCEL",
+  "INFO",
+  "INVITE",
+  "MESSAGE",
+  "NOTIFY",
+  "OPTIONS",
+  "PRACK",
+  "PUBLISH",
+  "REFER",
+  "REGISTER",
+  "SUBSCRIBE",
+  "UPDATE",
+])
 
-export interface Situation {
-  readonly cancelsInvite: boolean
+const ALLOW: Header = { name: "Allow", value: "ACK, CANCEL, OPTIONS" }
+const ACCEPT_NOTHING: Header = { name: "Accept", value: "" }
+
+export function answer(request: SipRequest): Answer {
+  const { method } = request
+  if (method === "CANCEL") return answerWith(481, "Call/Transaction Does Not Exist")
+  if (!KNOWN_METHODS.has(method)) return answerWith(501, "Not Implemented")
+  if (method !== "OPTIONS") return answerWith(405, "Method Not Allowed", [ALLOW])
+  if (!isSipUri(request.uri)) return answerWith(416, "Unsupported URI Scheme")
+  const required = requiredOptions(request)
+  if (!required.every(isToken)) return answerWith(400, "Bad Request")
+  if (required.length > 0) {
+    return answerWith(420, "Bad Extension", [{ name: "Unsupported", value: required.join(", ") }])
+  }
+  if (request.body.length > 0) return answerWith(415, "Unsupported Media Type", [ACCEPT_NOTHING])
+  return answerWith(200, "OK", [ALLOW])
 }
 
-export function answer(request: SipRequest, situation: Situation): Answer {
-  if (request.method === "CANCEL") {
-    if (situation.cancelsInvite) return { status: 200, reason: "OK", headers: [] }
-    return { status: 481, reason: "Call/Transaction Does Not Exist", headers: [] }
-  }
-  if (request.method !== "OPTIONS") {
-    return { status: 405, reason: "Method Not Allowed", headers: [ALLOW] }
-  }
-  if (!isSipUri(request.uri)) {
-    return { status: 416, reason: "Unsupported URI Scheme", headers: [] }
-  }
-  const required = request.headers
+function requiredOptions(request: SipRequest): string[] {
+  return request.headers
     .filter((header) => header.name === "Require")
     .flatMap((header) => header.value.split(","))
     .map((option) => option.trim())
     .filter((option) => option !== "")
-  if (required.length > 0) {
-    const unsupported = { name: "Unsupported", value: required.join(", ") }
-    return { status: 420, reason: "Bad Extension", headers: [unsupported] }
-  }
-  return { status: 200, reason: "OK", headers: [ALLOW] }
+}
+
+function answerWith(status: number, reason: string, headers: readonly Header[] = []): Answer {
+  return { status, reason, headers }
 }

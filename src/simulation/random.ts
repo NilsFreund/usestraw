@@ -1,4 +1,5 @@
 import type { Random } from "../core/types"
+import { hash } from "../support/hash"
 
 export function createRandom(seed: number): Random {
   let state = seed >>> 0
@@ -12,9 +13,7 @@ export function createRandom(seed: number): Random {
 }
 
 export function deriveSeed(seed: number, label: string): number {
-  let hash = 0x811c9dc5
-  for (const char of `${seed}:${label}`) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193)
-  return hash >>> 0
+  return hash(`${seed}:${label}`)
 }
 
 export function createStreams(seed: number): (label: string) => Random {

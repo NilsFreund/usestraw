@@ -1,19 +1,16 @@
 import { describe, expect, it } from "vitest"
 import type { Address } from "../../src"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
-import { createNetwork, type Network } from "../../src/simulation/network/network"
+import { createNetwork } from "../../src/simulation/network/network"
 import { profiles } from "../../src/simulation/network/profiles"
 import type { PacketRecord } from "../../src/simulation/network/types"
 import { createSimulation } from "../../src/simulation/simulation"
 import { traceStats } from "../../src/simulation/stats"
 import { alice, bob } from "../helpers"
+import { settle, tolerance } from "../simulation/support"
 
 const carol: Address = { transport: "UDP", host: "192.0.2.30", port: 5060 }
 const payload = new Uint8Array(200)
-
-function drain(net: Network): void {
-  for (let next = net.nextEvent(); next !== undefined; next = net.nextEvent()) net.step(next)
-}
 
 function blast(
   internet: LinkConditions,
@@ -25,7 +22,7 @@ function blast(
   net.attach("alice", alice, { access: access.alice ?? {} })
   net.attach("bob", bob, { access: access.bob ?? {} })
   for (let index = 0; index < count; index++) net.send("alice", bob, payload, index)
-  drain(net)
+  settle(net)
   return net.trace
 }
 
@@ -46,7 +43,7 @@ describe("network statistics over large samples", () => {
   it("matches the configured loss rate", () => {
     expect(
       Math.abs(deliveredShare(blast({ loss: loss.random(0.05) }, 20_000)) - 0.95),
-    ).toBeLessThan(0.01)
+    ).toBeLessThan(tolerance(0.95, 20_000))
   })
 
   it("compounds loss along the path", () => {
@@ -54,7 +51,7 @@ describe("network statistics over large samples", () => {
       alice: { loss: loss.random(0.1) },
       bob: { loss: loss.random(0.1) },
     })
-    expect(Math.abs(deliveredShare(trace) - 0.81)).toBeLessThan(0.015)
+    expect(Math.abs(deliveredShare(trace) - 0.81)).toBeLessThan(tolerance(0.81, 20_000))
     expect(traceStats(trace).dropped.loss).toBe(trace.length - traceStats(trace).delivered)
   })
 
@@ -69,9 +66,10 @@ describe("network statistics over large samples", () => {
   })
 
   it("duplicates and corrupts at the configured rates", () => {
-    const stats = traceStats(blast({ duplicate: 0.05, corrupt: 0.02 }, 20_000))
-    expect(Math.abs(stats.duplicates / 20_000 - 0.05)).toBeLessThan(0.01)
-    expect(Math.abs(stats.corrupted / 20_000 - 0.02)).toBeLessThan(0.01)
+    const stats = traceStats(blast({ duplicate: 0.05, corrupt: 0.02 }, 50_000))
+    const copies = stats.delivered + stats.duplicates
+    expect(Math.abs(stats.duplicates / stats.sent - 0.05)).toBeLessThan(tolerance(0.05, stats.sent))
+    expect(Math.abs(stats.corrupted / copies - 0.02)).toBeLessThan(tolerance(0.02, copies))
   })
 
   it("reorders with jitter and keeps order on ordered links", () => {
@@ -98,7 +96,7 @@ describe("network statistics over large samples", () => {
         net.send("alice", carol, payload, index * 3)
         net.send("alice", bob, payload, index * 3 + 1)
       }
-      drain(net)
+      settle(net)
       return net.trace.filter((packet) => packet.to === "carol")
     }
     expect(run({ loss: loss.random(0.9), latency: latency.normal(300, 100) })).toEqual(run({}))

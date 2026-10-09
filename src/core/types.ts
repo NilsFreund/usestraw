@@ -16,6 +16,12 @@ export type Input =
 export type CoreEvent =
   | Exclude<TransactionEvent, { readonly type: "request" }>
   | { readonly type: "request"; readonly request: SipRequest; readonly from: Address }
+  | {
+      readonly type: "answered"
+      readonly request: SipRequest
+      readonly from: Address
+      readonly status: number
+    }
   | { readonly type: "invalid"; readonly error: string; readonly from: Address }
 
 export type Output =

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatNameAddr, parseNameAddr } from "../../../src/message/fields/name-addr"
+import { formatNameAddr, isNameAddr, parseNameAddr } from "../../../src/message/fields/name-addr"
 import { ParseError } from "../../../src/message/syntax"
 
 describe("parseNameAddr", () => {
@@ -40,6 +40,27 @@ describe("parseNameAddr", () => {
     "<sip:alice@example.com> tag=1",
   ])("rejects %s", (value) => {
     expect(() => parseNameAddr(value)).toThrow(ParseError)
+  })
+})
+
+describe("isNameAddr", () => {
+  const valid = parseNameAddr('"Alice" <sip:alice@example.com>;tag=1')
+
+  it.each([
+    valid,
+    { ...valid, displayName: "BEL:\x07 NUL:\x00" },
+    { uri: "tel:+49", params: new Map() },
+  ])("accepts %o", (address) => {
+    expect(isNameAddr(address)).toBe(true)
+  })
+
+  it.each([
+    { ...valid, displayName: "Alice\r\nX-Injected: yes" },
+    { ...valid, uri: "sip:alice@example.com>\r\nX: y" },
+    { ...valid, uri: "alice" },
+    { ...valid, params: new Map([["tag", "1\r\nX: y"]]) },
+  ])("rejects %o", (address) => {
+    expect(isNameAddr(address)).toBe(false)
   })
 })
 

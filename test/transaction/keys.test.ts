@@ -45,6 +45,14 @@ describe("serverKey (RFC 3261 §17.2.3)", () => {
     expect(serverKey(changed)).toBe("z9hG4bKclient|2001:db8::1:5060|OPTIONS")
   })
 
+  it("defaults the sent-by port to 5061 for TLS", () => {
+    const changed = {
+      ...request("OPTIONS"),
+      via: [parseVia("SIP/2.0/TLS client.example.com;branch=z9hG4bKclient")],
+    }
+    expect(serverKey(changed)).toBe("z9hG4bKclient|client.example.com:5061|OPTIONS")
+  })
+
   it("falls back to RFC 2543 matching without the magic cookie", () => {
     expect(serverKey(request("INVITE", "legacy"))).toBe(
       "rfc2543|call-1|a1||1|INVITE|192.0.2.10:5060|sip:bob@example.com",

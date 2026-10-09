@@ -65,6 +65,13 @@ describe("parseMessage", () => {
     })
   })
 
+  it.each(["0x46", "7e1", "70.0"])("rejects the Max-Forwards %s", (value) => {
+    expect(parseMessage(register.replace("Max-Forwards: 70", `Max-Forwards: ${value}`))).toEqual({
+      ok: false,
+      error: `Invalid Max-Forwards "${value}"`,
+    })
+  })
+
   it("rejects Max-Forwards above 255", () => {
     expect(parseMessage(register.replace("Max-Forwards: 70", "Max-Forwards: 256"))).toEqual({
       ok: false,
@@ -110,7 +117,111 @@ describe("parseMessage", () => {
     expect(parseMessage(register.replace(search, replacement))).toEqual({ ok: false, error })
   })
 
+  it.each([
+    ["SIP/2.0 700 Weird", 'Invalid status code "700"'],
+    ["SIP/2.0 099 Low", 'Invalid status code "099"'],
+    ["SIP/2.0 0200 OK", 'Invalid status code "0200"'],
+    ["SIP/2.0 200 OK\x00", "Invalid character in reason phrase"],
+    ["SIP/2.0 200 O\rK", "Invalid character in reason phrase"],
+  ])("rejects the status line %j", (line, error) => {
+    const message = register.replace("REGISTER sip:example.com SIP/2.0", line)
+    expect(parseMessage(message)).toEqual({ ok: false, error })
+  })
+
+  it("accepts a lowercase SIP version", () => {
+    expect(parsed(register.replace("SIP/2.0\r\n", "sip/2.0\r\n"))).toMatchObject({
+      method: "REGISTER",
+    })
+    const response = register.replace("REGISTER sip:example.com SIP/2.0", "sip/2.0 200 OK")
+    expect(parsed(response)).toMatchObject({ status: 200 })
+  })
+
+  it("keeps a reason phrase with a line separator", () => {
+    const response = register.replace("REGISTER sip:example.com SIP/2.0", "SIP/2.0 200 O\u2028K")
+    expect(parsed(response)).toMatchObject({ reason: "O\u2028K" })
+  })
+
+  it("keeps header values with line and paragraph separators", () => {
+    const message = parsed(
+      register.replace("Supported: path, outbound", "Subject: a\u2028b\u2029c"),
+    )
+    expect(message.headers).toEqual([{ name: "Subject", value: "a\u2028b\u2029c" }])
+  })
+
+  it("rejects a Content-Length with trailing garbage", () => {
+    expect(parseMessage(register.replace("Content-Length: 0", "Content-Length: 5abc"))).toEqual({
+      ok: false,
+      error: 'Invalid Content-Length "5abc"',
+    })
+  })
+
+  it.each([
+    ["a NUL in a header value", "Subject: a\x00b", "Invalid character in Subject header"],
+    ["an escape character", "Subject: \x1b[31mred", "Invalid character in Subject header"],
+    ["a DEL character", "Subject: a\x7fb", "Invalid character in Subject header"],
+    ["a lone CR", "Subject: a\rX-Injected: yes", "Invalid character in Subject header"],
+    ["a lone CR in a folded line", "Subject: a\r\n b\rc", "Invalid character in Subject header"],
+    ["a NUL in the Call-ID", "Call-ID: a\x00b", "Invalid character in Call-ID header"],
+    ["a NUL in a URI", "Contact: <sip:bob@192.0.2.4\x00>", "Invalid character in Contact header"],
+  ])("rejects %s", (_, header, error) => {
+    const message = register.replace("Supported: path, outbound", header)
+    expect(parseMessage(message)).toEqual({ ok: false, error })
+  })
+
+  it("rejects an escaped control character in the Call-ID", () => {
+    const message = register.replace("Call-ID: 843817637684230@998sdasdh09", 'Call-ID: "\\\x00"')
+    expect(parseMessage(message)).toEqual({
+      ok: false,
+      error: 'Invalid Call-ID "\\"\\\\\\u0000\\""',
+    })
+  })
+
+  it("quotes and escapes invalid values in errors", () => {
+    const message = register.replace("Supported: path, outbound", 'Date: "x\\y"')
+    expect(parseMessage(message)).toEqual({ ok: false, error: 'Invalid Date "\\"x\\\\y\\""' })
+  })
+
+  it("rejects a NUL in the Request-URI", () => {
+    const message = register.replace("sip:example.com", "sip:exa\x00mple.com")
+    expect(parseMessage(message)).toEqual({
+      ok: false,
+      error: 'Invalid Request-URI "sip:exa\\u0000mple.com"',
+    })
+  })
+
+  it("keeps escaped control characters inside quoted strings", () => {
+    const message = parsed(register.replace("To: Bob", 'To: "NUL:\\\x00 DEL:\\\x7f"'))
+    expect(message.to.displayName).toBe("NUL:\x00 DEL:\x7f")
+  })
+
+  it("accepts messages of exactly 65535 bytes and rejects larger ones", () => {
+    expect(sized(65_535)).toHaveLength(65_535)
+    expect(parseMessage(sized(65_535))).toMatchObject({ ok: true })
+    expect(parseMessage(sized(65_536))).toEqual({
+      ok: false,
+      error: "Message exceeds 65535 bytes",
+    })
+  })
+
+  it("accepts 256 header lines and rejects more", () => {
+    const head = register.split("\r\n").slice(0, 9)
+    const message = (lines: number) =>
+      [...head, ...Array.from({ length: lines - 8 }, (_, i) => `X-${i}: ${i}`), "", ""].join("\r\n")
+    expect(parseMessage(message(256))).toMatchObject({ ok: true })
+    expect(parseMessage(message(257))).toEqual({
+      ok: false,
+      error: "Too many header lines (limit 256)",
+    })
+  })
+
   it("lets programming errors escape instead of hiding them as parse errors", () => {
     expect(() => parseMessage(undefined as unknown as string)).toThrow(TypeError)
   })
 })
+
+function sized(total: number): string {
+  const head = (length: number) =>
+    register.replace("Content-Length: 0", `Content-Length: ${length}`)
+  const length = total - head(10_000).length
+  return head(length) + "x".repeat(length)
+}

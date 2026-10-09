@@ -210,6 +210,25 @@ describe("createTransactions", () => {
       expect(transactions.hasInvite(request("CANCEL", "z9hG4bKinvite"))).toBe(true)
     })
 
+    it("forgets the INVITE once its transaction ended", () => {
+      const transactions = createTransactions({ local: alice })
+      const invite = request("INVITE", "z9hG4bKinvite")
+      const key = serverKey(transactions.receive(invite, bob, 0))
+      transactions.respond(key, response(invite, 486), 0)
+      transactions.expire(32_000)
+      expect(transactions.hasInvite(request("CANCEL", "z9hG4bKinvite"))).toBe(false)
+    })
+
+    it("treats a retransmission after Timer J as a new request", () => {
+      const transactions = createTransactions({ local: alice })
+      const key = serverKey(transactions.receive(request("OPTIONS"), bob, 0))
+      transactions.respond(key, response(request("OPTIONS"), 200), 0)
+      expect(transactions.expire(31_999)).toEqual([])
+      expect(kinds(transactions.receive(request("OPTIONS"), bob, 31_999))).toEqual(["200"])
+      expect(transactions.expire(32_000)).toEqual([])
+      expect(serverKey(transactions.receive(request("OPTIONS"), bob, 32_001))).toBe(key)
+    })
+
     it("matches RFC 2543 requests without the magic cookie", () => {
       const transactions = createTransactions({ local: alice })
       const legacy = parsed(

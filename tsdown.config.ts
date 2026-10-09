@@ -6,4 +6,5 @@ export default defineConfig({
   dts: true,
   exports: true,
   publint: true,
+  attw: { profile: "esm-only", level: "error" },
 })

@@ -1,5 +1,5 @@
-import { fail, isToken, quote, readQuoted } from "../syntax"
-import { formatParams, type Params, parseParams } from "./params"
+import { fail, hasLineBreak, isText, isToken, quote, readQuoted, show } from "../syntax"
+import { formatParams, isParams, type Params, parseParams } from "./params"
 import { isUri } from "./uri"
 
 export interface NameAddr {
@@ -19,13 +19,18 @@ export function parseNameAddr(input: string): NameAddr {
     const words = value.slice(0, delimiter).trim()
     if (words === "") return angled(value.slice(delimiter))
     const tokens = words.split(/\s+/)
-    if (!tokens.every(isToken)) fail(`Invalid display name "${words}"`)
+    if (!tokens.every(isToken)) fail(`Invalid display name ${show(words)}`)
     return angled(value.slice(delimiter), tokens.join(" "))
   }
   const end = delimiter === -1 ? value.length : delimiter
   const uri = value.slice(0, end).trim()
-  if (!isUri(uri) || /[,?]/.test(uri)) fail(`Invalid address "${uri}"`)
+  if (!isUri(uri) || /[,?]/.test(uri)) fail(`Invalid address ${show(uri)}`)
   return { uri, params: parseParams(value.slice(end)) }
+}
+
+export function isNameAddr(address: NameAddr): boolean {
+  const { displayName = "", uri, params } = address
+  return isUri(uri) && isText(displayName) && !hasLineBreak(displayName) && isParams(params)
 }
 
 export function formatNameAddr(address: NameAddr): string {
@@ -36,9 +41,9 @@ export function formatNameAddr(address: NameAddr): string {
 function angled(input: string, displayName?: string): NameAddr {
   const rest = input.trimStart()
   const close = rest.indexOf(">")
-  if (!rest.startsWith("<") || close === -1) fail(`Expected <uri> in "${input.trim()}"`)
+  if (!rest.startsWith("<") || close === -1) fail(`Expected <uri> in ${show(input.trim())}`)
   const uri = rest.slice(1, close)
-  if (!isUri(uri)) fail(`Invalid URI "${uri}"`)
+  if (!isUri(uri)) fail(`Invalid URI ${show(uri)}`)
   const params = parseParams(rest.slice(close + 1))
   return displayName === undefined ? { uri, params } : { displayName, uri, params }
 }

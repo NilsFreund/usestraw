@@ -61,6 +61,7 @@ export function run(
     at !== undefined && at <= until;
     at = transaction.nextDeadline()
   ) {
+    if (log.length === 1000) throw new Error("The transaction keeps firing")
     log.push([at, kinds(transaction.expire(at))])
   }
   return log

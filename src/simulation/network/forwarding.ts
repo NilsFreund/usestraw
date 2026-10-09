@@ -22,7 +22,7 @@ export interface Transit {
   readonly corrupted: boolean
   readonly hop: Hop
   readonly origin: string | undefined
-  readonly site?: string
+  readonly site?: string | undefined
 }
 
 export interface Fabric {
@@ -68,12 +68,15 @@ export function createForwarding({ hosts, nats, routes, agenda }: Fabric): Forwa
 
   function egress(transit: Transit, now: number): Delivery | undefined {
     if (hosts.get(transit.sender).offline) return drop(transit, "outage", now)
+    const { destination } = transit
     let source = transit.source
     for (let site = transit.origin; site !== undefined; site = nats.parent(site)) {
-      if (inside(transit.destination, site)) {
-        return proceed(transit, { source, site, hop: "ingress" }, now)
+      if (inside(destination, site)) return proceed(transit, { source, site, hop: "ingress" }, now)
+      const nat = nats.get(site)
+      source = nat.outbound(source, destination, now)
+      if (destination.host === nat.host) {
+        return proceed(transit, { source, site: nats.parent(site), hop: "ingress" }, now)
       }
-      source = nats.get(site).outbound(source, transit.destination, now)
     }
     return proceed(transit, { source, hop: "internet" }, now)
   }

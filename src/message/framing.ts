@@ -1,4 +1,4 @@
-import { fail } from "./syntax"
+import { fail, show } from "./syntax"
 
 const CR = 13
 const LF = 10
@@ -23,7 +23,7 @@ export function sliceBody(
   contentLength: string | undefined,
 ): Uint8Array {
   if (contentLength !== undefined && !/^\d+$/.test(contentLength)) {
-    fail(`Invalid Content-Length "${contentLength}"`)
+    fail(`Invalid Content-Length ${show(contentLength)}`)
   }
   const end = contentLength === undefined ? bytes.length : start + Number(contentLength)
   if (end > bytes.length) fail("Content-Length exceeds message size")

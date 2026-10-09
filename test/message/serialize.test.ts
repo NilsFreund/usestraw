@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { serializeMessage } from "../../src"
+import { createResponse, isRequest, serializeMessage } from "../../src"
 import { parsed, register } from "../helpers"
 
 describe("serializeMessage", () => {
@@ -26,5 +26,29 @@ describe("serializeMessage", () => {
     const body = new TextEncoder().encode("v=0\r\n")
     const text = new TextDecoder().decode(serializeMessage({ ...parsed(register), body }))
     expect(text).toContain("Content-Length: 5\r\n\r\nv=0\r\n")
+  })
+
+  it("refuses messages that would inject headers", () => {
+    const request = parsed(register)
+    if (!isRequest(request)) throw new Error("Expected a request")
+    const response = createResponse(request, 200, "OK\r\nX-Injected: yes")
+    expect(() => serializeMessage(response)).toThrow(TypeError)
+  })
+
+  it("catches values that change between validation and formatting", () => {
+    const request = parsed(register)
+    let reads = 0
+    const shifty = Object.defineProperty({ ...request }, "callId", {
+      get: () => (reads++ === 0 ? "abc" : "abc\r\nX-Injected: 1"),
+    })
+    expect(() => serializeMessage(shifty)).toThrow(
+      new TypeError('Line break in "Call-ID: abc\\r\\nX-Injected: 1"'),
+    )
+  })
+
+  it("round-trips escaped control characters in display names", () => {
+    const message = parsed(register.replace("To: Bob", 'To: "BEL:\\\x07 NUL:\\\x00"'))
+    const again = parsed(serializeMessage(message))
+    expect(again.to.displayName).toBe("BEL:\x07 NUL:\x00")
   })
 })

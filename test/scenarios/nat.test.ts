@@ -30,8 +30,8 @@ function home(type: NatType, setup: Partial<NatSetup> = {}) {
 }
 
 function requestSource(events: readonly CoreEvent[]): Address {
-  const request = events.find((event) => event.type === "request")
-  if (request?.type !== "request") throw new Error("No request received")
+  const request = events.find((event) => event.type === "answered")
+  if (request?.type !== "answered") throw new Error("No request received")
   return request.from
 }
 
@@ -45,7 +45,7 @@ describe("behind a home NAT", () => {
     expect(outcomes(phone.events)).toEqual(["response"])
     expect(requestSource(box.events)).toEqual(mapped)
     const request = box.events[0]
-    expect(request?.type === "request" && request.request.via[0]?.params).toEqual(
+    expect(request?.type === "answered" && request.request.via[0]?.params).toEqual(
       new Map([
         ["branch", expect.any(String)],
         ["rport", "49152"],

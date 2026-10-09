@@ -1,10 +1,10 @@
-import { createResponse } from "../message/response"
 import type { SipRequest, SipResponse } from "../message/types"
 import { type Address, isReliable } from "../transport/address"
 import { createAlarms } from "./alarms"
 import { acknowledges, serverKey } from "./keys"
 import { notify, send } from "./outputs"
 import { defaultTimers, type TimerSettings, transactionTimeout } from "./timers"
+import { createTrying } from "./trying"
 import type { ServerTransaction, TransactionOutput } from "./types"
 
 export type ServerInviteState = "proceeding" | "completed" | "confirmed" | "accepted" | "terminated"
@@ -18,24 +18,31 @@ export function createServerInvite(
   const alarms = createAlarms<"trying" | "G" | "H" | "I" | "L">()
   let to = replyTo
   let state: ServerInviteState = "proceeding"
-  let latest = createResponse(invite, 100, "Trying")
+  let latest: SipResponse | undefined
+  let started = 0
   let interval = timers.t1
 
   function start(now: number): TransactionOutput[] {
+    started = now
     alarms.set("trying", now + timers.trying)
     return []
   }
 
+  function current(now: number): SipResponse {
+    return latest ?? createTrying(invite, now - started)
+  }
+
   function receive(request: SipRequest, from: Address, now: number): TransactionOutput[] {
     if (request.method === "ACK") return acknowledge(request, now)
-    if (state !== "proceeding" && state !== "completed") return []
+    if (state === "confirmed" || state === "terminated") return []
     to = from
+    if (state === "accepted") return []
     alarms.clear("trying")
-    return [send(latest, to)]
+    return [send(current(now), to)]
   }
 
   function acknowledge(ack: SipRequest, now: number): TransactionOutput[] {
-    if (state !== "completed" || !acknowledges(ack, latest)) return []
+    if (state !== "completed" || !acknowledges(ack, current(now))) return []
     alarms.clear("G", "H")
     state = "confirmed"
     if (reliable) state = "terminated"
@@ -65,21 +72,21 @@ export function createServerInvite(
 
   function expire(now: number): TransactionOutput[] {
     const due = alarms.take(now)
-    if (due.includes("H")) return [unacknowledged()]
+    if (due.includes("H")) return [unacknowledged(now)]
     if (due.includes("I") || due.includes("L")) terminate()
     if (due.includes("G")) return [retransmit(now)]
-    return due.includes("trying") ? [send(latest, to)] : []
+    return due.includes("trying") ? [send(current(now), to)] : []
   }
 
   function retransmit(now: number): TransactionOutput {
     interval = Math.min(2 * interval, timers.t2)
     alarms.set("G", now + interval)
-    return send(latest, to)
+    return send(current(now), to)
   }
 
-  function unacknowledged(): TransactionOutput {
+  function unacknowledged(now: number): TransactionOutput {
     terminate()
-    return notify({ type: "unacknowledged", request: invite, response: latest })
+    return notify({ type: "unacknowledged", request: invite, response: current(now) })
   }
 
   function terminate(): void {

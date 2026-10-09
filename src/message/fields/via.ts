@@ -1,5 +1,7 @@
-import { fail, splitOutside } from "../syntax"
-import { formatParams, type Params, parseParams } from "./params"
+import { atMost, MAX_VIAS } from "../limits"
+import { fail, isToken, show, splitOutside, TOKEN_CHARS } from "../syntax"
+import { bareHost, HOST_PATTERN, isHost, isPort, sameHost } from "./host"
+import { formatParams, isParams, type Params, parseParams } from "./params"
 
 export interface Via {
   readonly transport: string
@@ -8,22 +10,32 @@ export interface Via {
   readonly params: Params
 }
 
-const VIA =
-  /^SIP\s*\/\s*2\.0\s*\/\s*([A-Za-z0-9.!%*_+`'~-]+)\s+(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?:\s*:\s*(\d+))?\s*(;.*)?$/i
+const VIA = new RegExp(
+  `^SIP[ \\t]*/[ \\t]*2\\.0[ \\t]*/[ \\t]*(${TOKEN_CHARS}+)[ \\t]+(${HOST_PATTERN})(?:[ \\t]*:[ \\t]*(\\d+))?[ \\t]*(;.*)?$`,
+  "i",
+)
 
 export function parseVias(values: readonly string[]): Via[] {
-  return values.flatMap((value) => splitOutside(value, ",")).map(parseVia)
+  const entries = values.flatMap((value) => splitOutside(value, ","))
+  return atMost(entries, MAX_VIAS, "Via entries").map(parseVia)
 }
 
 export function parseVia(input: string): Via {
   const match = VIA.exec(input.trim())
-  if (!match) fail(`Invalid Via "${input.trim()}"`)
+  if (!match) fail(`Invalid Via ${show(input.trim())}`)
   const [, transport = "", host = "", port, params = ""] = match
   const via = { transport: transport.toUpperCase(), host, params: parseParams(params) }
   if (port === undefined) return via
   const number = Number(port)
-  if (number > 65535) fail(`Invalid Via port ${port}`)
+  if (!isPort(number)) fail(`Invalid Via port ${show(port)}`)
   return { ...via, port: number }
+}
+
+export function isVia(via: Via): boolean {
+  const { transport, host, port, params } = via
+  return (
+    isToken(transport) && isHost(host) && (port === undefined || isPort(port)) && isParams(params)
+  )
 }
 
 export function withReceived(via: Via, host: string, port: number): Via {
@@ -32,18 +44,6 @@ export function withReceived(via: Via, host: string, port: number): Via {
   if (rport || !sameHost(via.host, host)) params.set("received", bareHost(host))
   if (rport) params.set("rport", String(port))
   return { ...via, params }
-}
-
-export function formatHost(host: string): string {
-  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
-}
-
-export function bareHost(host: string): string {
-  return host.startsWith("[") ? host.slice(1, -1) : host
-}
-
-export function sameHost(a: string, b: string): boolean {
-  return bareHost(a).toLowerCase() === bareHost(b).toLowerCase()
 }
 
 export function formatVia(via: Via): string {

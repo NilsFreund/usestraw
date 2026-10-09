@@ -11,8 +11,31 @@ describe("timers", () => {
     expect(transactionTimeout({ ...defaultTimers, t1: 100 })).toBe(6400)
   })
 
+  it("freezes the defaults", () => {
+    expect(Object.isFrozen(defaultTimers)).toBe(true)
+  })
+
   it("accepts the defaults", () => {
     expect(() => validateTimers(defaultTimers)).not.toThrow()
+  })
+
+  it.each([{ t2: 500 }, { t4: 0 }, { trying: 0 }, { t1: 100, d: 6400 }])(
+    "accepts the boundary %o",
+    (change) => {
+      expect(() => validateTimers({ ...defaultTimers, ...change })).not.toThrow()
+    },
+  )
+
+  it.each([
+    { t1: Number.POSITIVE_INFINITY },
+    { t2: Number.POSITIVE_INFINITY },
+    { t4: Number.POSITIVE_INFINITY },
+    { d: Number.POSITIVE_INFINITY },
+    { trying: Number.NaN },
+  ])("rejects the non-finite %o", (change) => {
+    expect(() => validateTimers({ ...defaultTimers, ...change })).toThrow(
+      new RangeError("Timer settings must be finite numbers"),
+    )
   })
 
   it.each([

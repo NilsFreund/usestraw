@@ -1,4 +1,5 @@
-import { fail, isToken } from "../syntax"
+import { isIntegerIn } from "../../support/integer"
+import { fail, isToken, show } from "../syntax"
 
 export interface CSeq {
   readonly seq: number
@@ -6,11 +7,14 @@ export interface CSeq {
 }
 
 export function parseCSeq(value: string): CSeq {
-  const match = /^(\d+)\s+(\S+)$/.exec(value)
-  const seq = Number(match?.[1])
-  const method = match?.[2] ?? ""
-  if (!(seq <= 0xffffffff) || !isToken(method)) fail(`Invalid CSeq "${value}"`)
-  return { seq, method }
+  const match = /^(\d+)[ \t]+(\S+)$/.exec(value)
+  const cseq = { seq: Number(match?.[1]), method: match?.[2] ?? "" }
+  if (!isCSeq(cseq)) fail(`Invalid CSeq ${show(value)}`)
+  return cseq
+}
+
+export function isCSeq(cseq: CSeq): boolean {
+  return isIntegerIn(cseq.seq, 0, 0xffffffff) && isToken(cseq.method)
 }
 
 export function formatCSeq(cseq: CSeq): string {

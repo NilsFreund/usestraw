@@ -32,11 +32,14 @@ describe("createPortAllocator", () => {
     expect(() => allocate(5060, () => true)).toThrow("NAT ran out of ports")
   })
 
-  it("picks random ports in the unprivileged range and skips taken ones", () => {
+  it("picks random ports across the whole unprivileged range", () => {
+    expect(createPortAllocator("random", () => 0)(5060, free)).toBe(1024)
+    expect(createPortAllocator("random", () => 0.999_999_99)(5060, free)).toBe(65535)
+  })
+
+  it("skips random ports that are taken", () => {
     const first = createPortAllocator("random", createRandom(7))(5060, free)
     const retried = createPortAllocator("random", createRandom(7))(5060, (port) => port === first)
-    expect(first).toBeGreaterThanOrEqual(1024)
-    expect(first).toBeLessThanOrEqual(65535)
     expect(retried).not.toBe(first)
   })
 })

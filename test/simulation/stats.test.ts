@@ -4,6 +4,7 @@ import { createNetwork } from "../../src/simulation/network/network"
 import type { Fate, PacketRecord } from "../../src/simulation/network/types"
 import { traceStats } from "../../src/simulation/stats"
 import { alice, bob } from "../helpers"
+import { settle } from "./support"
 
 function packet(fates: Fate[], copies = 1): PacketRecord {
   return { id: 1, sentAt: 0, from: "a", to: "b", size: 1, summary: "", copies, fates }
@@ -34,6 +35,11 @@ describe("traceStats", () => {
     })
   })
 
+  it("counts every extra delivered copy as a duplicate", () => {
+    const tripled = packet([delivered(), delivered(), delivered()], 3)
+    expect(traceStats([tripled])).toMatchObject({ delivered: 1, duplicates: 2 })
+  })
+
   it("returns zeros for an empty trace", () => {
     expect(traceStats([])).toMatchObject({ sent: 0, delivered: 0, undelivered: 0, inFlight: 0 })
   })
@@ -47,13 +53,7 @@ describe("traceStats", () => {
     net.attach("bob", bob, { access: { loss: loss.random(0.2) } })
     for (let index = 0; index < 2000; index++) net.send("alice", bob, new Uint8Array(10), index)
     for (const checkpoint of [500, 1500, Number.POSITIVE_INFINITY]) {
-      for (
-        let next = net.nextEvent();
-        next !== undefined && next <= checkpoint;
-        next = net.nextEvent()
-      ) {
-        net.step(next)
-      }
+      settle(net, checkpoint)
       const stats = traceStats(net.trace)
       expect(stats.delivered + stats.undelivered + stats.inFlight).toBe(stats.sent)
     }

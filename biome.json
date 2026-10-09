@@ -11,7 +11,12 @@
   },
   "linter": {
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error"
+      }
     }
   },
   "javascript": {
@@ -33,6 +38,27 @@
         "rules": {
           "correctness": {
             "noNodejsModules": "error"
+          },
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Buffer": "Use Uint8Array so the core runs everywhere.",
+                  "process": "The core is sans-I/O and must not touch the process.",
+                  "setTimeout": "Report deadlines through nextDeadline() instead.",
+                  "setInterval": "Report deadlines through nextDeadline() instead.",
+                  "setImmediate": "Report deadlines through nextDeadline() instead.",
+                  "queueMicrotask": "The core must stay synchronous.",
+                  "Date": "Take the time from the now argument.",
+                  "performance": "Take the time from the now argument.",
+                  "crypto": "Take randomness from the injected Random."
+                }
+              }
+            }
+          },
+          "suspicious": {
+            "noConsole": "error"
           }
         }
       }

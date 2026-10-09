@@ -1,19 +1,23 @@
+import { isCallId } from "./fields/call-id"
 import { parseContact } from "./fields/contact"
 import { parseCSeq } from "./fields/cseq"
+import { parseMaxForwards } from "./fields/max-forwards"
 import { parseNameAddr } from "./fields/name-addr"
 import { isRequestUri } from "./fields/uri"
 import { parseVias } from "./fields/via"
 import { sliceBody, splitHead } from "./framing"
 import { canonicalName, isTypedHeader } from "./headers"
-import { fail, isToken, ParseError } from "./syntax"
+import { atMost, MAX_HEADER_LINES, MAX_MESSAGE_SIZE } from "./limits"
+import { isStatusCode } from "./status"
+import { fail, hasControl, hasRawControl, isToken, ParseError, show, TOKEN_CHARS } from "./syntax"
 import type { Header, MessageFields, SipMessage } from "./types"
 
 export type ParseResult =
   | { readonly ok: true; readonly message: SipMessage }
   | { readonly ok: false; readonly error: string }
 
-const HEADER = /^([A-Za-z0-9.!%*_+`'~-]+)[ \t]*:(.*)$/
-const STATUS_LINE = /^(SIP\/\d+\.\d+) (\d+)(?: (.*))?$/i
+const HEADER = new RegExp(`^(${TOKEN_CHARS}+)[ \\t]*:(.*)$`, "s")
+const STATUS_LINE = /^(SIP\/\d+\.\d+) (\d+)(?: (.*))?$/is
 const DATE =
   /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/
 
@@ -29,12 +33,13 @@ export function parseMessage(data: Uint8Array | string): ParseResult {
 }
 
 function parse(bytes: Uint8Array): SipMessage {
+  if (bytes.length > MAX_MESSAGE_SIZE) fail(`Message exceeds ${MAX_MESSAGE_SIZE} bytes`)
   const [head, bodyStart] = splitHead(bytes)
   const [startLine = "", ...lines] = head.split(/\r?\n/)
   const firstLine = /^SIP\//i.test(startLine)
     ? parseStatusLine(startLine)
     : parseRequestLine(startLine)
-  const headers = parseHeaders(lines)
+  const headers = parseHeaders(atMost(lines, MAX_HEADER_LINES, "header lines"))
   const body = sliceBody(bytes, bodyStart, single(headers, "Content-Length"))
   const message = { ...firstLine, ...parseFields(headers), body }
   if ("method" in message && message.cseq.method !== message.method) {
@@ -45,25 +50,27 @@ function parse(bytes: Uint8Array): SipMessage {
 
 function parseStatusLine(line: string): { status: number; reason: string } {
   const match = STATUS_LINE.exec(line)
-  if (!match) fail(`Invalid status line "${line}"`)
+  if (!match) fail(`Invalid status line ${show(line)}`)
   const [, version = "", code = "", reason = ""] = match
   checkVersion(version)
-  if (!/^[1-6]\d\d$/.test(code)) fail(`Invalid status code ${code}`)
+  if (!/^\d{3}$/.test(code) || !isStatusCode(Number(code)))
+    fail(`Invalid status code ${show(code)}`)
+  if (hasControl(reason)) fail("Invalid character in reason phrase")
   return { status: Number(code), reason }
 }
 
 function parseRequestLine(line: string): { method: string; uri: string } {
   const parts = line.split(" ")
-  if (parts.length !== 3) fail(`Invalid request line "${line}"`)
+  if (parts.length !== 3) fail(`Invalid request line ${show(line)}`)
   const [method = "", uri = "", version = ""] = parts
-  if (!isToken(method)) fail(`Invalid method "${method}"`)
-  if (!isRequestUri(uri)) fail(`Invalid Request-URI "${uri}"`)
+  if (!isToken(method)) fail(`Invalid method ${show(method)}`)
+  if (!isRequestUri(uri)) fail(`Invalid Request-URI ${show(uri)}`)
   checkVersion(version)
   return { method, uri }
 }
 
 function checkVersion(version: string): void {
-  if (version.toUpperCase() !== "SIP/2.0") fail(`Unsupported SIP version ${version}`)
+  if (version.toUpperCase() !== "SIP/2.0") fail(`Unsupported SIP version ${show(version)}`)
 }
 
 function parseHeaders(lines: string[]): Header[] {
@@ -76,9 +83,12 @@ function parseHeaders(lines: string[]): Header[] {
       continue
     }
     const match = HEADER.exec(line)
-    if (!match) fail(`Invalid header line "${line}"`)
+    if (!match) fail(`Invalid header line ${show(line)}`)
     const [, name = "", value = ""] = match
     headers.push({ name: canonicalName(name), value })
+  }
+  for (const { name, value } of headers) {
+    if (hasRawControl(value)) fail(`Invalid character in ${name} header`)
   }
   return headers.map(({ name, value }) => ({ name, value: value.trim() }))
 }
@@ -89,12 +99,12 @@ function parseFields(headers: Header[]): Omit<MessageFields, "body"> {
   const from = parseNameAddr(required(headers, "From"))
   const to = parseNameAddr(required(headers, "To"))
   const callId = required(headers, "Call-ID")
-  if (!/^\S+$/.test(callId)) fail(`Invalid Call-ID "${callId}"`)
+  if (!isCallId(callId)) fail(`Invalid Call-ID ${show(callId)}`)
   const cseq = parseCSeq(required(headers, "CSeq"))
   const maxForwards = single(headers, "Max-Forwards")
   const contact = parseContact(values(headers, "Contact"))
   for (const date of values(headers, "Date")) {
-    if (!DATE.test(date)) fail(`Invalid Date "${date}"`)
+    if (!DATE.test(date)) fail(`Invalid Date ${show(date)}`)
   }
   return {
     via,
@@ -106,12 +116,6 @@ function parseFields(headers: Header[]): Omit<MessageFields, "body"> {
     headers: headers.filter((header) => !isTypedHeader(header.name)),
     ...(maxForwards === undefined ? {} : { maxForwards: parseMaxForwards(maxForwards) }),
   }
-}
-
-function parseMaxForwards(value: string): number {
-  const hops = Number(value)
-  if (!/^\d+$/.test(value) || hops > 255) fail(`Invalid Max-Forwards "${value}"`)
-  return hops
 }
 
 function values(headers: Header[], name: string): string[] {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../src"
+import type { Address, Random } from "../../src"
 import { latency, loss } from "../../src/simulation/network/conditions"
+import { outage } from "../../src/simulation/scenarios"
 import { createSimulation, type SimulationOptions } from "../../src/simulation/simulation"
 import { formatTrace } from "../../src/simulation/trace"
 import { alice, bob, bytes, eventTypes, options, outcomes, userAgent } from "../helpers"
@@ -27,7 +28,7 @@ describe("createSimulation", () => {
       seed: 1,
       internet: { latency: latency.uniform(10, 50) },
     })
-    expect(eventTypes(callee.events)).toEqual(["request"])
+    expect(callee.events).toMatchObject([{ type: "answered", status: 200 }])
     expect(caller.events).toMatchObject([{ type: "response", response: { status: 200 } }])
     expect(
       simulation.trace.map((packet) => `${packet.from}→${packet.to} ${packet.summary}`),
@@ -69,7 +70,8 @@ describe("createSimulation", () => {
       const { simulation, caller, callee } = ping({ seed, internet: { ...lossy, duplicate: 0.1 } })
       const context = `seed ${seed}\n${formatTrace(simulation.trace)}`
       expect(outcomes(caller.events), context).toEqual(["response"])
-      expect(eventTypes(callee.events), context).toEqual(["request"])
+      expect(callee.events.length, context).toBeGreaterThan(0)
+      expect(new Set(eventTypes(callee.events)), context).toEqual(new Set(["answered"]))
     }
   })
 
@@ -121,9 +123,9 @@ describe("createSimulation", () => {
     })
 
     it("fails loudly when the simulation does not settle", () => {
-      const { simulation, caller } = setup({ seed: 1, maxSteps: 3 })
+      const { simulation, caller } = setup({ seed: 1, maxSteps: 2 })
       simulation.command(caller, options(bob))
-      expect(() => simulation.run()).toThrow("Simulation did not settle after 3 steps")
+      expect(() => simulation.run()).toThrow("Simulation did not settle after 2 steps")
     })
   })
 
@@ -146,6 +148,30 @@ describe("createSimulation", () => {
       expect(log).toEqual(["nested"])
     })
 
+    it("applies outages starting or ending at a moment before its packets", () => {
+      const { simulation } = setup({ seed: 1, internet: { latency: latency.fixed(20) } })
+      outage(simulation, "bob", 20, 100)
+      outage(simulation, "alice", 5, 15)
+      simulation.network.send("alice", bob, bytes("x"), 0)
+      simulation.network.send("bob", alice, bytes("y"), 0)
+      simulation.run()
+      expect(simulation.trace.map((packet) => packet.fates)).toEqual([
+        [{ type: "dropped", at: 20, reason: "outage", hop: "downlink" }],
+        [{ type: "delivered", at: 20, host: "alice", corrupted: false }],
+      ])
+    })
+
+    it("delivers a response due at Timer F before the timer fires", () => {
+      const { simulation, caller } = setup({ seed: 1, internet: { latency: latency.fixed(250) } })
+      outage(simulation, "bob", 0, 31_600)
+      simulation.command(caller, options(bob))
+      simulation.run()
+      expect(simulation.trace.at(-1)?.fates).toEqual([
+        { type: "delivered", at: 32_000, host: "alice", corrupted: false },
+      ])
+      expect(eventTypes(caller.events)).toEqual(["response"])
+    })
+
     it("rejects actions in the past", () => {
       const { simulation } = setup({ seed: 1 })
       simulation.run(1000)
@@ -164,6 +190,23 @@ describe("createSimulation", () => {
       expect(() => simulation.addNode("eve", alice, userAgent("eve", alice))).toThrow(
         "already taken by alice",
       )
+    })
+
+    it("gives every node its own reproducible random stream", () => {
+      const firstDraws = () => {
+        const simulation = createSimulation({ seed: 1 })
+        const draws: number[] = []
+        const recorded = (address: Address) => (random: Random) => {
+          draws.push(random())
+          return userAgent("x", address)(random)
+        }
+        simulation.addNode("alice", alice, recorded(alice))
+        simulation.addNode("bob", bob, recorded(bob))
+        return draws
+      }
+      const [first, second] = firstDraws()
+      expect(first).not.toBe(second)
+      expect(firstDraws()).toEqual([first, second])
     })
 
     it("rejects commands for nodes of another simulation", () => {
