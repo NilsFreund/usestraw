@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sliceBody, splitHead } from "../../src/message/framing"
+import { findBlankLine, sliceBody, splitHead } from "../../src/message/framing"
 import { ParseError } from "../../src/message/syntax"
 
 const bytes = (text: string) => new TextEncoder().encode(text)
@@ -44,5 +44,27 @@ describe("sliceBody", () => {
 
   it.each(["-1", "abc", "6"])("rejects Content-Length %s", (length) => {
     expect(() => sliceBody(data, 4, length)).toThrow(ParseError)
+  })
+})
+
+describe("findBlankLine", () => {
+  const find = (text: string, start?: number) =>
+    findBlankLine(new TextEncoder().encode(text), start)
+
+  it.each([
+    ["A\r\n\r\nB", [1, 5]],
+    ["A\n\nB", [1, 3]],
+    ["A\n\r\nB", [1, 4]],
+    ["A\r\n\nB", [1, 4]],
+  ])("finds the blank line in %j", (text, expected) => {
+    expect(find(text)).toStrictEqual(expected)
+  })
+
+  it("starts searching at the given index", () => {
+    expect(find("A\n\nB\n\nC", 3)).toStrictEqual([4, 6])
+  })
+
+  it.each(["A\r\n", "A\r\n\r", "A\n", "A\n\r", "A"])("needs more bytes for %j", (text) => {
+    expect(find(text)).toBeUndefined()
   })
 })

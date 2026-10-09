@@ -7,14 +7,20 @@ const decoder = new TextDecoder("utf-8", { fatal: true })
 export function splitHead(bytes: Uint8Array): [head: string, bodyStart: number] {
   let start = 0
   while (bytes[start] === CR || bytes[start] === LF) start++
+  const [end, bodyStart] = findBlankLine(bytes, start) ?? fail("Missing empty line after headers")
+  return [decode(bytes.subarray(start, end)), bodyStart]
+}
+
+export function findBlankLine(
+  bytes: Uint8Array,
+  start = 0,
+): [headEnd: number, bodyStart: number] | undefined {
   for (let i = start; i < bytes.length; i++) {
     if (bytes[i] !== LF) continue
     const next = bytes[i + 1] === CR ? i + 2 : i + 1
-    if (bytes[next] !== LF) continue
-    const end = bytes[i - 1] === CR ? i - 1 : i
-    return [decode(bytes.subarray(start, end)), next + 1]
+    if (bytes[next] === LF) return [bytes[i - 1] === CR ? i - 1 : i, next + 1]
   }
-  return fail("Missing empty line after headers")
+  return undefined
 }
 
 export function sliceBody(

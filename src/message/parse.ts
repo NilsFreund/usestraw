@@ -73,6 +73,11 @@ function checkVersion(version: string): void {
   if (version.toUpperCase() !== "SIP/2.0") fail(`Unsupported SIP version ${show(version)}`)
 }
 
+export function splitHeaderLine(line: string): { name: string; value: string } | undefined {
+  const [, name, value = ""] = HEADER.exec(line) ?? []
+  return name === undefined ? undefined : { name: canonicalName(name), value }
+}
+
 function parseHeaders(lines: string[]): Header[] {
   const headers: { name: string; value: string }[] = []
   for (const line of lines) {
@@ -82,10 +87,7 @@ function parseHeaders(lines: string[]): Header[] {
       previous.value += ` ${line.trim()}`
       continue
     }
-    const match = HEADER.exec(line)
-    if (!match) fail(`Invalid header line ${show(line)}`)
-    const [, name = "", value = ""] = match
-    headers.push({ name: canonicalName(name), value })
+    headers.push(splitHeaderLine(line) ?? fail(`Invalid header line ${show(line)}`))
   }
   for (const { name, value } of headers) {
     if (hasRawControl(value)) fail(`Invalid character in ${name} header`)
