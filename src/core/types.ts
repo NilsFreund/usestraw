@@ -11,7 +11,12 @@ export interface Credentials {
 }
 
 export type Command =
-  | { readonly type: "options"; readonly uri: string; readonly to: Address }
+  | {
+      readonly type: "options"
+      readonly uri: string
+      readonly to: Address
+      readonly callId?: string
+    }
   | { readonly type: "send"; readonly message: SipMessage; readonly to: Address }
   | {
       readonly type: "register"

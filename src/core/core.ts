@@ -10,6 +10,7 @@ import type { TransactionEvent, TransactionOutput } from "../transaction/types"
 import type { Address } from "../transport/address"
 import {
   checkAddress,
+  checkCallId,
   checkCredentials,
   checkExpires,
   checkRegistrar,
@@ -86,7 +87,8 @@ export function createCore(options: CoreOptions): Core {
       case "options": {
         checkAddress(command.to)
         checkRequestUri(command.uri)
-        const request = createOptionsRequest(command.uri, identity)
+        if (command.callId !== undefined) checkCallId(command.callId)
+        const request = createOptionsRequest(command.uri, identity, command.callId)
         return translate(transactions.send(request, command.to, now), now)
       }
       case "register": {

@@ -62,6 +62,19 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/node/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off"
+          },
+          "style": {
+            "noRestrictedGlobals": "off"
+          }
+        }
+      }
     }
   ]
 }

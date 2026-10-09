@@ -4,7 +4,7 @@ export const QUOTED_STRING: string = String.raw`"(?:[^"\\]|\\.)*"`
 const TOKEN = new RegExp(`^${TOKEN_CHARS}+$`)
 const CONTROL = /(?![\t\x80-\x9f])\p{Cc}/u
 const LINE_BREAK = /[\r\n]/
-const INVISIBLE = /[\x7f-\x9f\u2028\u2029]/g
+const INVISIBLE = /[\x7f-\x9f\u2028\u2029\p{Cf}]/gu
 
 export class ParseError extends Error {
   override readonly name = "ParseError"
@@ -16,9 +16,11 @@ export function fail(message: string): never {
 
 export function show(value: unknown): string {
   const json = JSON.stringify(value) ?? String(value)
-  const text = json.replace(
-    INVISIBLE,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  const text = json.replace(INVISIBLE, (char) =>
+    char
+      .split("")
+      .map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)
+      .join(""),
   )
   return text.length > 100 ? `${text.slice(0, 97)}...` : text
 }

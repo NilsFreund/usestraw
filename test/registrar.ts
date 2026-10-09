@@ -150,15 +150,18 @@ export function registrar(options: RegistrarOptions = {}): (random: Random) => R
       handle(input, now) {
         if (input.type !== "receive") return []
         const result = parseMessage(input.data)
-        if (!result.ok || !isRequest(result.message) || result.message.method !== "REGISTER")
-          return []
+        if (!result.ok || !isRequest(result.message)) return []
         const request = result.message
+        const to = replyAddress(topVia(request), input.from)
+        if (request.method === "OPTIONS") {
+          return [{ type: "send", data: serializeMessage(createResponse(request, 200, "OK")), to }]
+        }
+        if (request.method !== "REGISTER") return []
         registers.push(request)
         const branch = topVia(request).params.get("branch") ?? ""
         const response = answered.get(branch) ?? respond(request, now)
         answered.set(branch, response)
-        const data = serializeMessage(response)
-        return [{ type: "send", data, to: replyAddress(topVia(request), input.from) }]
+        return [{ type: "send", data: serializeMessage(response), to }]
       },
       nextDeadline: () => undefined,
     }

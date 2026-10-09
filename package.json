@@ -54,6 +54,7 @@
   },
   "exports": {
     ".": "./dist/index.js",
+    "./node": "./dist/node/index.js",
     "./package.json": "./package.json"
   }
 }

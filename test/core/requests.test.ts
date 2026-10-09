@@ -40,6 +40,10 @@ describe("createOptionsRequest", () => {
     expect(first.callId).not.toBe(second.callId)
     expect(first.via[0]?.params.get("branch")).not.toBe(second.via[0]?.params.get("branch"))
   })
+
+  it("uses a given Call-ID", () => {
+    expect(createOptionsRequest("sip:bob@example.com", identity, "ping-7").callId).toBe("ping-7")
+  })
 })
 
 describe("createRequest", () => {

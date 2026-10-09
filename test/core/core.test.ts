@@ -44,8 +44,11 @@ function statuses(outputs: Output[]): number[] {
   })
 }
 
-const options = (uri = "sip:bob@example.com") =>
-  ({ type: "command", command: { type: "options", uri, to: bob } }) as const
+const options = (uri = "sip:bob@example.com", callId?: string) =>
+  ({
+    type: "command",
+    command: { type: "options", uri, to: bob, ...(callId === undefined ? {} : { callId }) },
+  }) as const
 
 const receive = (data: Uint8Array, from = bob) => ({ type: "receive", data, from }) as const
 
@@ -107,6 +110,11 @@ describe("createCore", () => {
       expect(request.from.params.get("tag")).toMatch(/^[a-z0-9]{10}$/)
       expect(request.callId).toMatch(/^[a-z0-9]{20}$/)
       expect(ua.nextDeadline()).toBe(1500)
+    })
+
+    it("sends OPTIONS with the Call-ID it was given", () => {
+      const request = sentRequest(core().handle(options("sip:bob@example.com", "ping-7"), 0)[0])
+      expect(request.callId).toBe("ping-7")
     })
 
     it("retransmits the same request until it times out at Timer F", () => {
@@ -654,6 +662,30 @@ describe("createCore", () => {
     it("refuses OPTIONS targets with URI headers", () => {
       expect(() => core().handle(options("sip:b@x?Route=evil"), 0)).toThrow(TypeError)
     })
+
+    it.each([
+      "",
+      "a b",
+      "ping\r\nX-Injected: yes",
+      "caf\u00e9",
+      "a\u202eb",
+      "a@b@c",
+      "@b",
+      "a@",
+      "x".repeat(257),
+    ])("refuses the Call-ID %j before starting a transaction", (callId) => {
+      const ua = core()
+      expect(() => ua.handle(options("sip:bob@example.com", callId), 0)).toThrow("Invalid Call-ID")
+      expect(ua.nextDeadline()).toBeUndefined()
+    })
+
+    it.each(["a@b", "x".repeat(256), "w-.!%*_+`'~()<>:\\\"/[]?{}@host.example"])(
+      "accepts the Call-ID %j",
+      (callId) => {
+        const request = sentRequest(core().handle(options("sip:bob@example.com", callId), 0)[0])
+        expect(request.callId).toBe(callId)
+      },
+    )
   })
 
   describe("IPv6", () => {

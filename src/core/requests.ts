@@ -44,10 +44,11 @@ export function createRequest(
   }
 }
 
-export function createOptionsRequest(uri: string, identity: Identity): SipRequest {
+export function createOptionsRequest(uri: string, identity: Identity, callId?: string): SipRequest {
   const { aor, random } = identity
   const from = { uri: aor, params: new Map([["tag", createTag(random)]]) }
-  const fields = { from, to: { uri, params: new Map() }, callId: createCallId(random), seq: 1 }
+  const to = { uri, params: new Map() }
+  const fields = { from, to, callId: callId ?? createCallId(random), seq: 1 }
   return createRequest("OPTIONS", uri, fields, identity)
 }
 

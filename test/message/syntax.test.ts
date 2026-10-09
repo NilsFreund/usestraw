@@ -139,6 +139,10 @@ describe("show", () => {
     )
   })
 
+  it("escapes invisible format characters such as bidi overrides", () => {
+    expect(show("a‮b​c﻿d\u{e0001}e")).toBe('"a\\u202eb\\u200bc\\ufeffd\\udb40\\udc01e"')
+  })
+
   it("cuts long values", () => {
     expect(show("x".repeat(500))).toBe(`"${"x".repeat(96)}...`)
     expect(show("x".repeat(98))).toHaveLength(100)

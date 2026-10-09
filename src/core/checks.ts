@@ -19,6 +19,16 @@ export function checkRequestUri(uri: string): void {
   if (!isRequestUri(uri)) throw new TypeError(`Invalid Request-URI ${show(uri)}`)
 }
 
+// RFC 3261 §25.1: callid = word [ "@" word ]
+const WORD = String.raw`[\w\-.!%*+\`'~()<>:\\"/[\]?{}]+`
+const CALL_ID = new RegExp(`^${WORD}(?:@${WORD})?$`)
+
+export function checkCallId(callId: string): void {
+  if (!isText(callId) || callId.length > 256 || !CALL_ID.test(callId)) {
+    throw new TypeError(`Invalid Call-ID ${show(callId)}`)
+  }
+}
+
 export function checkRegistrar(registrar: string | undefined): asserts registrar is string {
   const parts = registrar === undefined ? undefined : splitSipUri(registrar)
   if (registrar === undefined || !parts || parts.user !== undefined || !isRequestUri(registrar)) {
