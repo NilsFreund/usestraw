@@ -1,4 +1,4 @@
-import type { Address } from "../../core/types"
+import type { Address } from "../../transport/address"
 
 export function addressKey(address: Address): string {
   return `${address.transport}:${address.host}:${address.port}`

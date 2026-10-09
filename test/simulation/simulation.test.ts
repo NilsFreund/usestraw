@@ -32,17 +32,28 @@ describe("createSimulation", () => {
     expect(
       simulation.trace.map((packet) => `${packet.from}→${packet.to} ${packet.summary}`),
     ).toEqual(["alice→bob OPTIONS sip:bob@example.com SIP/2.0", "bob→alice SIP/2.0 200 OK"])
-    expect(simulation.now).toBeGreaterThanOrEqual(20)
-    expect(simulation.now).toBeLessThanOrEqual(100)
+    expect(simulation.trace[1]?.fates[0]?.at).toBeLessThanOrEqual(100)
   })
 
-  it("times out exactly at Timer F when the internet drops everything", () => {
+  it("retransmits into a dead network and times out exactly at Timer F", () => {
     const { simulation, caller, callee } = ping({ seed: 1, internet: { loss: loss.random(1) } })
     expect(callee.events).toEqual([])
     expect(eventTypes(caller.events)).toEqual(["timeout"])
     expect(simulation.now).toBe(32_000)
     expect(formatTrace(simulation.trace)).toBe(
-      "     0ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+      [
+        "     0ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        "   500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        "  1500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        "  3500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        "  7500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        " 11500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        " 15500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        " 19500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        " 23500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        " 27500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+        " 31500ms  alice → bob  OPTIONS sip:bob@example.com SIP/2.0  (lost)",
+      ].join("\n"),
     )
   })
 
@@ -53,17 +64,24 @@ describe("createSimulation", () => {
     expect(second.caller.events).toEqual(first.caller.events)
   })
 
-  it("always ends a ping with exactly one outcome across 500 seeds", () => {
-    const seen = new Set<string>()
+  it("carries every ping through 30 % loss and duplicates across 500 seeds", () => {
     for (let seed = 1; seed <= 500; seed++) {
-      const { simulation, caller, callee } = ping({ seed, internet: lossy })
-      const outcome = outcomes(caller.events).join(",")
+      const { simulation, caller, callee } = ping({ seed, internet: { ...lossy, duplicate: 0.1 } })
       const context = `seed ${seed}\n${formatTrace(simulation.trace)}`
-      expect(["response", "timeout"], context).toContain(outcome)
-      if (outcome === "response") expect(eventTypes(callee.events), context).toEqual(["request"])
-      seen.add(outcome)
+      expect(outcomes(caller.events), context).toEqual(["response"])
+      expect(eventTypes(callee.events), context).toEqual(["request"])
     }
-    expect(seen).toEqual(new Set(["response", "timeout"]))
+  })
+
+  it("still answers most pings at 50 % loss and always ends with one outcome", () => {
+    let answered = 0
+    for (let seed = 1; seed <= 200; seed++) {
+      const { caller } = ping({ seed, internet: { ...lossy, loss: loss.random(0.5) } })
+      const outcome = outcomes(caller.events)
+      expect(outcome).toHaveLength(1)
+      if (outcome[0] === "response") answered++
+    }
+    expect(answered / 200).toBeGreaterThan(0.9)
   })
 
   it("exposes the network and its trace", () => {
@@ -96,16 +114,16 @@ describe("createSimulation", () => {
     })
 
     it("settles when the last event happens exactly at maxSteps", () => {
-      const { simulation, caller } = setup({ seed: 1, maxSteps: 2 })
+      const { simulation, caller } = setup({ seed: 1, maxSteps: 4 })
       simulation.command(caller, options(bob))
       simulation.run()
       expect(eventTypes(caller.events)).toEqual(["response"])
     })
 
     it("fails loudly when the simulation does not settle", () => {
-      const { simulation, caller } = setup({ seed: 1, maxSteps: 1 })
+      const { simulation, caller } = setup({ seed: 1, maxSteps: 3 })
       simulation.command(caller, options(bob))
-      expect(() => simulation.run()).toThrow("Simulation did not settle after 1 steps")
+      expect(() => simulation.run()).toThrow("Simulation did not settle after 3 steps")
     })
   })
 

@@ -1,4 +1,4 @@
-import type { Address } from "../../core/types"
+import type { Address } from "../../transport/address"
 import { addressKey } from "./address"
 import type { Hosts } from "./hosts"
 import type { Nats } from "./nats"

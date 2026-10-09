@@ -1,4 +1,5 @@
-import type { Address, Random } from "../../core/types"
+import type { Random } from "../../core/types"
+import type { Address } from "../../transport/address"
 import { addressKey } from "./address"
 import { type Access, accessLink } from "./conditions"
 import { createCounter } from "./counter"

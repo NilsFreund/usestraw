@@ -4,19 +4,21 @@ import { latency } from "../../src/simulation/network/conditions"
 import type { Fate } from "../../src/simulation/network/types"
 import { degrade, flapping, handover, outage, partition } from "../../src/simulation/scenarios"
 import { createSimulation } from "../../src/simulation/simulation"
-import { alice, bob, options, userAgent } from "../helpers"
+import { alice, bob, bytes } from "../helpers"
+
+const probe = bytes("PROBE\r\n\r\n")
 
 function world() {
   const simulation = createSimulation({ seed: 1, internet: { latency: latency.fixed(20) } })
-  const caller = simulation.addNode("alice", alice, userAgent("alice", alice))
-  simulation.addNode("bob", bob, userAgent("bob", bob))
+  simulation.network.attach("alice", alice)
+  simulation.network.attach("bob", bob)
   const pingAt = (time: number) =>
-    simulation.at(time, () => simulation.command(caller, options(bob)))
+    simulation.at(time, () => simulation.network.send("alice", bob, probe, time))
   const firstFates = () =>
     simulation.trace
       .filter((packet) => packet.from === "alice")
       .map((packet) => fateLabel(packet.fates[0]))
-  return { simulation, caller, pingAt, firstFates }
+  return { simulation, pingAt, firstFates, address: () => simulation.network.addressOf("alice") }
 }
 
 function fateLabel(fate: Fate | undefined): string {
@@ -85,17 +87,17 @@ describe("scenario helpers", () => {
   })
 
   it("moves a host to a new address at the handover time", () => {
-    const { simulation, caller } = world()
+    const { simulation, address } = world()
     const lte: Address = { ...alice, host: "100.64.12.34" }
     handover(simulation, "alice", 1000, lte)
     simulation.run(999)
-    expect(caller.address).toEqual(alice)
+    expect(address()).toEqual(alice)
     simulation.run(1000)
-    expect(caller.address).toEqual(lte)
+    expect(address()).toEqual(lte)
   })
 
   it("passes NAT and access options along with a handover", () => {
-    const { simulation, caller } = world()
+    const { simulation, address } = world()
     simulation.network.addNat("carrier", { host: "198.51.100.1" })
     const cgnat: Address = { ...alice, host: "100.64.0.9" }
     handover(simulation, "alice", 10, cgnat, {
@@ -103,7 +105,7 @@ describe("scenario helpers", () => {
       access: { latency: latency.fixed(40) },
     })
     simulation.run()
-    expect(caller.address).toEqual(cgnat)
+    expect(address()).toEqual(cgnat)
   })
 
   it("replaces the access link when degrading", () => {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import type { Address } from "../../../src"
-import { createAgenda } from "../../../src/simulation/network/agenda"
 import { latency } from "../../../src/simulation/network/conditions"
 import {
   createForwarding,
@@ -12,6 +11,7 @@ import { createNats } from "../../../src/simulation/network/nats"
 import { createRoutes } from "../../../src/simulation/network/routes"
 import type { Hop } from "../../../src/simulation/network/types"
 import { createStreams } from "../../../src/simulation/random"
+import { createAgenda } from "../../../src/support/agenda"
 import { alice, bob, bytes } from "../../helpers"
 
 type World = ReturnType<typeof fabric>

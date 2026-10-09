@@ -20,6 +20,10 @@ function sent(outputs: Output[]) {
   return outputs.flatMap((output) => (output.type === "send" ? [output] : []))
 }
 
+function events(outputs: Output[]) {
+  return outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
+}
+
 function message(output: Output | undefined): SipMessage {
   if (output?.type !== "send") throw new Error("Expected a send output")
   return parsed(output.data)
@@ -29,6 +33,13 @@ function sentRequest(output: Output | undefined): SipRequest {
   const request = message(output)
   if (!isRequest(request)) throw new Error("Expected a request")
   return request
+}
+
+function statuses(outputs: Output[]): number[] {
+  return sent(outputs).map((output) => {
+    const response = message(output)
+    return "status" in response ? response.status : 0
+  })
 }
 
 const options = (uri = "sip:bob@example.com") =>
@@ -56,9 +67,17 @@ function responseTo(request: SipRequest, status = 200): Uint8Array {
   return serializeMessage(createResponse(request, status, "Reason", { toTag: "b1" }))
 }
 
+function drain(ua: Core): { at: number; outputs: Output[] }[] {
+  const log: { at: number; outputs: Output[] }[] = []
+  for (let at = ua.nextDeadline(); at !== undefined; at = ua.nextDeadline()) {
+    log.push({ at, outputs: ua.handle({ type: "timeout" }, at) })
+  }
+  return log
+}
+
 describe("createCore", () => {
   describe("outgoing OPTIONS", () => {
-    it("sends a well-formed request and waits until Timer F", () => {
+    it("sends a well-formed request through a client transaction", () => {
       const ua = core()
       const [output] = ua.handle(options(), 1000)
       expect(output).toMatchObject({ type: "send", to: bob })
@@ -76,46 +95,46 @@ describe("createCore", () => {
       expect(request.via[0]?.params.get("rport")).toBeNull()
       expect(request.from.params.get("tag")).toMatch(/^[a-z0-9]{10}$/)
       expect(request.callId).toMatch(/^[a-z0-9]{20}$/)
-      expect(ua.nextDeadline()).toBe(33_000)
+      expect(ua.nextDeadline()).toBe(1500)
     })
 
-    it("reports the matching final response and stops waiting", () => {
+    it("retransmits the same request until it times out at Timer F", () => {
+      const ua = core()
+      const [first] = ua.handle(options(), 0)
+      const log = drain(ua)
+      const retransmissions = log.flatMap(({ at, outputs }) => sent(outputs).map(() => at))
+      expect(retransmissions).toEqual([
+        500, 1500, 3500, 7500, 11500, 15500, 19500, 23500, 27500, 31500,
+      ])
+      expect(sent(log[0]?.outputs ?? [])[0]).toEqual(first)
+      expect(log.at(-1)).toMatchObject({
+        at: 32_000,
+        outputs: [{ type: "event", event: { type: "timeout", request: { method: "OPTIONS" } } }],
+      })
+    })
+
+    it("reports the final response, stops retransmitting and absorbs repeats", () => {
       const ua = core()
       const request = sentRequest(ua.handle(options(), 0)[0])
-      expect(ua.handle(receive(responseTo(request)), 40)).toMatchObject([
-        { type: "event", event: { type: "response", response: { status: 200 }, from: bob } },
+      expect(events(ua.handle(receive(responseTo(request)), 40))).toMatchObject([
+        { type: "response", response: { status: 200 }, from: bob },
       ])
-      expect(ua.nextDeadline()).toBeUndefined()
+      expect(ua.handle(receive(responseTo(request)), 60)).toEqual([])
+      expect(ua.nextDeadline()).toBe(5040)
+      expect(drain(ua).flatMap(({ outputs }) => outputs)).toEqual([])
     })
 
-    it("keeps waiting after a provisional response", () => {
+    it("reports provisional responses and keeps waiting", () => {
       const ua = core()
       const request = sentRequest(ua.handle(options(), 0)[0])
-      expect(ua.handle(receive(responseTo(request, 100)), 40)).toHaveLength(1)
-      expect(ua.nextDeadline()).toBe(32_000)
-    })
-
-    it("tracks several requests with their own deadlines", () => {
-      const ua = core()
-      ua.handle(options(), 0)
-      ua.handle(options(), 1000)
-      expect(ua.nextDeadline()).toBe(32_000)
-      expect(ua.handle({ type: "timeout" }, 32_000)).toHaveLength(1)
-      expect(ua.nextDeadline()).toBe(33_000)
-    })
-
-    it("times out when no response arrives", () => {
-      const ua = core()
-      ua.handle(options(), 0)
-      expect(ua.handle({ type: "timeout" }, 31_999)).toEqual([])
-      expect(ua.handle({ type: "timeout" }, 32_000)).toMatchObject([
-        { type: "event", event: { type: "timeout", request: { method: "OPTIONS" } } },
+      expect(events(ua.handle(receive(responseTo(request, 100)), 40))).toMatchObject([
+        { type: "response", response: { status: 100 } },
       ])
-      expect(ua.nextDeadline()).toBeUndefined()
+      expect(ua.nextDeadline()).toBe(500)
     })
   })
 
-  describe("response matching (RFC 3261 §17.1.3 and §18.1.2)", () => {
+  describe("response filtering (RFC 3261 §18.1.2 and §17.1.3)", () => {
     const cases: [string, (request: SipRequest) => SipMessage][] = [
       ["an unknown branch", (request) => withTopVia(request, { branch: "z9hG4bKunknown" })],
       ["a missing branch", (request) => withTopVia(request, { branch: undefined })],
@@ -126,7 +145,7 @@ describe("createCore", () => {
       ["a foreign transport", (request) => withTopVia(request, { transport: "TCP" })],
     ]
 
-    it.each(cases)("reports a response with %s as stray and keeps waiting", (_, change) => {
+    it.each(cases)("reports a response with %s as stray", (_, change) => {
       const ua = core()
       const request = sentRequest(ua.handle(options(), 0)[0])
       const changed = change(request)
@@ -134,15 +153,15 @@ describe("createCore", () => {
       expect(ua.handle(receive(responseTo(changed)), 10)).toMatchObject([
         { type: "event", event: { type: "stray", response: { status: 200 }, from: bob } },
       ])
-      expect(ua.nextDeadline()).toBe(32_000)
+      expect(ua.nextDeadline()).toBe(500)
     })
 
     it("accepts a sent-by host echoed in different case", () => {
       const ua = core()
       const request = sentRequest(ua.handle(options(), 0)[0])
       const echoed = withTopVia(request, { host: alice.host.toUpperCase() })
-      expect(ua.handle(receive(responseTo(echoed)), 10)).toMatchObject([
-        { type: "event", event: { type: "response" } },
+      expect(events(ua.handle(receive(responseTo(echoed)), 10))).toMatchObject([
+        { type: "response" },
       ])
     })
 
@@ -151,16 +170,14 @@ describe("createCore", () => {
       const request = sentRequest(ua.handle(options(), 0)[0])
       const raw = withTopVia(request, { branch: "z9hG4bKraw" })
       ua.handle({ type: "command", command: { type: "send", message: raw, to: bob } }, 0)
-      expect(ua.handle(receive(responseTo(raw)), 10)).toMatchObject([
-        { type: "event", event: { type: "stray" } },
-      ])
+      expect(events(ua.handle(receive(responseTo(raw)), 10))).toMatchObject([{ type: "stray" }])
     })
   })
 
   describe("incoming requests", () => {
     it("answers OPTIONS with 200 OK to the source address", () => {
       const outputs = core().handle(receive(incoming("OPTIONS")), 0)
-      expect(outputs[0]).toMatchObject({ type: "event", event: { type: "request", from: bob } })
+      expect(events(outputs)).toMatchObject([{ type: "request", from: bob }])
       const [reply] = sent(outputs)
       expect(reply?.to).toEqual(bob)
       const response = message(reply)
@@ -174,7 +191,15 @@ describe("createCore", () => {
       expect(response.to.params.get("tag")).toMatch(/^[a-z0-9]{10}$/)
     })
 
-    it.each(["INVITE", "MESSAGE", "NOTIFY", "BYE"])("rejects %s with 405 and Allow", (method) => {
+    it("absorbs retransmitted requests and resends the same response", () => {
+      const ua = core()
+      const [reply] = sent(ua.handle(receive(incoming("OPTIONS")), 0))
+      const repeat = ua.handle(receive(incoming("OPTIONS")), 500)
+      expect(events(repeat)).toEqual([])
+      expect(sent(repeat)).toEqual([reply])
+    })
+
+    it.each(["MESSAGE", "NOTIFY", "BYE"])("rejects %s with 405 and Allow", (method) => {
       const response = message(sent(core().handle(receive(incoming(method)), 0))[0])
       expect(response).toMatchObject({
         status: 405,
@@ -183,15 +208,31 @@ describe("createCore", () => {
       })
     })
 
-    it("never answers ACK", () => {
+    it("answers INVITE with 405 right away and repeats it until the ACK arrives", () => {
+      const ua = core()
+      expect(statuses(ua.handle(receive(incoming("INVITE")), 0))).toEqual([405])
+      expect(statuses(ua.handle({ type: "timeout" }, 500))).toEqual([405])
+      expect(ua.handle(receive(incoming("ACK")), 600)).toEqual([])
+      expect(drain(ua).flatMap(({ outputs }) => outputs)).toEqual([])
+    })
+
+    it("reports an INVITE rejection that is never acknowledged", () => {
+      const ua = core()
+      ua.handle(receive(incoming("INVITE")), 0)
+      expect(drain(ua).at(-1)).toMatchObject({
+        at: 32_000,
+        outputs: [{ type: "event", event: { type: "unacknowledged", response: { status: 405 } } }],
+      })
+    })
+
+    it("passes an ACK without transaction to the application", () => {
       const outputs = core().handle(receive(incoming("ACK")), 0)
       expect(outputs).toMatchObject([{ type: "event", event: { type: "request" } }])
     })
 
     it("stamps received and rport on the top Via (RFC 3581)", () => {
       const via = "Via: SIP/2.0/UDP 10.0.0.5:5060;branch=z9hG4bK1;rport"
-      const outputs = core().handle(receive(incoming("OPTIONS", via)), 0)
-      const response = message(sent(outputs)[0])
+      const response = message(sent(core().handle(receive(incoming("OPTIONS", via)), 0))[0])
       expect(response.via[0]?.params).toEqual(
         new Map([
           ["branch", "z9hG4bK1"],
@@ -227,6 +268,14 @@ describe("createCore", () => {
       expect(response).toMatchObject({ status: 416, reason: "Unsupported URI Scheme" })
     })
 
+    it("answers CANCEL for a known INVITE with 200 and leaves the INVITE alone", () => {
+      const ua = core()
+      ua.handle(receive(incoming("INVITE")), 0)
+      const cancel = incoming("CANCEL").slice()
+      expect(statuses(ua.handle(receive(cancel), 100))).toEqual([200])
+      expect(statuses(ua.handle({ type: "timeout" }, 500))).toEqual([405])
+    })
+
     it("answers CANCEL without a transaction with 481", () => {
       const response = message(sent(core().handle(receive(incoming("CANCEL")), 0))[0])
       expect(response).toMatchObject({ status: 481 })
@@ -238,8 +287,6 @@ describe("createCore", () => {
       const [reply] = sent(core().handle(receive(incoming("OPTIONS", via), source), 0))
       expect(reply?.to).toEqual({ ...bob, port: 5070 })
     })
-
-    it.todo("absorbs retransmitted requests with the same response (milestone 4)")
   })
 
   describe("input validation", () => {
@@ -267,7 +314,9 @@ describe("createCore", () => {
       const ua = createCore({ address: v6, aor: "sip:alice@example.com", random: createRandom(1) })
       const request = sentRequest(ua.handle(options(), 0)[0])
       expect(request.via[0]?.host).toBe("[2001:db8::10]")
-      expect(ua.handle(receive(responseTo(request)), 10)).toHaveLength(1)
+      expect(events(ua.handle(receive(responseTo(request)), 10))).toMatchObject([
+        { type: "response" },
+      ])
     })
 
     it("does not add received when a bracketed sent-by matches the source", () => {
@@ -276,6 +325,28 @@ describe("createCore", () => {
       const response = message(sent(core().handle(receive(incoming("OPTIONS", via), from), 0))[0])
       expect(response.via[0]?.params.has("received")).toBe(false)
     })
+  })
+
+  it("rejects invalid timer settings", () => {
+    expect(() =>
+      createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        timers: { t1: 0, t2: 0, t4: 0, d: 0, trying: 0 },
+      }),
+    ).toThrow("T1 must be positive, got 0")
+  })
+
+  it("uses custom timer settings", () => {
+    const ua = createCore({
+      address: alice,
+      aor: "sip:alice@example.com",
+      random: createRandom(1),
+      timers: { t1: 100, t2: 400, t4: 1000, d: 6400, trying: 40 },
+    })
+    ua.handle(options(), 0)
+    expect(ua.nextDeadline()).toBe(100)
   })
 
   it("sends messages verbatim on the send command", () => {

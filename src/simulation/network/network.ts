@@ -1,6 +1,6 @@
-import type { Address } from "../../core/types"
+import { createAgenda } from "../../support/agenda"
+import type { Address } from "../../transport/address"
 import { createStreams } from "../random"
-import { createAgenda } from "./agenda"
 import type { Access, LinkConditions } from "./conditions"
 import { createForwarding, type PacketState, type Transit } from "./forwarding"
 import { createHosts, type HostOptions } from "./hosts"

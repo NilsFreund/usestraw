@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createAgenda } from "../../../src/simulation/network/agenda"
+import { createAgenda } from "../../src/support/agenda"
 
 describe("createAgenda", () => {
   it("starts empty", () => {
@@ -20,6 +20,15 @@ describe("createAgenda", () => {
     const taken = [agenda.take(99), agenda.take(99), agenda.take(99), agenda.take(99)]
     expect(taken).toEqual(["first", "a", "b", "c"])
     expect(agenda.size).toBe(0)
+  })
+
+  it("peeks at the next item without taking it", () => {
+    const agenda = createAgenda<string>()
+    expect(agenda.peek()).toBeUndefined()
+    agenda.push(20, "b")
+    agenda.push(10, "a")
+    expect(agenda.peek()).toBe("a")
+    expect(agenda.size).toBe(2)
   })
 
   it("only hands out items that are due", () => {

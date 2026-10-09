@@ -1,4 +1,4 @@
-import type { Address } from "../../core/types"
+import type { Address } from "../../transport/address"
 
 export type DropReason = "outage" | "mtu" | "loss" | "congestion" | "nat" | "unroutable"
 

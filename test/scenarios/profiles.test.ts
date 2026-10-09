@@ -60,8 +60,12 @@ describe("every network profile", () => {
     const roundTrip = (name: ProfileName) =>
       median(
         Array.from({ length: 31 }, (_, index) => {
-          const { simulation, caller } = ping(profiles[name], index + 1)
-          return caller.events.some((event) => event.type === "response") ? simulation.now : 0
+          const { simulation } = ping(profiles[name], index + 1)
+          const answer = simulation.trace.find(
+            (packet) =>
+              packet.from === "bob" && packet.fates.some((fate) => fate.type === "delivered"),
+          )
+          return answer?.fates.find((fate) => fate.type === "delivered")?.at ?? 0
         }).filter((time) => time > 0),
       )
     const ordered: ProfileName[] = ["lan", "fiber", "wifi", "lte", "mobile3g", "satellite"]

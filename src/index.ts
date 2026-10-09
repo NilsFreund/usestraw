@@ -1,13 +1,5 @@
 export { type Core, type CoreOptions, createCore } from "./core/core"
-export type {
-  Address,
-  Command,
-  CoreEvent,
-  Input,
-  Output,
-  Random,
-  Transport,
-} from "./core/types"
+export type { Command, CoreEvent, Input, Output, Random } from "./core/types"
 export type { Contact } from "./message/fields/contact"
 export type { CSeq } from "./message/fields/cseq"
 export type { NameAddr } from "./message/fields/name-addr"
@@ -25,3 +17,6 @@ export {
   type SipRequest,
   type SipResponse,
 } from "./message/types"
+export { defaultTimers, type TimerSettings } from "./transaction/timers"
+export type { TransactionEvent } from "./transaction/types"
+export type { Address, Transport } from "./transport/address"

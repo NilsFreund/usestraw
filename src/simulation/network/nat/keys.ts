@@ -1,4 +1,4 @@
-import type { Address } from "../../../core/types"
+import type { Address } from "../../../transport/address"
 import type { NatBehavior } from "./types"
 
 export function endpointKey(address: Address): string {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { earliest } from "../../src/core/time"
+import { earliest } from "../../src/support/time"
 
 describe("earliest", () => {
   it("returns the smallest time", () => {

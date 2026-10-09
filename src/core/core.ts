@@ -1,19 +1,23 @@
 import { isRequestUri, isUri } from "../message/fields/uri"
-import { formatHost, sameHost, withReceived } from "../message/fields/via"
+import { withReceived } from "../message/fields/via"
 import { parseMessage } from "../message/parse"
 import { createResponse } from "../message/response"
 import { serializeMessage } from "../message/serialize"
-import { isRequest, type SipMessage, type SipRequest, type SipResponse } from "../message/types"
-import { createBranch, createCallId, createTag } from "./ids"
-import { replyAddress } from "./routing"
-import { earliest } from "./time"
-import type { Address, Command, CoreEvent, Input, Output, Random } from "./types"
+import { isRequest, type SipMessage, type SipRequest } from "../message/types"
+import { defaultTimers, type TimerSettings } from "../transaction/timers"
+import { createTransactions } from "../transaction/transactions"
+import type { TransactionEvent, TransactionOutput } from "../transaction/types"
+import type { Address } from "../transport/address"
+import { createTag } from "./ids"
+import { createOptionsRequest } from "./requests"
+import type { Command, CoreEvent, Input, Output, Random } from "./types"
 import { answer } from "./uas"
 
 export interface CoreOptions {
   readonly address: Address
   readonly aor: string
   readonly random: Random
+  readonly timers?: TimerSettings
 }
 
 export interface Core {
@@ -21,115 +25,62 @@ export interface Core {
   nextDeadline(): number | undefined
 }
 
-const T1 = 500
-const TIMER_F = 64 * T1
-
 export function createCore(options: CoreOptions): Core {
   const { address, aor, random } = options
   if (!isUri(aor)) throw new TypeError(`Invalid address of record "${aor}"`)
-  const pending = new Map<string, { request: SipRequest; deadline: number }>()
+  const timers = options.timers ?? defaultTimers
+  const transactions = createTransactions({ local: address, timers })
 
   function handle(input: Input, now: number): Output[] {
     switch (input.type) {
       case "receive":
-        return receive(input.data, input.from)
+        return receive(input.data, input.from, now)
       case "timeout":
-        return expire(now)
+        return translate(transactions.expire(now), now)
       case "command":
         return execute(input.command, now)
     }
   }
 
-  function nextDeadline(): number | undefined {
-    return earliest(Array.from(pending.values(), (entry) => entry.deadline))
-  }
-
-  function receive(data: Uint8Array, from: Address): Output[] {
+  function receive(data: Uint8Array, from: Address, now: number): Output[] {
     const result = parseMessage(data)
     if (!result.ok) return [event({ type: "invalid", error: result.error, from })]
-    if (!isRequest(result.message)) return onResponse(result.message, from)
-    const via = result.message.via.map((entry, index) =>
+    const { message } = result
+    if (!isRequest(message)) return translate(transactions.receive(message, from, now), now)
+    const via = message.via.map((entry, index) =>
       index === 0 ? withReceived(entry, from.host, from.port) : entry,
     )
-    return onRequest({ ...result.message, via }, from)
-  }
-
-  function onRequest(request: SipRequest, from: Address): Output[] {
-    const received = event({ type: "request", request, from })
-    if (request.method === "ACK") return [received]
-    const { status, reason, headers } = answer(request)
-    const response = createResponse(request, status, reason, { toTag: createTag(random), headers })
-    return [received, send(response, replyAddress(request.via[0], from))]
-  }
-
-  function onResponse(response: SipResponse, from: Address): Output[] {
-    const branch = response.via[0]?.params.get("branch") ?? ""
-    const entry = pending.get(branch)
-    if (!entry || !isOwnResponse(response, entry.request)) {
-      return [event({ type: "stray", response, from })]
-    }
-    if (response.status >= 200) pending.delete(branch)
-    return [event({ type: "response", response, from })]
-  }
-
-  function isOwnResponse(response: SipResponse, request: SipRequest): boolean {
-    const [via, ...rest] = response.via
-    return (
-      rest.length === 0 &&
-      via !== undefined &&
-      via.transport === address.transport &&
-      sameHost(via.host, address.host) &&
-      via.port === address.port &&
-      response.cseq.method === request.cseq.method
-    )
-  }
-
-  function expire(now: number): Output[] {
-    const outputs: Output[] = []
-    for (const [branch, { request, deadline }] of pending) {
-      if (deadline > now) continue
-      pending.delete(branch)
-      outputs.push(event({ type: "timeout", request }))
-    }
-    return outputs
+    return translate(transactions.receive({ ...message, via }, from, now), now)
   }
 
   function execute(command: Command, now: number): Output[] {
     if (command.type === "send") return [send(command.message, command.to)]
     if (!isRequestUri(command.uri)) throw new TypeError(`Invalid Request-URI "${command.uri}"`)
-    const branch = createBranch(random)
-    const request = createOptions(command.uri, branch)
-    pending.set(branch, { request, deadline: now + TIMER_F })
-    return [send(request, command.to)]
+    const request = createOptionsRequest(command.uri, { address, aor, random })
+    return translate(transactions.send(request, command.to, now), now)
   }
 
-  function createOptions(uri: string, branch: string): SipRequest {
-    return {
-      method: "OPTIONS",
-      uri,
-      via: [
-        {
-          transport: address.transport,
-          host: formatHost(address.host),
-          port: address.port,
-          params: new Map([
-            ["branch", branch],
-            ["rport", null],
-          ]),
-        },
-      ],
-      maxForwards: 70,
-      from: { uri: aor, params: new Map([["tag", createTag(random)]]) },
-      to: { uri, params: new Map() },
-      callId: createCallId(random),
-      cseq: { seq: 1, method: "OPTIONS" },
-      contact: [],
-      headers: [],
-      body: new Uint8Array(),
-    }
+  function translate(outputs: TransactionOutput[], now: number): Output[] {
+    return outputs.flatMap((output) =>
+      output.type === "send" ? [send(output.message, output.to)] : react(output.event, now),
+    )
   }
 
-  return { handle, nextDeadline }
+  function react(happened: TransactionEvent, now: number): Output[] {
+    if (happened.type !== "request") return [event(happened)]
+    const { request, from, transaction } = happened
+    const received = event({ type: "request", request, from })
+    if (transaction === undefined) return [received]
+    return [received, ...translate(transactions.respond(transaction, reply(request), now), now)]
+  }
+
+  function reply(request: SipRequest) {
+    const situation = { cancelsInvite: transactions.hasInvite(request) }
+    const { status, reason, headers } = answer(request, situation)
+    return createResponse(request, status, reason, { toTag: createTag(random), headers })
+  }
+
+  return { handle, nextDeadline: () => transactions.nextDeadline() }
 }
 
 function send(message: SipMessage, to: Address): Output {

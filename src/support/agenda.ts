@@ -2,6 +2,7 @@ export interface Agenda<T> {
   readonly size: number
   push(at: number, item: T): void
   next(): number | undefined
+  peek(): T | undefined
   take(now: number): T | undefined
 }
 
@@ -62,6 +63,7 @@ export function createAgenda<T>(): Agenda<T> {
     },
     push,
     next: () => heap[0]?.at,
+    peek: () => heap[0]?.item,
     take,
   }
 }

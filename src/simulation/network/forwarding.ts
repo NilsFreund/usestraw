@@ -1,6 +1,6 @@
-import type { Address } from "../../core/types"
+import type { Agenda } from "../../support/agenda"
+import type { Address } from "../../transport/address"
 import { addressKey, sameAddress } from "./address"
-import type { Agenda } from "./agenda"
 import type { Host, Hosts } from "./hosts"
 import type { Nats } from "./nats"
 import type { Routes } from "./routes"

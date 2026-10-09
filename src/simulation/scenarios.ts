@@ -1,4 +1,4 @@
-import type { Address } from "../core/types"
+import type { Address } from "../transport/address"
 import type { Access } from "./network/conditions"
 import type { HostOptions } from "./network/hosts"
 import type { Simulation } from "./simulation"

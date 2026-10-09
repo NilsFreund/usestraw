@@ -1,4 +1,5 @@
-import type { Address, Random } from "../../../core/types"
+import type { Random } from "../../../core/types"
+import type { Address } from "../../../transport/address"
 import { endpointKey, mappingKey, portKey } from "./keys"
 import { createPortAllocator } from "./ports"
 import type { NatOptions } from "./types"

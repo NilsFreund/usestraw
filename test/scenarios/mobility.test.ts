@@ -19,7 +19,7 @@ function commute(simulationOptions: SimulationOptions) {
 const lte: Address = { transport: "UDP", host: "100.64.33.7", port: 5060 }
 
 describe("mobility", () => {
-  it("loses the reply in flight during a Wi-Fi to LTE handover and recovers afterwards", () => {
+  it("keeps a transaction alive across a Wi-Fi to LTE handover", () => {
     const { simulation, caller, ping } = commute({
       seed: 1,
       internet: { latency: latency.fixed(50) },
@@ -28,8 +28,12 @@ describe("mobility", () => {
     handover(simulation, "alice", 60, lte, { access: profiles.lte })
     ping(40_000)
     simulation.run()
-    expect(outcomes(caller.events)).toEqual(["timeout", "response"])
+    expect(outcomes(caller.events)).toEqual(["response", "response"])
     expect(simulation.trace[1]?.fates).toMatchObject([{ reason: "unroutable", hop: "ingress" }])
+    const answered = simulation.trace.filter(
+      (packet) => packet.from === "bob" && packet.fates.some((fate) => fate.type === "delivered"),
+    )
+    expect(answered[0]?.to).toBe("alice")
   })
 
   it("moves behind a carrier NAT and is seen with the carrier address", () => {
@@ -43,32 +47,46 @@ describe("mobility", () => {
     expect(request?.type === "request" && request.from.host).toBe("198.51.100.1")
   })
 
-  it("survives a train ride with flapping coverage, identically on every replay", () => {
-    const ride = () => {
+  it("rides through short coverage gaps thanks to retransmissions", () => {
+    const { simulation, caller, ping } = commute({ seed: 3, internet: profiles.fiber })
+    simulation.at(0, () => simulation.network.setAccess("alice", profiles.lte))
+    flapping(simulation, "alice", { from: 5000, every: 20_000, duration: 6000, count: 6 })
+    for (let at = 0; at < 120_000; at += 5000) ping(at)
+    simulation.run()
+    expect(outcomes(caller.events)).toEqual(Array.from({ length: 24 }, () => "response"))
+  })
+
+  it("loses pings in a tunnel longer than Timer F, identically on every replay", () => {
+    const tunnel = () => {
       const { simulation, caller, ping } = commute({ seed: 3, internet: profiles.fiber })
       simulation.at(0, () => simulation.network.setAccess("alice", profiles.lte))
-      flapping(simulation, "alice", { from: 5000, every: 20_000, duration: 6000, count: 6 })
+      flapping(simulation, "alice", { from: 10_000, every: 60_000, duration: 40_000, count: 2 })
       for (let at = 0; at < 120_000; at += 5000) ping(at)
       simulation.run()
       return outcomes(caller.events)
     }
-    const first = ride()
+    const first = tunnel()
     expect(first).toHaveLength(24)
     expect(first).toContain("response")
     expect(first).toContain("timeout")
-    expect(ride()).toEqual(first)
+    expect(tunnel()).toEqual(first)
   })
 
-  it("heals after a partition between two sites", () => {
+  it("bridges a partition with retransmissions", () => {
     const { simulation, caller, ping } = commute({ seed: 4 })
     partition(simulation, ["alice", "bob"], 5000, 10_000)
     for (const at of [0, 10_000, 50_000]) ping(at)
     simulation.run()
-    expect(outcomes(caller.events)).toEqual(["response", "timeout", "response"])
-    const delivered = simulation.trace
-      .filter((packet) => packet.from === "alice")
-      .map((packet) => packet.fates[0]?.type)
-    expect(delivered).toEqual(["delivered", "dropped", "delivered"])
+    expect(outcomes(caller.events)).toEqual(["response", "response", "response"])
+    const blocked = simulation.trace.filter(
+      (packet) => packet.from === "alice" && packet.fates[0]?.type === "dropped",
+    )
+    expect(blocked.length).toBeGreaterThan(0)
+    expect(
+      blocked.every(
+        (packet) => packet.fates[0]?.type === "dropped" && packet.fates[0].reason === "outage",
+      ),
+    ).toBe(true)
   })
 
   it("gets slower but keeps working when the link degrades", () => {

@@ -9,8 +9,13 @@ export interface Answer {
 
 const ALLOW: Header = { name: "Allow", value: "OPTIONS" }
 
-export function answer(request: SipRequest): Answer {
+export interface Situation {
+  readonly cancelsInvite: boolean
+}
+
+export function answer(request: SipRequest, situation: Situation): Answer {
   if (request.method === "CANCEL") {
+    if (situation.cancelsInvite) return { status: 200, reason: "OK", headers: [] }
     return { status: 481, reason: "Call/Transaction Does Not Exist", headers: [] }
   }
   if (request.method !== "OPTIONS") {
