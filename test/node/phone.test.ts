@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { getHeader } from "../../src"
+import { getHeader, replay } from "../../src"
 import { ConnectError, type ConnectOptions, connect, type Phone } from "../../src/node"
 import { type PhoneSettings, resolveOptions } from "../../src/node/options"
 import { connectPhone, type PhoneHandle } from "../../src/node/phone"
@@ -378,5 +378,13 @@ describe("connect", () => {
     off()
     await phone.close()
     expect(seen).toStrictEqual([])
+  })
+
+  it("records a real session that replays byte for byte", async () => {
+    const server = await serve(udpRegistrar())
+    const phone = await phoneFor(options(server, "udp"))
+    await phone.ping()
+    await phone.close()
+    expect(replay(phone.trace ?? "")).toMatchObject({ ok: true })
   })
 })

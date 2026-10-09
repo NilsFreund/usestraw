@@ -51,6 +51,7 @@ describe("resolveOptions", () => {
       label: "tls://[2001:db8::1]:5061",
       closeTimeout: 5000,
       connectTimeout: 10_000,
+      trace: true,
       credentials: { username: "alice", password: "secret" },
       signal,
       tls: { ca: "pem" },
@@ -75,6 +76,7 @@ describe("resolveOptions", () => {
       label: "udp://example.com:5060",
       closeTimeout: 5000,
       connectTimeout: 10_000,
+      trace: true,
     })
   })
 
@@ -182,6 +184,7 @@ describe("resolveOptions", () => {
       label: "tls://sip.carrier.example:5061",
       closeTimeout: 5000,
       connectTimeout: 10_000,
+      trace: true,
       credentials: { username: "agent", password: "secret" },
       signal,
     })
@@ -230,5 +233,10 @@ describe("resolveOptions", () => {
     expect(() => resolveOptions(`tls://agent:${SECRET}@`)).toThrow(
       new TypeError("Invalid connection URL: use tls://user:password@host[:port]"),
     )
+  })
+
+  it("turns the trace off when asked", () => {
+    expect(resolveOptions({ uri: "sip:alice@example.com", trace: false }).trace).toBe(false)
+    expect(resolveOptions("udp://dev@127.0.0.1", { trace: false }).trace).toBe(false)
   })
 })

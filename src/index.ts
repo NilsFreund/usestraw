@@ -27,6 +27,14 @@ export {
   type SipRequest,
   type SipResponse,
 } from "./message/types"
+export { ladder } from "./recorder/ladder"
+export {
+  createRecordedCore,
+  type RecordedCore,
+  type RecorderSettings,
+  type Step,
+} from "./recorder/recorder"
+export { type ReplayResult, replay } from "./recorder/replay"
 export { defaultTimers, type TimerSettings } from "./transaction/timers"
 export type { TransactionEvent } from "./transaction/types"
 export type { Address, Transport } from "./transport/address"

@@ -17,6 +17,7 @@ export interface ConnectUrlOptions {
   readonly authUser?: string | undefined
   readonly tls?: TlsOptions | undefined
   readonly signal?: AbortSignal | undefined
+  readonly trace?: boolean | undefined
 }
 
 export interface ConnectOptions extends ConnectUrlOptions {
@@ -42,6 +43,7 @@ export interface PhoneSettings {
   readonly expires?: number
   readonly signal?: AbortSignal
   readonly tls?: TlsSettings
+  readonly trace: boolean
 }
 
 const SERVER = /^(udp|tls):\/\/(\[[^\]]*\]|[^:/[\]]+)(?::(\d{1,5}))?$/i
@@ -55,7 +57,7 @@ export function resolveOptions(
   if (!options) {
     throw new TypeError("Missing connection URL: pass tls://user:password@host[:port]")
   }
-  const { uri, password, signal, tls } = options
+  const { uri, password, signal, tls, trace = true } = options
   const invalidUri = new TypeError(`Invalid uri ${show(redact(uri))}: use sip:user@domain`)
   const parts = isUri(uri) ? splitSipUri(uri) : undefined
   if (!parts?.user) throw invalidUri
@@ -80,6 +82,7 @@ export function resolveOptions(
     label: `${server.transport.toLowerCase()}://${formatHost(server.host)}:${server.port}`,
     closeTimeout: 5000,
     connectTimeout: 10_000,
+    trace,
     ...(credentials ? { credentials } : {}),
     ...(signal ? { signal } : {}),
     ...(tls?.ca === undefined ? {} : { tls: { ca: tls.ca } }),

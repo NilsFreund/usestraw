@@ -1,7 +1,9 @@
 import { createCore } from "../core/core"
 import { createCallId } from "../core/ids"
 import type { CoreEvent, Input, Output } from "../core/types"
+import { createRecordedCore } from "../recorder/recorder"
 import { createClock } from "./clock"
+import { debugOutput } from "./debug"
 import { type ConnectError, connectError } from "./errors"
 import { type Link, openLink } from "./links"
 import { createListeners } from "./listeners"
@@ -20,6 +22,7 @@ export interface Phone extends AsyncDisposable {
   readonly status: PhoneStatus
   readonly error: ConnectError | undefined
   readonly retryAt: number | undefined
+  readonly trace: string | undefined
   subscribe(listener: () => void): () => void
   close(): Promise<void>
 }
@@ -51,18 +54,22 @@ export async function connectPhone(settings: PhoneSettings): Promise<PhoneHandle
 }
 
 export async function startPhone(link: Link, settings: PhoneSettings): Promise<PhoneHandle> {
-  const { aor, registrar, credentials, expires, closeTimeout, signal, label, username } = settings
+  const { aor, registrar, credentials, expires, closeTimeout, signal, label, username, trace } =
+    settings
   if (signal?.aborted) {
     link.close()
     throw signal.reason
   }
   const context = { label, username }
-  const core = createCore({
+  const coreOptions = {
     address: link.local,
     aor,
     random: secureRandom,
     ...(credentials ? { credentials } : {}),
-  })
+  }
+  const debug = debugOutput()
+  const recorder = trace || debug ? createRecordedCore(coreOptions, { onStep: debug }) : undefined
+  const core = recorder ?? createCore(coreOptions)
   const clock = createClock()
   const listeners = createListeners()
   const pings = createPings()
@@ -189,6 +196,9 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     },
     get retryAt() {
       return retryAt
+    },
+    get trace() {
+      return trace ? recorder?.recording() : undefined
     },
     subscribe: listeners.subscribe,
     ping,

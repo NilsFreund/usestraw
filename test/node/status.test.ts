@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { getHeader } from "../../src"
+import { getHeader, replay } from "../../src"
 import { ConnectError, connectError } from "../../src/node/errors"
 import { type ConnectOptions, type PhoneSettings, resolveOptions } from "../../src/node/options"
 import { type Phone, startPhone } from "../../src/node/phone"
@@ -295,6 +295,37 @@ describe("phone status", () => {
     ])
     expect(seen[1]?.retryAt).toBeGreaterThan(seen[0]?.retryAt ?? 0)
     network.online = true
+    await closeNow(phone)
+  })
+
+  it("keeps a trace without the password that replays byte for byte", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network)
+    network.inject(incoming())
+    await vi.advanceTimersByTimeAsync(300_000)
+    await closeNow(phone)
+    const recording = phone.trace ?? ""
+    expect(recording).not.toContain("secret")
+    expect(recording).toContain('response=\\"masked\\"')
+    expect(replay(recording)).toMatchObject({ ok: true })
+  })
+
+  it("keeps no trace when asked not to", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network, { trace: false })
+    expect(phone.trace).toBeUndefined()
+    await closeNow(phone)
+  })
+
+  it("still prints the live ladder without keeping a trace", async () => {
+    vi.stubEnv("STRAW_DEBUG", "1")
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    const network = memoryNetwork()
+    const phone = await options(network, { trace: false })
+    expect(phone.trace).toBeUndefined()
+    expect(write).toHaveBeenCalledWith(expect.stringContaining("phone → 192.0.2.20:5060  REGISTER"))
+    write.mockRestore()
+    vi.unstubAllEnvs()
     await closeNow(phone)
   })
 })
