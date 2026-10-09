@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isRequestUri, isSipUri, isUri } from "../../../src/message/fields/uri"
+import { isRequestUri, isSipUri, isUri, splitSipUri } from "../../../src/message/fields/uri"
 
 describe("isUri", () => {
   it("rejects objects that only look like URIs", () => {
@@ -53,4 +53,29 @@ describe("isSipUri", () => {
   it.each(["tel:+4930123456", "sipx:alice", "http://example.com"])("rejects %s", (value) => {
     expect(isSipUri(value)).toBe(false)
   })
+})
+
+describe("splitSipUri", () => {
+  it.each([
+    ["sip:alice@example.com", { scheme: "sip", user: "alice", hostport: "example.com" }],
+    [
+      "SIPS:alice@example.com:5061;transport=tls",
+      { scheme: "sips", user: "alice", hostport: "example.com:5061" },
+    ],
+    [
+      "sip:alice;ext=1@example.com",
+      { scheme: "sip", user: "alice;ext=1", hostport: "example.com" },
+    ],
+    ["sip:example.com?Subject=x", { scheme: "sip", hostport: "example.com" }],
+    ["sip:[2001:db8::1]:5060", { scheme: "sip", hostport: "[2001:db8::1]:5060" }],
+  ])("splits %s", (uri, parts) => {
+    expect(splitSipUri(uri)).toStrictEqual(parts)
+  })
+
+  it.each(["tel:+4930123456", "urn:uuid:f81d4fae", "sipx:alice@example.com"])(
+    "ignores %s",
+    (uri) => {
+      expect(splitSipUri(uri)).toBeUndefined()
+    },
+  )
 })

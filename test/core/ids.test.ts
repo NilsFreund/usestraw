@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { createBranch, createCallId, createTag, randomToken } from "../../src/core/ids"
+import {
+  createBranch,
+  createCallId,
+  createCnonce,
+  createTag,
+  randomToken,
+} from "../../src/core/ids"
 import { createRandom } from "../../src/simulation/random"
 
 describe("randomToken", () => {
@@ -31,8 +37,9 @@ describe("identifiers", () => {
     expect(createBranch(createRandom(1))).toMatch(/^z9hG4bK[a-z0-9]{16}$/)
   })
 
-  it("creates tags and Call-IDs of fixed length", () => {
+  it("creates tags, Call-IDs and cnonces of fixed length", () => {
     expect(createTag(createRandom(1))).toMatch(/^[a-z0-9]{10}$/)
     expect(createCallId(createRandom(1))).toMatch(/^[a-z0-9]{20}$/)
+    expect(createCnonce(createRandom(1))).toMatch(/^[a-z0-9]{16}$/)
   })
 })

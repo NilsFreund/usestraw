@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { formatAuthorization } from "../../src/auth/authorization"
-import type { Credentials } from "../../src/auth/digest"
+import type { Authorization } from "../../src/auth/digest"
 
-const base: Credentials = {
+const base: Authorization = {
   username: "bob",
   realm: "biloxi.com",
   nonce: "dcd98b7102dd2f0e8b11d0f600bfb0c093",

@@ -15,7 +15,7 @@ export interface ClientNonce {
   readonly nc: number
 }
 
-export interface Credentials {
+export interface Authorization {
   readonly username: string
   readonly realm: string
   readonly nonce: string
@@ -30,12 +30,12 @@ export interface Credentials {
 const CNONCE = /^[!#-[\]-~]+$/
 const encoder = new TextEncoder()
 
-export function computeCredentials(
+export function computeAuthorization(
   offer: Offer,
   secret: Secret,
   target: DigestTarget,
   client: ClientNonce,
-): Credentials {
+): Authorization {
   const { challenge, algorithm, qop } = offer
   const { realm, nonce, opaque } = challenge
   if (!isIntegerIn(client.nc, 1, 0xffffffff))

@@ -22,3 +22,7 @@ export function createTag(random: Random): string {
 export function createCallId(random: Random): string {
   return randomToken(random, 20)
 }
+
+export function createCnonce(random: Random): string {
+  return randomToken(random, 16)
+}

@@ -22,10 +22,10 @@ describe("parseContact", () => {
     },
   )
 
-  it("accepts up to 64 entries and rejects more", () => {
+  it("accepts up to 256 entries and rejects more", () => {
     const entries = (count: number) => [Array.from({ length: count }, () => "<sip:a@b>").join(",")]
-    expect(parseContact(entries(64))).toHaveLength(64)
-    expect(() => parseContact(entries(65))).toThrow("Too many Contact entries (limit 64)")
+    expect(parseContact(entries(256))).toHaveLength(256)
+    expect(() => parseContact(entries(257))).toThrow("Too many Contact entries (limit 256)")
   })
 
   it("returns an empty list without Contact headers", () => {

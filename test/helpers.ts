@@ -5,9 +5,11 @@ import {
   type Core,
   type CoreEvent,
   createCore,
+  isRequest,
   parseMessage,
   type Random,
   type SipMessage,
+  type SipRequest,
 } from "../src"
 
 export function fixture(name: string): Uint8Array {
@@ -36,6 +38,12 @@ export function parsed(data: Uint8Array | string): SipMessage {
   const result = parseMessage(data)
   if (!result.ok) throw new Error(result.error)
   return result.message
+}
+
+export function parsedRequest(data: Uint8Array | string): SipRequest {
+  const message = parsed(data)
+  if (!isRequest(message)) throw new Error("Expected a request")
+  return message
 }
 
 export function eventTypes(events: readonly CoreEvent[]): string[] {

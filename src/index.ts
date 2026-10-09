@@ -1,5 +1,15 @@
 export { type Core, type CoreOptions, createCore } from "./core/core"
-export type { Command, CoreEvent, Input, Output, Random } from "./core/types"
+export type {
+  AuthFailure,
+  Command,
+  CoreEvent,
+  Credentials,
+  Input,
+  Output,
+  Random,
+  RegistrationEvent,
+  RegistrationFailure,
+} from "./core/types"
 export type { Contact } from "./message/fields/contact"
 export type { CSeq } from "./message/fields/cseq"
 export type { NameAddr } from "./message/fields/name-addr"

@@ -1,27 +1,34 @@
-import { isIp } from "../message/fields/host"
-import { isRequestUri, isUri } from "../message/fields/uri"
+import { isUri } from "../message/fields/uri"
 import { withReceived } from "../message/fields/via"
-import { MAX_MESSAGE_SIZE } from "../message/limits"
 import { parseMessage } from "../message/parse"
-import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
-import { isRequest, type SipMessage, type SipRequest } from "../message/types"
-import { checkTime } from "../support/time"
-import { topVia } from "../transaction/keys"
+import { isRequest } from "../message/types"
+import { checkTime, earliest } from "../support/time"
 import { defaultTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
-import type { TransactionOutput } from "../transaction/types"
-import { type Address, isAddress } from "../transport/address"
-import { replyAddress } from "../transport/routing"
+import type { TransactionEvent, TransactionOutput } from "../transaction/types"
+import type { Address } from "../transport/address"
+import {
+  checkAddress,
+  checkCredentials,
+  checkExpires,
+  checkRegistrar,
+  checkRequestUri,
+  checkSource,
+} from "./checks"
+import { event, send } from "./outputs"
+import { defaultRegistrar } from "./registration/binding"
+import { createRegistration } from "./registration/registration"
+import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
-import { createStateless } from "./stateless"
-import type { Command, CoreEvent, Input, Output, Random } from "./types"
-import { answer } from "./uas"
+import { createResponder } from "./responder"
+import type { Command, Credentials, Input, Output, Random } from "./types"
 
 export interface CoreOptions {
   readonly address: Address
   readonly aor: string
   readonly random: Random
+  readonly credentials?: Credentials
   readonly timers?: TimerSettings
 }
 
@@ -34,9 +41,13 @@ export function createCore(options: CoreOptions): Core {
   const { address, aor, random } = options
   checkAddress(address)
   if (!isUri(aor)) throw new TypeError(`Invalid address of record ${show(aor)}`)
+  const credentials = options.credentials && Object.freeze({ ...options.credentials })
+  if (credentials) checkCredentials(credentials)
   const timers = options.timers ?? defaultTimers
   const transactions = createTransactions({ local: address, timers })
-  const stateless = createStateless(random)
+  const identity = { address, aor, random }
+  const responder = createResponder(random)
+  const registration = createRegistration(identity, credentials)
 
   function handle(input: Input, now: number): Output[] {
     checkTime(now)
@@ -44,62 +55,80 @@ export function createCore(options: CoreOptions): Core {
       case "receive":
         return receive(input.data, input.from, now)
       case "timeout":
-        return translate(transactions.expire(now))
+        return [
+          ...translate(transactions.expire(now), now),
+          ...translateRegistration(registration.expire(now), now),
+        ]
       case "command":
         return execute(input.command, now)
+      default:
+        throw new TypeError(`Unknown input ${show(input)}`)
     }
   }
 
   function receive(data: Uint8Array, from: Address, now: number): Output[] {
-    checkAddress(from)
-    if (!isIp(from.host))
-      throw new TypeError(`The source must be an IP address, got ${show(from.host)}`)
+    checkSource(from)
     const result = parseMessage(data)
     if (!result.ok) return [event({ type: "invalid", error: result.error, from })]
     const { message } = result
-    if (!isRequest(message)) return translate(transactions.receive(message, from, now))
+    if (!isRequest(message)) return translate(transactions.receive(message, from, now), now)
     const via = message.via.map((entry, index) =>
       index === 0 ? withReceived(entry, from.host, from.port) : entry,
     )
-    return receiveRequest({ ...message, via }, from)
-  }
-
-  function receiveRequest(request: SipRequest, from: Address): Output[] {
-    if (request.method === "ACK") {
-      return stateless.acknowledges(request) ? [] : [event({ type: "request", request, from })]
-    }
-    const reply = answer(request)
-    const answered = event({ type: "answered", request, from, status: reply.status })
-    const data = serializeMessage(stateless.reply(request, reply))
-    if (data.length > MAX_MESSAGE_SIZE) return [answered]
-    return [answered, { type: "send", data, to: replyAddress(topVia(request), from) }]
+    return responder.respond({ ...message, via }, from)
   }
 
   function execute(command: Command, now: number): Output[] {
-    checkAddress(command.to)
-    if (command.type === "send") return [send(command.message, command.to)]
-    if (!isRequestUri(command.uri)) throw new TypeError(`Invalid Request-URI ${show(command.uri)}`)
-    const request = createOptionsRequest(command.uri, { address, aor, random })
-    return translate(transactions.send(request, command.to, now))
+    switch (command.type) {
+      case "send":
+        checkAddress(command.to)
+        return [send(command.message, command.to)]
+      case "options": {
+        checkAddress(command.to)
+        checkRequestUri(command.uri)
+        const request = createOptionsRequest(command.uri, identity)
+        return translate(transactions.send(request, command.to, now), now)
+      }
+      case "register": {
+        const { to, registrar = defaultRegistrar(aor), expires = 3600 } = command
+        checkAddress(to)
+        checkRegistrar(registrar)
+        checkExpires(expires)
+        return translateRegistration(registration.register({ to, registrar, expires }), now)
+      }
+      case "unregister":
+        return translateRegistration(registration.unregister(), now)
+      default:
+        throw new TypeError(`Unknown command ${show(command)}`)
+    }
   }
 
-  function translate(outputs: TransactionOutput[]): Output[] {
-    return outputs.map((output) =>
-      output.type === "send" ? send(output.message, output.to) : event(output.event),
+  function translate(outputs: TransactionOutput[], now: number): Output[] {
+    return outputs.flatMap((output) => {
+      if (output.type === "send") return [send(output.message, output.to)]
+      const happened = output.event
+      return isRegistration(happened)
+        ? translateRegistration(registration.receive(happened, now), now)
+        : [event(happened)]
+    })
+  }
+
+  function translateRegistration(outputs: RegistrationOutput[], now: number): Output[] {
+    return outputs.flatMap((output) =>
+      output.type === "send"
+        ? translate(transactions.send(output.request, output.to, now), now)
+        : [event(output.event)],
     )
   }
 
-  return { handle, nextDeadline: () => transactions.nextDeadline() }
+  function nextDeadline(): number | undefined {
+    return earliest([transactions.nextDeadline(), registration.nextDeadline()])
+  }
+
+  return { handle, nextDeadline }
 }
 
-function checkAddress(address: Address): void {
-  if (!isAddress(address)) throw new TypeError(`Invalid address ${show(address)}`)
-}
-
-function send(message: SipMessage, to: Address): Output {
-  return { type: "send", data: serializeMessage(message), to }
-}
-
-function event(coreEvent: CoreEvent): Output {
-  return { type: "event", event: coreEvent }
+function isRegistration(happened: TransactionEvent): happened is RegistrationInput {
+  if (happened.type === "response") return happened.response.cseq.method === "REGISTER"
+  return happened.type === "timeout" && happened.request.method === "REGISTER"
 }

@@ -1,10 +1,10 @@
 import { quote } from "../message/syntax"
-import type { Credentials } from "./digest"
+import type { Authorization } from "./digest"
 
 // RFC 7616 §3.4 and RFC 8760 §2.6: quoted username, realm, nonce, uri, response, cnonce and opaque
-export function formatAuthorization(credentials: Credentials): string {
+export function formatAuthorization(authorization: Authorization): string {
   const { username, realm, nonce, uri, response, algorithm, opaque, protection, userhash } =
-    credentials
+    authorization
   const params = [
     `username=${quote(username)}`,
     `realm=${quote(realm)}`,

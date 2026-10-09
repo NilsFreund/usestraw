@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { serializeMessage } from "../../src"
-import { createOptionsRequest } from "../../src/core/requests"
+import { createOptionsRequest, createRequest } from "../../src/core/requests"
 import { createRandom } from "../../src/simulation/random"
 import { alice, parsed } from "../helpers"
 
@@ -39,5 +39,28 @@ describe("createOptionsRequest", () => {
     const second = createOptionsRequest("sip:bob@example.com", { ...identity, random })
     expect(first.callId).not.toBe(second.callId)
     expect(first.via[0]?.params.get("branch")).not.toBe(second.via[0]?.params.get("branch"))
+  })
+})
+
+describe("createRequest", () => {
+  it("fills in Via, Max-Forwards, CSeq and an empty body around the given fields", () => {
+    const from = { uri: "sip:alice@example.com", params: new Map([["tag", "a1"]]) }
+    const to = { uri: "sip:example.com", params: new Map() }
+    const headers = [{ name: "Expires", value: "60" }]
+    const fields = { from, to, callId: "c1", seq: 9, headers }
+    const request = createRequest("REGISTER", "sip:example.com", fields, identity)
+    expect(request).toMatchObject({
+      method: "REGISTER",
+      uri: "sip:example.com",
+      maxForwards: 70,
+      from,
+      to,
+      callId: "c1",
+      cseq: { seq: 9, method: "REGISTER" },
+      contact: [],
+      headers,
+      body: new Uint8Array(),
+    })
+    expect(request.via[0]?.params.get("branch")).toMatch(/^z9hG4bK/)
   })
 })

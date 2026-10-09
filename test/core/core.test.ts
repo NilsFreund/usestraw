@@ -4,6 +4,7 @@ import {
   type Core,
   createCore,
   createResponse,
+  type Input,
   isRequest,
   type Output,
   type SipMessage,
@@ -76,9 +77,9 @@ function responseTo(request: SipRequest, status = 200): Uint8Array {
   return serializeMessage(createResponse(request, status, "Reason", { toTag: "b1" }))
 }
 
-function drain(ua: Core): { at: number; outputs: Output[] }[] {
+function drain(ua: Core, until = Number.POSITIVE_INFINITY): { at: number; outputs: Output[] }[] {
   const log: { at: number; outputs: Output[] }[] = []
-  for (let at = ua.nextDeadline(); at !== undefined; at = ua.nextDeadline()) {
+  for (let at = ua.nextDeadline(); at !== undefined && at <= until; at = ua.nextDeadline()) {
     if (log.length === 1000) throw new Error("The core keeps firing")
     log.push({ at, outputs: ua.handle({ type: "timeout" }, at) })
   }
@@ -181,6 +182,155 @@ describe("createCore", () => {
       const raw = withTopVia(request, { branch: "z9hG4bKraw" })
       ua.handle({ type: "command", command: { type: "send", message: raw, to: bob } }, 0)
       expect(events(ua.handle(receive(responseTo(raw)), 10))).toMatchObject([{ type: "stray" }])
+    })
+  })
+
+  describe("registration", () => {
+    const account = { username: "alice", password: "secret" }
+    const registering = () =>
+      createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        credentials: account,
+      })
+    const register = {
+      type: "command",
+      command: { type: "register", to: bob, expires: 120 },
+    } as const
+
+    it("sends a REGISTER through a client transaction and reports the binding", () => {
+      const ua = registering()
+      const request = sentRequest(ua.handle(register, 0)[0])
+      expect(request).toMatchObject({ method: "REGISTER", uri: "sip:example.com" })
+      expect(ua.nextDeadline()).toBe(500)
+      expect(events(ua.handle(receive(responseTo(request)), 40))).toStrictEqual([
+        { type: "registration", state: "registered", expires: 120 },
+      ])
+      expect(ua.nextDeadline()).toBe(5040)
+    })
+
+    it("answers a challenge inside the core and refreshes on its own", () => {
+      const ua = registering()
+      const request = sentRequest(ua.handle(register, 0)[0])
+      const challenge = {
+        name: "WWW-Authenticate",
+        value: 'Digest realm="example.com", nonce="n", qop="auth"',
+      }
+      const unauthorized = serializeMessage(
+        createResponse(request, 401, "Unauthorized", { toTag: "r", headers: [challenge] }),
+      )
+      const retry = sentRequest(sent(ua.handle(receive(unauthorized), 40)).at(-1))
+      expect(retry.headers.map((header) => header.name)).toContain("Authorization")
+      ua.handle(receive(responseTo(retry)), 80)
+      const refreshes = drain(ua, 61_000).flatMap(({ at, outputs }) =>
+        sent(outputs)
+          .filter((output) => message(output).cseq.method === "REGISTER")
+          .map(() => at),
+      )
+      expect(refreshes[0]).toBeGreaterThanOrEqual(80 + 54_000)
+      expect(refreshes[0]).toBeLessThanOrEqual(80 + 66_000)
+    })
+
+    it("turns a REGISTER timeout into a registration failure with a retry", () => {
+      const ua = registering()
+      ua.handle(register, 0)
+      const failure = drain(ua, 40_000)
+        .flatMap(({ outputs }) => events(outputs))
+        .find((event) => event.type === "registration")
+      expect(failure).toMatchObject({
+        state: "failed",
+        failure: { reason: "timeout" },
+        retryIn: expect.any(Number),
+      })
+    })
+
+    it("still reports OPTIONS responses and timeouts directly", () => {
+      const ua = registering()
+      ua.handle(register, 0)
+      const request = sentRequest(ua.handle(options(), 0)[0])
+      expect(events(ua.handle(receive(responseTo(request)), 10))).toMatchObject([
+        { type: "response" },
+      ])
+    })
+
+    it("unregisters", () => {
+      const ua = registering()
+      ua.handle(receive(responseTo(sentRequest(ua.handle(register, 0)[0]))), 10)
+      const request = sentRequest(
+        ua.handle({ type: "command", command: { type: "unregister" } }, 20)[0],
+      )
+      expect(request.headers).toContainEqual({ name: "Expires", value: "0" })
+      expect(events(ua.handle(receive(responseTo(request)), 30))).toStrictEqual([
+        { type: "registration", state: "unregistered" },
+      ])
+    })
+
+    it.each([
+      ["an invalid destination", { type: "register", to: { ...bob, port: 0.5 } }, TypeError],
+      [
+        "a registrar that is no URI",
+        { type: "register", to: bob, registrar: "example.com" },
+        TypeError,
+      ],
+      [
+        "a registrar with a user part",
+        { type: "register", to: bob, registrar: "sip:bob@example.com" },
+        TypeError,
+      ],
+      [
+        "a registrar that is not SIP",
+        { type: "register", to: bob, registrar: "tel:+4930123" },
+        TypeError,
+      ],
+      ["an invalid expiry", { type: "register", to: bob, expires: 0 }, RangeError],
+    ] as const)("rejects %s before changing any state", (_, command, error) => {
+      const ua = registering()
+      expect(() => ua.handle({ type: "command", command }, 0)).toThrow(error)
+      expect(ua.nextDeadline()).toBeUndefined()
+    })
+
+    it("needs an explicit registrar for an address of record that is not SIP", () => {
+      const ua = createCore({
+        address: alice,
+        aor: "tel:+4930123",
+        random: createRandom(1),
+        credentials: account,
+      })
+      expect(() => ua.handle(register, 0)).toThrow(new TypeError("Invalid registrar undefined"))
+      const command = { type: "register", to: bob, registrar: "sip:example.com" } as const
+      expect(sentRequest(ua.handle({ type: "command", command }, 0)[0]).uri).toBe("sip:example.com")
+    })
+
+    it("keeps the credentials it was created with", () => {
+      const credentials = { username: "alice", password: "secret" }
+      const ua = createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        credentials,
+      })
+      credentials.username = "alice\r\nX: y"
+      const request = sentRequest(ua.handle(register, 0)[0])
+      const challenge = { name: "WWW-Authenticate", value: 'Digest realm="example.com", nonce="n"' }
+      const unauthorized = serializeMessage(
+        createResponse(request, 401, "Unauthorized", { toTag: "r", headers: [challenge] }),
+      )
+      expect(() => ua.handle(receive(unauthorized), 10)).not.toThrow()
+    })
+
+    it("accepts an explicit registrar", () => {
+      const command = { type: "register", to: bob, registrar: "sip:registrar.example.com" } as const
+      expect(sentRequest(registering().handle({ type: "command", command }, 0)[0]).uri).toBe(
+        "sip:registrar.example.com",
+      )
+    })
+
+    it("rejects credentials with line breaks", () => {
+      const credentials = { username: "alice\r\nX: y", password: "secret" }
+      expect(() =>
+        createCore({ address: alice, aor: "sip:a@x", random: createRandom(1), credentials }),
+      ).toThrow(TypeError)
     })
   })
 
@@ -410,6 +560,15 @@ describe("createCore", () => {
   })
 
   describe("input validation", () => {
+    it("rejects unknown inputs and commands from untyped callers", () => {
+      const input = { type: "dance" } as unknown as Input
+      const command = { type: "command", command: { type: "dance" } } as unknown as Input
+      expect(() => core().handle(input, 0)).toThrow(new TypeError('Unknown input {"type":"dance"}'))
+      expect(() => core().handle(command, 0)).toThrow(
+        new TypeError('Unknown command {"type":"dance"}'),
+      )
+    })
+
     const invalidAddresses: Address[] = [
       { ...alice, host: "evil host" },
       { ...alice, host: "a\r\nb" },
