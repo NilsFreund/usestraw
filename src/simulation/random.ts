@@ -1,5 +1,5 @@
 import type { Random } from "../core/types"
-import { hash } from "../support/hash"
+import { fnv1a } from "../support/fnv"
 
 export function createRandom(seed: number): Random {
   let state = seed >>> 0
@@ -13,7 +13,7 @@ export function createRandom(seed: number): Random {
 }
 
 export function deriveSeed(seed: number, label: string): number {
-  return hash(`${seed}:${label}`)
+  return fnv1a(`${seed}:${label}`)
 }
 
 export function createStreams(seed: number): (label: string) => Random {

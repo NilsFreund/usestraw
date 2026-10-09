@@ -1,6 +1,6 @@
 import { createResponse } from "../message/response"
 import type { SipRequest, SipResponse } from "../message/types"
-import { hash } from "../support/hash"
+import { fnv1a } from "../support/fnv"
 import { serverKey, serverKeys } from "../transaction/keys"
 import { createTag } from "./ids"
 import type { Random } from "./types"
@@ -13,7 +13,7 @@ export interface Stateless {
 
 export function createStateless(random: Random): Stateless {
   const salt = createTag(random)
-  const tag = (key: string) => hash(`${salt}|${key}`).toString(36)
+  const tag = (key: string) => fnv1a(`${salt}|${key}`).toString(36)
 
   return {
     reply: (request, { status, reason, headers }) =>

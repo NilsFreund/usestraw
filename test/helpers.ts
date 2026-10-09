@@ -50,6 +50,12 @@ export function bytes(text: string): Uint8Array {
   return new TextEncoder().encode(text)
 }
 
+export function samples(maxLength: number): Uint8Array[] {
+  return Array.from({ length: maxLength + 1 }, (_, length) =>
+    Uint8Array.from({ length }, (_, index) => (index * 131 + length) & 255),
+  )
+}
+
 export function userAgent(user: string, address: Address): (random: Random) => Core {
   return (random) => createCore({ address, aor: `sip:${user}@example.com`, random })
 }

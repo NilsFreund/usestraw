@@ -1,5 +1,5 @@
 import { isSipUri } from "../message/fields/uri"
-import { isToken } from "../message/syntax"
+import { isToken, splitList } from "../message/syntax"
 import type { Header, SipRequest } from "../message/types"
 
 export interface Answer {
@@ -46,9 +46,7 @@ export function answer(request: SipRequest): Answer {
 function requiredOptions(request: SipRequest): string[] {
   return request.headers
     .filter((header) => header.name === "Require")
-    .flatMap((header) => header.value.split(","))
-    .map((option) => option.trim())
-    .filter((option) => option !== "")
+    .flatMap((header) => splitList(header.value))
 }
 
 function answerWith(status: number, reason: string, headers: readonly Header[] = []): Answer {

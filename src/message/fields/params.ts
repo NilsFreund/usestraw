@@ -1,9 +1,11 @@
 import { atMost, MAX_PARAMS } from "../limits"
-import { fail, hasRawControl, isToken, show, splitOutside } from "../syntax"
+import { fail, hasRawControl, isToken, QUOTED_STRING, show, splitOutside } from "../syntax"
 
 export type Params = ReadonlyMap<string, string | null>
 
-const VALUE = /^(?:[A-Za-z0-9.!%*_+`'~:-]+|\[[0-9A-Fa-f:.]+\]|"(?:[^"\\]|\\.)*")$/
+const VALUE = new RegExp(
+  String.raw`^(?:[A-Za-z0-9.!%*_+\`'~:-]+|\[[0-9A-Fa-f:.]+\]|${QUOTED_STRING})$`,
+)
 
 export function parseParams(input: string): Params {
   const params = new Map<string, string | null>()

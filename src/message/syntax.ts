@@ -1,4 +1,5 @@
 export const TOKEN_CHARS = "[A-Za-z0-9.!%*_+`'~-]"
+export const QUOTED_STRING: string = String.raw`"(?:[^"\\]|\\.)*"`
 
 const TOKEN = new RegExp(`^${TOKEN_CHARS}+$`)
 const CONTROL = /(?![\t\x80-\x9f])\p{Cc}/u
@@ -48,6 +49,13 @@ export function hasRawControl(value: string): boolean {
     } else if (hasControl(char)) return true
   }
   return false
+}
+
+export function splitList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== "")
 }
 
 export function splitOutside(value: string, separator: string): string[] {

@@ -5,11 +5,32 @@ import {
   hasRawControl,
   isText,
   isToken,
+  QUOTED_STRING,
   quote,
   readQuoted,
   show,
+  splitList,
   splitOutside,
 } from "../../src/message/syntax"
+
+describe("splitList", () => {
+  it("splits on commas, trims and drops empty items", () => {
+    expect(splitList(" a , b,, c ,")).toStrictEqual(["a", "b", "c"])
+    expect(splitList("")).toStrictEqual([])
+  })
+})
+
+describe("QUOTED_STRING", () => {
+  const quoted = new RegExp(`^${QUOTED_STRING}$`)
+
+  it.each(['""', '"a b"', '"a\\"b"', '"\\\\"'])("matches %s", (value) => {
+    expect(quoted.test(value)).toBe(true)
+  })
+
+  it.each(['"a', 'a"', '"a"b"', '"\\"'])("does not match %s", (value) => {
+    expect(quoted.test(value)).toBe(false)
+  })
+})
 
 describe("splitOutside", () => {
   it("ignores separators inside quotes and angle brackets", () => {
