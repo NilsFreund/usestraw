@@ -1,4 +1,4 @@
-import type { CallEnd, CallEvent, CallReason, Command } from "../core/types"
+import type { CallEnd, CallEvent, CallReason, CoreCommand } from "../core/types"
 import { splitSipUri } from "../message/fields/uri"
 import type { CallMedia } from "../sdp/types"
 import { type CallAudio, openAudio } from "./audio"
@@ -154,7 +154,7 @@ export interface CallSetup {
   readonly callerName?: string
   readonly host: string
   readonly agent?: Agent
-  readonly run: (command: Command) => void
+  readonly run: (command: CoreCommand) => void
   readonly changed: () => void
 }
 
@@ -163,7 +163,7 @@ export interface CallHandle {
   readonly answered: Promise<LiveCall | UnansweredCall>
   receive(event: CallEvent): void
   open(): Promise<CallAudio>
-  place(command: Command): void
+  place(command: CoreCommand): void
   giveUp(reason: CallReason): void
 }
 
@@ -210,7 +210,7 @@ export function createCall(setup: CallSetup): CallHandle {
     return opening
   }
 
-  function place(command: Command): void {
+  function place(command: CoreCommand): void {
     if (status === "ended") return
     placed = true
     run(command)

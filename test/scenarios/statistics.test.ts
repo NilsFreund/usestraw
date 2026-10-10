@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../src"
+import type { TransportAddress } from "../../src"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
 import { createNetwork } from "../../src/simulation/network/network"
 import { profiles } from "../../src/simulation/network/profiles"
@@ -9,7 +9,7 @@ import { traceStats } from "../../src/simulation/stats"
 import { alice, bob } from "../helpers"
 import { settle, tolerance } from "../simulation/support"
 
-const carol: Address = { transport: "UDP", host: "192.0.2.30", port: 5060 }
+const carol: TransportAddress = { transport: "UDP", host: "192.0.2.30", port: 5060 }
 const payload = new Uint8Array(200)
 
 function blast(
@@ -111,7 +111,11 @@ describe("network statistics over large samples", () => {
   it("scales to many hosts exchanging thousands of packets", () => {
     const simulation = createSimulation({ seed: 11, internet: profiles.cable })
     const hosts = Array.from({ length: 60 }, (_, index) => {
-      const address: Address = { transport: "UDP", host: `198.18.0.${index + 1}`, port: 5060 }
+      const address: TransportAddress = {
+        transport: "UDP",
+        host: `198.18.0.${index + 1}`,
+        port: 5060,
+      }
       simulation.network.attach(`host${index}`, address, {
         access: index % 2 ? profiles.wifi : profiles.lte,
       })

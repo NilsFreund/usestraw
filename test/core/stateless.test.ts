@@ -24,7 +24,7 @@ describe("createStateless (RFC 3261 §8.2.7)", () => {
   it("derives the same To tag for the same request", () => {
     const stateless = createStateless(createRandom(1))
     const tag = () => stateless.reply(request("INVITE"), rejection).to.params.get("tag")
-    expect(tag()).toMatch(/^[a-z0-9]+$/)
+    expect(tag()).toMatch(/^[0-9a-f]{16}$/)
     expect(tag()).toBe(tag())
   })
 
@@ -33,6 +33,15 @@ describe("createStateless (RFC 3261 §8.2.7)", () => {
     const tag = (branch: string) =>
       stateless.reply(request("INVITE", branch), rejection).to.params.get("tag")
     expect(tag("z9hG4bK1")).not.toBe(tag("z9hG4bK2"))
+  })
+
+  it("signs only the first 512 bytes of a huge transaction key", () => {
+    const stateless = createStateless(createRandom(1))
+    const tag = (branch: string) =>
+      stateless.reply(request("INVITE", branch), rejection).to.params.get("tag")
+    const long = `z9hG4bK${"x".repeat(600)}`
+    expect(tag(`${long}a`)).toBe(tag(`${long}b`))
+    expect(tag(`z9hG4bK${"x".repeat(400)}a`)).not.toBe(tag(`z9hG4bK${"x".repeat(400)}b`))
   })
 
   it("salts tags per instance", () => {

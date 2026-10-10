@@ -4,13 +4,13 @@ import { computeAuthorization } from "../auth/digest"
 import type { Offer } from "../auth/offer"
 import { selectOffer } from "../auth/select"
 import { getHeaders } from "../message/headers"
-import type { Header, SipRequest, SipResponse } from "../message/types"
+import type { SipHeader, SipRequest, SipResponse } from "../message/types"
 import { createCnonce } from "./ids"
-import type { AuthFailure, Credentials, OfferedChallenge, Random } from "./types"
+import type { AuthChallenge, AuthFailure, Credentials, Random } from "./types"
 
 export interface Authenticator {
   challenge(response: SipResponse): AuthFailure | undefined
-  authorize(request: SipRequest): Header[]
+  authorize(request: SipRequest): SipHeader[]
   reset(): void
 }
 
@@ -54,7 +54,7 @@ export function createAuthenticator(
   }
 
   // RFC 7616 §3.4: the nonce count rises with every request sent under the same nonce
-  function authorize(request: SipRequest): Header[] {
+  function authorize(request: SipRequest): SipHeader[] {
     if (!credentials) return []
     return [...answers].map(([name, answer]) => {
       answer.nc += 1
@@ -67,7 +67,7 @@ export function createAuthenticator(
   return { challenge, authorize, reset: () => answers.clear() }
 }
 
-function describe(value: string): OfferedChallenge {
+function describe(value: string): AuthChallenge {
   const challenge = parseChallenge(value)
   if (!challenge) return { scheme: value.replace(/[ \t].*$/s, "") }
   return { scheme: "Digest", realm: challenge.realm, algorithm: challenge.algorithm ?? "MD5" }

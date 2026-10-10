@@ -3,7 +3,7 @@ import dns from "node:dns"
 import { isIP } from "node:net"
 import { networkInterfaces } from "node:os"
 import { describe, expect, it, vi } from "vitest"
-import type { Address } from "../../src"
+import type { TransportAddress } from "../../src"
 import { type LinkHandlers, openLink, openTls, openUdp } from "../../src/node/links"
 import { certificate, localhost, silentServer, tlsRegistrar } from "./servers"
 
@@ -59,7 +59,7 @@ describe("openUdp", () => {
     const link = await openUdp({ address: "127.0.0.2", family: 4, port: 5060 })
     const other = createSocket("udp4")
     await new Promise<void>((resolve) => other.bind(0, "127.0.0.1", resolve))
-    const seen: Address[] = []
+    const seen: TransportAddress[] = []
     link.start({ receive: (_, from) => seen.push(from), close: () => undefined })
     other.send("x", link.local.port, "127.0.0.1")
     await vi.waitFor(() => expect(seen).toHaveLength(1))

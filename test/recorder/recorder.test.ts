@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createRecordedCore, replay, type Step } from "../../src"
+import { createRecordedCore, defaultTimers, type RecordedStep, replay } from "../../src"
 import { decode } from "../../src/recorder/codec"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes } from "../helpers"
@@ -33,6 +33,7 @@ describe("createRecordedCore", () => {
     expect(header).toMatchObject({
       straw: "recording",
       version: 1,
+      release: "0.0.0",
       truncated: false,
       next: null,
       options: {
@@ -45,10 +46,15 @@ describe("createRecordedCore", () => {
     expect(header?.["random"]).toStrictEqual(expect.arrayContaining([expect.any(Number)]))
   })
 
-  it("leaves out credentials and timers that were not given", () => {
+  it("leaves out credentials that were not given, but always writes timers and maxCalls", () => {
     const { credentials: _, ...plain } = options()
     const [header] = lines(createRecordedCore(plain).recording())
-    expect(header?.["options"]).toStrictEqual({ address: alice, aor: "sip:alice@example.com" })
+    expect(header?.["options"]).toStrictEqual({
+      address: alice,
+      aor: "sip:alice@example.com",
+      timers: defaultTimers,
+      maxCalls: 100,
+    })
     const realmless = createRecordedCore({
       ...options(),
       credentials: { username: "a", password: "p" },
@@ -67,7 +73,7 @@ describe("createRecordedCore", () => {
   })
 
   it("records each step with its time, input, draws, outputs and next deadline", () => {
-    const seen: Step[] = []
+    const seen: RecordedStep[] = []
     const core = createRecordedCore(options(), { onStep: (step) => seen.push(step) })
     const outputs = core.handle(optionsCommand, 1000)
     expect(core.nextDeadline()).toBe(1500)
@@ -111,7 +117,7 @@ describe("createRecordedCore", () => {
   })
 
   it("hands the listener the masked step only", () => {
-    const seen: Step[] = []
+    const seen: RecordedStep[] = []
     const core = createRecordedCore(options(), { onStep: (step) => seen.push(step) })
     const ok = bytes(
       [

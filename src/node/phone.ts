@@ -1,6 +1,6 @@
 import { createCore } from "../core/core"
 import { createCallId } from "../core/ids"
-import type { CoreEvent, Input, Output } from "../core/types"
+import type { CoreEvent, CoreInput, CoreOutput } from "../core/types"
 import { isRequestUri } from "../message/fields/uri"
 import { show } from "../message/syntax"
 import { createRecordedCore } from "../recorder/recorder"
@@ -196,7 +196,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
   let draining = false
   let snapshot: readonly Call[] = []
 
-  function deliver(outputs: Output[]): void {
+  function deliver(outputs: CoreOutput[]): void {
     for (const output of outputs) {
       if (output.type === "send") link.send(output.data, output.to)
       else notice(output.event)
@@ -204,7 +204,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     clock.schedule(core.nextDeadline(), () => run({ type: "timeout" }))
   }
 
-  function run(input: Input): void {
+  function run(input: CoreInput): void {
     if (status !== "offline") deliver(core.handle(input, clock.now()))
   }
 

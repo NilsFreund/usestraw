@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs"
 import {
-  type Address,
-  type Command,
   type Core,
+  type CoreCommand,
   type CoreEvent,
   createCore,
   isRequest,
@@ -10,6 +9,7 @@ import {
   type Random,
   type SipMessage,
   type SipRequest,
+  type TransportAddress,
 } from "../src"
 
 export function fixture(name: string): Uint8Array {
@@ -31,8 +31,8 @@ export const register: string = [
   "",
 ].join("\r\n")
 
-export const alice: Address = { transport: "UDP", host: "192.0.2.10", port: 5060 }
-export const bob: Address = { transport: "UDP", host: "192.0.2.20", port: 5060 }
+export const alice: TransportAddress = { transport: "UDP", host: "192.0.2.10", port: 5060 }
+export const bob: TransportAddress = { transport: "UDP", host: "192.0.2.20", port: 5060 }
 
 export function parsed(data: Uint8Array | string): SipMessage {
   const result = parseMessage(data)
@@ -64,11 +64,11 @@ export function samples(maxLength: number): Uint8Array[] {
   )
 }
 
-export function userAgent(user: string, address: Address): (random: Random) => Core {
+export function userAgent(user: string, address: TransportAddress): (random: Random) => Core {
   return (random) => createCore({ address, aor: `sip:${user}@example.com`, random })
 }
 
-export function options(to: Address, uri = "sip:bob@example.com"): Command {
+export function options(to: TransportAddress, uri = "sip:bob@example.com"): CoreCommand {
   return { type: "options", uri, to }
 }
 

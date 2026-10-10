@@ -1,19 +1,23 @@
 import type { Random } from "../../../core/types"
-import type { Address } from "../../../transport/address"
+import type { TransportAddress } from "../../../transport/address"
 import { endpointKey, mappingKey, portKey } from "./keys"
 import { createPortAllocator } from "./ports"
 import type { NatOptions } from "./types"
 
 export interface Nat {
   readonly host: string
-  outbound(internal: Address, remote: Address, now: number): Address
-  inbound(external: Address, remote: Address, now: number): Address | undefined
+  outbound(internal: TransportAddress, remote: TransportAddress, now: number): TransportAddress
+  inbound(
+    external: TransportAddress,
+    remote: TransportAddress,
+    now: number,
+  ): TransportAddress | undefined
   reset(): void
 }
 
 interface Mapping {
   readonly key: string
-  readonly internal: Address
+  readonly internal: TransportAddress
   readonly port: number
   readonly hosts: Set<string>
   readonly endpoints: Set<string>
@@ -33,7 +37,11 @@ export function createNat(options: NatOptions, random: Random): Nat {
   let byKey = new Map<string, Mapping>()
   let byPort = new Map<string, Mapping>()
 
-  function outbound(internal: Address, remote: Address, now: number): Address {
+  function outbound(
+    internal: TransportAddress,
+    remote: TransportAddress,
+    now: number,
+  ): TransportAddress {
     const key = mappingKey(mapping, internal, remote)
     const existing = byKey.get(key)
     const entry = existing && alive(existing, now) ? existing : open(key, internal, now)
@@ -43,14 +51,18 @@ export function createNat(options: NatOptions, random: Random): Nat {
     return { transport: internal.transport, host, port: entry.port }
   }
 
-  function inbound(external: Address, remote: Address, now: number): Address | undefined {
+  function inbound(
+    external: TransportAddress,
+    remote: TransportAddress,
+    now: number,
+  ): TransportAddress | undefined {
     const entry = byPort.get(portKey(external.transport, external.port))
     if (!entry || !alive(entry, now) || !admits(entry, remote)) return undefined
     if (refreshOnInbound) entry.lastActive = now
     return entry.internal
   }
 
-  function open(key: string, internal: Address, now: number): Mapping {
+  function open(key: string, internal: TransportAddress, now: number): Mapping {
     sweep(now)
     const port = allocate(internal.port, (candidate) =>
       byPort.has(portKey(internal.transport, candidate)),
@@ -79,7 +91,7 @@ export function createNat(options: NatOptions, random: Random): Nat {
     return false
   }
 
-  function admits(entry: Mapping, remote: Address): boolean {
+  function admits(entry: Mapping, remote: TransportAddress): boolean {
     switch (filtering) {
       case "endpoint-independent":
         return true

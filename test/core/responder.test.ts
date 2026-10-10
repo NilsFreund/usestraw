@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Output, parseMessage, type SipRequest } from "../../src"
+import { type CoreOutput, parseMessage, type SipRequest } from "../../src"
 import { createResponder } from "../../src/core/responder"
 import { createRandom } from "../../src/simulation/random"
 import { bob, parsedRequest } from "../helpers"
@@ -19,7 +19,7 @@ function request(method: string): SipRequest {
   )
 }
 
-function statuses(outputs: Output[]) {
+function statuses(outputs: CoreOutput[]) {
   return outputs.flatMap((output) => {
     if (output.type !== "send") return []
     const result = parseMessage(output.data)
@@ -51,17 +51,5 @@ describe("createResponder (RFC 3261 §8.2.7)", () => {
     expect(responder.respond(ack("dialog"), bob)).toMatchObject([
       { type: "event", event: { type: "request" } },
     ])
-  })
-
-  it("reports but does not send a reply above the size limit", () => {
-    const name = "\t".repeat(32_700)
-    const big = request("OPTIONS")
-    const huge = {
-      ...big,
-      from: { ...big.from, displayName: name },
-      to: { ...big.to, displayName: name },
-    }
-    const outputs = createResponder(createRandom(1)).respond(huge, bob)
-    expect(outputs).toMatchObject([{ type: "event", event: { type: "answered", status: 200 } }])
   })
 })

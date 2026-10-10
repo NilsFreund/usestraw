@@ -2,12 +2,12 @@ import type { NameAddr } from "../../message/fields/name-addr"
 import type { SipRequest, SipResponse } from "../../message/types"
 import type { MediaAddress } from "../../sdp/types"
 import type { TimerSettings } from "../../transaction/timers"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import type { Identity } from "../requests"
 import type { CallEvent, Credentials } from "../types"
 
 export type CallOutput =
-  | { readonly type: "send"; readonly request: SipRequest; readonly to: Address }
+  | { readonly type: "send"; readonly request: SipRequest; readonly to: TransportAddress }
   | { readonly type: "respond"; readonly transaction: string; readonly response: SipResponse }
   | { readonly type: "abandon"; readonly request: SipRequest }
   | { readonly type: "event"; readonly event: CallEvent }

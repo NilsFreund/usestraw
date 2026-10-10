@@ -1,13 +1,13 @@
 import { isSipUri } from "../message/fields/uri"
 import { getHeader } from "../message/headers"
 import { isToken, splitList } from "../message/syntax"
-import type { Header, SipRequest } from "../message/types"
+import type { SipHeader, SipRequest } from "../message/types"
 import { ALLOW } from "./requests"
 
 export interface Answer {
   readonly status: number
   readonly reason: string
-  readonly headers: readonly Header[]
+  readonly headers: readonly SipHeader[]
 }
 
 const KNOWN_METHODS: ReadonlySet<string> = new Set([
@@ -27,8 +27,8 @@ const KNOWN_METHODS: ReadonlySet<string> = new Set([
   "UPDATE",
 ])
 
-const ACCEPT_NOTHING: Header = { name: "Accept", value: "" }
-const ACCEPT_SDP: Header = { name: "Accept", value: "application/sdp" }
+const ACCEPT_NOTHING: SipHeader = { name: "Accept", value: "" }
+const ACCEPT_SDP: SipHeader = { name: "Accept", value: "application/sdp" }
 const SDP_TYPE = /^\s*application\/sdp\s*(?:;|$)/i
 const IN_DIALOG = new Set(["BYE", "CANCEL", "INVITE"])
 
@@ -75,7 +75,7 @@ function requiredOptions(request: SipRequest): string[] {
 export function answerWith(
   status: number,
   reason: string,
-  headers: readonly Header[] = [],
+  headers: readonly SipHeader[] = [],
 ): Answer {
   return { status, reason, headers }
 }

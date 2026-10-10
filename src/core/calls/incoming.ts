@@ -1,9 +1,9 @@
 import type { NameAddr } from "../../message/fields/name-addr"
 import { getHeader } from "../../message/headers"
-import type { Header, SipRequest } from "../../message/types"
+import type { SipHeader, SipRequest } from "../../message/types"
 import type { MediaAddress } from "../../sdp/types"
 import { serverKey } from "../../transaction/keys"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import { createAuthenticator } from "../authenticator"
 import { createTag } from "../ids"
 import type { CallEnd, CallParty } from "../types"
@@ -19,7 +19,7 @@ import type { Call, CallContext, CallOutput } from "./types"
 export interface IncomingSetup {
   readonly invite: SipRequest
   readonly transaction: string
-  readonly from: Address
+  readonly from: TransportAddress
 }
 
 // RFC 3261 §13.3.1.1: a ringing UAS repeats its provisional response every minute
@@ -41,7 +41,11 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
   let session: Session | undefined
   let refreshAt = now + RING_REFRESH
 
-  function reject(status: number, ended: CallEnd, headers: readonly Header[] = []): CallOutput[] {
+  function reject(
+    status: number,
+    ended: CallEnd,
+    headers: readonly SipHeader[] = [],
+  ): CallOutput[] {
     if (state === "ended") return []
     state = "ended"
     const response = createReply(invite, status, { tag, headers })

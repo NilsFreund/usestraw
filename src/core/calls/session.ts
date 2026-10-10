@@ -1,7 +1,7 @@
 import type { SipMessage, SipRequest, SipResponse } from "../../message/types"
 import type { CallMedia } from "../../sdp/types"
 import { topVia } from "../../transaction/keys"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import type { Authenticator } from "../authenticator"
 import type { CallEnd } from "../types"
 import { checkInvite } from "../uas"
@@ -15,7 +15,7 @@ import type { CallContext, CallOutput } from "./types"
 export interface SessionSetup {
   readonly call: string
   readonly dialog: Dialog
-  readonly to: Address
+  readonly to: TransportAddress
   readonly seq: number
   readonly remoteSeq?: number
   readonly media: Media

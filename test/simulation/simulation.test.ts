@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address, Random } from "../../src"
+import type { Random, TransportAddress } from "../../src"
 import { latency, loss } from "../../src/simulation/network/conditions"
 import { outage } from "../../src/simulation/scenarios"
 import { createSimulation, type SimulationOptions } from "../../src/simulation/simulation"
@@ -196,7 +196,7 @@ describe("createSimulation", () => {
       const firstDraws = () => {
         const simulation = createSimulation({ seed: 1 })
         const draws: number[] = []
-        const recorded = (address: Address) => (random: Random) => {
+        const recorded = (address: TransportAddress) => (random: Random) => {
           draws.push(random())
           return userAgent("x", address)(random)
         }
@@ -217,7 +217,7 @@ describe("createSimulation", () => {
 
     it("drops packets to addresses without a node", () => {
       const { simulation, caller } = setup({ seed: 1 })
-      const nowhere: Address = { transport: "UDP", host: "192.0.2.99", port: 5060 }
+      const nowhere: TransportAddress = { transport: "UDP", host: "192.0.2.99", port: 5060 }
       simulation.command(caller, options(nowhere, "sip:x@example.com"))
       simulation.run()
       expect(simulation.trace[0]?.to).toBe("UDP:192.0.2.99:5060")
@@ -227,7 +227,7 @@ describe("createSimulation", () => {
 
     it("ignores deliveries to plain network hosts without a core", () => {
       const { simulation } = setup({ seed: 1 })
-      const sink: Address = { transport: "UDP", host: "192.0.2.50", port: 5060 }
+      const sink: TransportAddress = { transport: "UDP", host: "192.0.2.50", port: 5060 }
       simulation.network.attach("sink", sink)
       simulation.network.send("alice", sink, bytes("x"), 0)
       simulation.run()
@@ -236,7 +236,7 @@ describe("createSimulation", () => {
 
     it("does not attach a host when its core cannot be created", () => {
       const { simulation } = setup({ seed: 1 })
-      const carol: Address = { transport: "UDP", host: "192.0.2.30", port: 5060 }
+      const carol: TransportAddress = { transport: "UDP", host: "192.0.2.30", port: 5060 }
       const broken = () => {
         throw new TypeError("bad core")
       }
@@ -246,7 +246,7 @@ describe("createSimulation", () => {
 
     it("follows the network address after a move", () => {
       const { simulation, caller } = setup({ seed: 1 })
-      const moved: Address = { ...alice, host: "192.0.2.77" }
+      const moved: TransportAddress = { ...alice, host: "192.0.2.77" }
       simulation.network.move("alice", moved)
       expect(caller.address).toEqual(moved)
     })

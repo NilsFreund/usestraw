@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest"
 import {
-  type Address,
   type Core,
+  type CoreInput,
+  type CoreOutput,
   createCore,
   createResponse,
-  type Input,
   isRequest,
-  type Output,
   type SipMessage,
   type SipRequest,
   serializeMessage,
+  type TransportAddress,
 } from "../../src"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes, fixture, parsed } from "../helpers"
@@ -27,26 +27,26 @@ function busy(): Core {
   })
 }
 
-function sent(outputs: Output[]) {
+function sent(outputs: CoreOutput[]) {
   return outputs.flatMap((output) => (output.type === "send" ? [output] : []))
 }
 
-function events(outputs: Output[]) {
+function events(outputs: CoreOutput[]) {
   return outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
 }
 
-function message(output: Output | undefined): SipMessage {
+function message(output: CoreOutput | undefined): SipMessage {
   if (output?.type !== "send") throw new Error("Expected a send output")
   return parsed(output.data)
 }
 
-function sentRequest(output: Output | undefined): SipRequest {
+function sentRequest(output: CoreOutput | undefined): SipRequest {
   const request = message(output)
   if (!isRequest(request)) throw new Error("Expected a request")
   return request
 }
 
-function statuses(outputs: Output[]): number[] {
+function statuses(outputs: CoreOutput[]): number[] {
   return sent(outputs).map((output) => {
     const response = message(output)
     return "status" in response ? response.status : 0
@@ -89,8 +89,11 @@ function responseTo(request: SipRequest, status = 200): Uint8Array {
   return serializeMessage(createResponse(request, status, "Reason", { toTag: "b1" }))
 }
 
-function drain(ua: Core, until = Number.POSITIVE_INFINITY): { at: number; outputs: Output[] }[] {
-  const log: { at: number; outputs: Output[] }[] = []
+function drain(
+  ua: Core,
+  until = Number.POSITIVE_INFINITY,
+): { at: number; outputs: CoreOutput[] }[] {
+  const log: { at: number; outputs: CoreOutput[] }[] = []
   for (let at = ua.nextDeadline(); at !== undefined && at <= until; at = ua.nextDeadline()) {
     if (log.length === 1000) throw new Error("The core keeps firing")
     log.push({ at, outputs: ua.handle({ type: "timeout" }, at) })
@@ -509,17 +512,26 @@ describe("createCore", () => {
       })
     })
 
-    it("answers but sends nothing when the reply would exceed 65535 bytes", () => {
-      const named = (name: string) =>
-        new TextDecoder()
-          .decode(incoming("OPTIONS"))
-          .replace("From: <", `From: "${name}" <`)
-          .replace("To: <", `To: "${name}" <`)
-      const data = bytes(named("\t".repeat(Math.floor((65_530 - named("").length) / 2))))
-      expect(data.length).toBeGreaterThan(65_500)
-      const outputs = core().handle(receive(data), 0)
+    it("sends a reply of up to 65535 bytes and only reports a bigger one", () => {
+      const named = (length: number) =>
+        bytes(
+          new TextDecoder()
+            .decode(incoming("OPTIONS"))
+            .replace("To: <", `To: "${"\t".repeat(length)}" <`),
+        )
+      const replies = (length: number) => sent(core().handle(receive(named(length)), 0))
+      const length = 65_535 - (replies(0)[0]?.data.length ?? 0)
+      expect(replies(length)[0]?.data).toHaveLength(65_535)
+      const outputs = core().handle(receive(named(length + 1)), 0)
       expect(events(outputs)).toMatchObject([{ type: "answered", status: 200 }])
-      expect(sent(outputs)).toEqual([])
+      expect(sent(outputs)).toHaveLength(0)
+    })
+
+    it("refuses to send an app's message above 65535 bytes", () => {
+      const message = { ...parsed(incoming("OPTIONS")), body: new Uint8Array(65_535) }
+      expect(() =>
+        core().handle({ type: "command", command: { type: "send", message, to: bob } }, 0),
+      ).toThrow(new RangeError("Message exceeds 65535 bytes"))
     })
 
     it("passes an ACK without transaction to the application", () => {
@@ -587,20 +599,20 @@ describe("createCore", () => {
 
   describe("input validation", () => {
     it("rejects unknown inputs and commands from untyped callers", () => {
-      const input = { type: "dance" } as unknown as Input
-      const command = { type: "command", command: { type: "dance" } } as unknown as Input
+      const input = { type: "dance" } as unknown as CoreInput
+      const command = { type: "command", command: { type: "dance" } } as unknown as CoreInput
       expect(() => core().handle(input, 0)).toThrow(new TypeError('Unknown input {"type":"dance"}'))
       expect(() => core().handle(command, 0)).toThrow(
         new TypeError('Unknown command {"type":"dance"}'),
       )
     })
 
-    const invalidAddresses: Address[] = [
+    const invalidAddresses: TransportAddress[] = [
       { ...alice, host: "evil host" },
       { ...alice, host: "a\r\nb" },
       { ...alice, port: 70_000 },
       { ...alice, port: 1.5 },
-      { ...alice, transport: "SCTP" as Address["transport"] },
+      { ...alice, transport: "SCTP" as TransportAddress["transport"] },
     ]
 
     it.each(invalidAddresses)("rejects the local address %o", (address) => {

@@ -188,7 +188,7 @@ console.log(ladder(trace)) // the ladder above, after the fact
 console.log(replay(trace)) // { ok: true, steps: 42 }, or the first step that differs
 ```
 
-A trace that grew past 512 KB still draws, but no longer replays. `trace: false` turns it off.
+Replays need the usestraw version that made the trace, and a trace that grew past 512 KB still draws but no longer replays. `trace: false` turns it off.
 
 ## API
 

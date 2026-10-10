@@ -1,6 +1,6 @@
 import { isRequest, type SipMessage, type SipRequest, type SipResponse } from "../message/types"
 import { createAgenda } from "../support/agenda"
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 import { acceptsResponse, replyAddress } from "../transport/routing"
 import { createClientInvite } from "./client-invite"
 import { createClientNonInvite } from "./client-non-invite"
@@ -12,14 +12,14 @@ import { defaultTimers, type TimerSettings, validateTimers } from "./timers"
 import type { ClientTransaction, ServerTransaction, Transaction, TransactionOutput } from "./types"
 
 export interface TransactionOptions {
-  readonly local: Address
+  readonly local: TransportAddress
   readonly timers?: TimerSettings
 }
 
 export interface Transactions {
-  send(request: SipRequest, to: Address, now: number): TransactionOutput[]
+  send(request: SipRequest, to: TransportAddress, now: number): TransactionOutput[]
   respond(transaction: string, response: SipResponse, now: number): TransactionOutput[]
-  receive(message: SipMessage, from: Address, now: number): TransactionOutput[]
+  receive(message: SipMessage, from: TransportAddress, now: number): TransactionOutput[]
   hasInvite(cancel: SipRequest): boolean
   abandon(request: SipRequest): void
   expire(now: number): TransactionOutput[]
@@ -34,7 +34,7 @@ export function createTransactions(options: TransactionOptions): Transactions {
   const schedule = createAgenda<Transaction<string>>()
   const scheduled = new Map<Transaction<string>, number>()
 
-  function start(request: SipRequest, to: Address, now: number): TransactionOutput[] {
+  function start(request: SipRequest, to: TransportAddress, now: number): TransactionOutput[] {
     if (request.method === "ACK") return [send(request, to)]
     const create = request.method === "INVITE" ? createClientInvite : createClientNonInvite
     const transaction = create(request, to, timers)
@@ -50,7 +50,7 @@ export function createTransactions(options: TransactionOptions): Transactions {
     return settle(transaction, transaction.respond(response, now))
   }
 
-  function receive(message: SipMessage, from: Address, now: number): TransactionOutput[] {
+  function receive(message: SipMessage, from: TransportAddress, now: number): TransactionOutput[] {
     if (isRequest(message)) return receiveRequest(message, from, now)
     const transaction = acceptsResponse(message, local)
       ? clients.get(clientKey(message))
@@ -59,7 +59,11 @@ export function createTransactions(options: TransactionOptions): Transactions {
     return settle(transaction, transaction.receive(message, from, now))
   }
 
-  function receiveRequest(request: SipRequest, from: Address, now: number): TransactionOutput[] {
+  function receiveRequest(
+    request: SipRequest,
+    from: TransportAddress,
+    now: number,
+  ): TransactionOutput[] {
     const to = replyAddress(topVia(request), from)
     const existing = find(request)
     const acceptedAck = request.method === "ACK" && existing?.state === "accepted"

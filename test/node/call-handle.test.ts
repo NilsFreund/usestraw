@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Command } from "../../src"
+import type { CoreCommand } from "../../src"
 import { type Agent, type CallSetup, createCall } from "../../src/node/calls"
 
 const media = {
@@ -11,7 +11,7 @@ const media = {
 } as const
 
 function handle(direction: CallSetup["direction"] = "incoming", host = "127.0.0.1", agent?: Agent) {
-  const commands: Command[] = []
+  const commands: CoreCommand[] = []
   const created = createCall({
     id: "c1",
     direction,

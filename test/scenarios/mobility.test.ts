@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../src"
+import type { TransportAddress } from "../../src"
 import { latency } from "../../src/simulation/network/conditions"
 import { profiles } from "../../src/simulation/network/profiles"
 import { degrade, flapping, handover, partition } from "../../src/simulation/scenarios"
@@ -16,7 +16,7 @@ function commute(simulationOptions: SimulationOptions) {
   return { simulation, caller, callee, ping }
 }
 
-const lte: Address = { transport: "UDP", host: "100.64.33.7", port: 5060 }
+const lte: TransportAddress = { transport: "UDP", host: "100.64.33.7", port: 5060 }
 
 describe("mobility", () => {
   it("keeps a transaction alive across a Wi-Fi to LTE handover", () => {

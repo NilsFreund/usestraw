@@ -1,12 +1,12 @@
 import { formatStep } from "../recorder/ladder"
-import type { Step } from "../recorder/recorder"
+import type { RecordedStep } from "../recorder/recorder"
 
 const OFF = new Set(["", "0", "false", "off"])
 
 export function debugOutput(
   env: Readonly<Record<string, string | undefined>> = process.env,
   write: (text: string) => void = (text) => process.stderr.write(text),
-): ((step: Step) => void) | undefined {
+): ((step: RecordedStep) => void) | undefined {
   if (OFF.has((env["STRAW_DEBUG"] ?? "").toLowerCase())) return undefined
   return (step) => {
     const lines = formatStep(step)

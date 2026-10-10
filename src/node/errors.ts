@@ -1,5 +1,5 @@
 import { isRetryable } from "../core/registration/retry"
-import type { OfferedChallenge, RegistrationFailure } from "../core/types"
+import type { AuthChallenge, RegistrationFailure } from "../core/types"
 import { show } from "../message/syntax"
 
 export type PhoneFailure = RegistrationFailure | { readonly reason: "network" }
@@ -115,7 +115,7 @@ function explain(failure: PhoneFailure, context: ErrorContext, cause?: Error): s
   }
 }
 
-function describe(offered: readonly OfferedChallenge[]): string {
+function describe(offered: readonly AuthChallenge[]): string {
   if (offered.length === 0) return "no challenge"
   const shown = offered
     .slice(0, 3)

@@ -10,7 +10,7 @@ import { canonicalName, isTypedHeader } from "./headers"
 import { atMost, MAX_HEADER_LINES, MAX_MESSAGE_SIZE } from "./limits"
 import { isStatusCode } from "./status"
 import { fail, hasControl, hasRawControl, isToken, ParseError, show, TOKEN_CHARS } from "./syntax"
-import type { Header, MessageFields, SipMessage } from "./types"
+import type { MessageFields, SipHeader, SipMessage } from "./types"
 
 /** A parsed message, or why the input is not one. */
 export type ParseResult =
@@ -83,7 +83,7 @@ export function splitHeaderLine(line: string): { name: string; value: string } |
   return name === undefined ? undefined : { name: canonicalName(name), value }
 }
 
-function parseHeaders(lines: string[]): Header[] {
+function parseHeaders(lines: string[]): SipHeader[] {
   const headers: { name: string; value: string }[] = []
   for (const line of lines) {
     const previous = headers.at(-1)
@@ -100,7 +100,7 @@ function parseHeaders(lines: string[]): Header[] {
   return headers.map(({ name, value }) => ({ name, value: value.trim() }))
 }
 
-function parseFields(headers: Header[]): Omit<MessageFields, "body"> {
+function parseFields(headers: SipHeader[]): Omit<MessageFields, "body"> {
   const via = parseVias(values(headers, "Via"))
   if (via.length === 0) fail("Missing Via header")
   const from = parseNameAddr(required(headers, "From"))
@@ -125,16 +125,16 @@ function parseFields(headers: Header[]): Omit<MessageFields, "body"> {
   }
 }
 
-function values(headers: Header[], name: string): string[] {
+function values(headers: SipHeader[], name: string): string[] {
   return headers.filter((header) => header.name === name).map((header) => header.value)
 }
 
-function single(headers: Header[], name: string): string | undefined {
+function single(headers: SipHeader[], name: string): string | undefined {
   const found = values(headers, name)
   if (found.length > 1) fail(`Multiple ${name} headers`)
   return found[0]
 }
 
-function required(headers: Header[], name: string): string {
+function required(headers: SipHeader[], name: string): string {
   return single(headers, name) ?? fail(`Missing ${name} header`)
 }

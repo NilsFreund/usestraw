@@ -2,7 +2,7 @@ import { formatNameAddr, type NameAddr, parseNameAddr } from "../../message/fiel
 import { isRequestUri } from "../../message/fields/uri"
 import { getHeaders } from "../../message/headers"
 import { splitOutside } from "../../message/syntax"
-import type { Header, SipRequest, SipResponse } from "../../message/types"
+import type { SipHeader, SipRequest, SipResponse } from "../../message/types"
 import { ALLOW, createRequest, type Identity } from "../requests"
 
 export interface Dialog {
@@ -22,7 +22,7 @@ export interface InviteFields {
   readonly sdp: Uint8Array
 }
 
-export const SDP: Header = { name: "Content-Type", value: "application/sdp" }
+export const SDP: SipHeader = { name: "Content-Type", value: "application/sdp" }
 const CREDENTIALS = /^(?:proxy-)?authorization$/i
 const MAX_ROUTES = 32
 
@@ -104,7 +104,7 @@ export function inDialog(
   dialog: Dialog,
   seq: number,
   identity: Identity,
-  extra: readonly Header[] = [],
+  extra: readonly SipHeader[] = [],
 ): SipRequest {
   const routes = dialog.routes.map((route) => ({ name: "Route", value: formatNameAddr(route) }))
   const fields = {

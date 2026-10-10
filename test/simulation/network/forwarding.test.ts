@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../../src"
+import type { TransportAddress } from "../../../src"
 import { latency } from "../../../src/simulation/network/conditions"
 import {
   createForwarding,
@@ -25,7 +25,7 @@ function fabric() {
   return { hosts, nats, routes, agenda, advance: createForwarding({ hosts, nats, routes, agenda }) }
 }
 
-function transit(destination: Address = bob): Transit {
+function transit(destination: TransportAddress = bob): Transit {
   const packet: PacketState = {
     id: 1,
     sentAt: 0,

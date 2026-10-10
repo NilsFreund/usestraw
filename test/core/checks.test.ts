@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   checkAddress,
+  checkAor,
   checkCredentials,
   checkExpires,
   checkRegistrar,
@@ -22,6 +23,34 @@ describe("checkRequestUri", () => {
     expect(() => checkRequestUri("sip:a@b?Route=x")).toThrow(
       new TypeError('Invalid Request-URI "sip:a@b?Route=x"'),
     )
+  })
+})
+
+describe("length limits", () => {
+  const host = (length: number) => `sip:${"a".repeat(length - 16)}@example.com`
+
+  it("takes URIs, user names and realms of up to 4096 characters", () => {
+    expect(host(4096)).toHaveLength(4096)
+    expect(() => checkRequestUri(host(4096))).not.toThrow()
+    expect(() => checkAor(host(4096))).not.toThrow()
+    expect(() => checkRegistrar(`sip:${"a".repeat(4088)}.com`)).not.toThrow()
+    const name = "a".repeat(4096)
+    expect(() => checkCredentials({ username: name, password: "p", realm: name })).not.toThrow()
+  })
+
+  it("refuses longer ones before they turn into a message too big to send", () => {
+    const tooLong = new RangeError("A URI must be at most 4096 characters, got 4097")
+    expect(() => checkRequestUri(host(4097))).toThrow(tooLong)
+    expect(() => checkAor(host(4097))).toThrow(tooLong)
+    expect(() => checkRegistrar(`sip:${"a".repeat(4089)}.com`)).toThrow(tooLong)
+    const name = "a".repeat(4097)
+    expect(() => checkCredentials({ username: name, password: "p" })).toThrow(
+      new RangeError("A user name must be at most 4096 characters, got 4097"),
+    )
+    expect(() => checkCredentials({ username: "a", password: "p", realm: name })).toThrow(
+      new RangeError("A realm must be at most 4096 characters, got 4097"),
+    )
+    expect(() => checkAor("alice")).toThrow(new TypeError('Invalid address of record "alice"'))
   })
 })
 

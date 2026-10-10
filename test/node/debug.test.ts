@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Step } from "../../src"
+import type { RecordedStep } from "../../src"
 import { debugOutput } from "../../src/node/debug"
 import { bob, bytes } from "../helpers"
 
-const sending: Step = {
+const sending: RecordedStep = {
   now: 0,
   input: { type: "timeout" },
   random: [],
   next: null,
   outputs: [{ type: "send", data: bytes("REGISTER sip:example.com SIP/2.0\r\n\r\n"), to: bob }],
 }
-const quiet: Step = { now: 0, input: { type: "timeout" }, random: [], next: null, outputs: [] }
+const quiet: RecordedStep = {
+  now: 0,
+  input: { type: "timeout" },
+  random: [],
+  next: null,
+  outputs: [],
+}
 
 afterEach(() => {
   vi.restoreAllMocks()

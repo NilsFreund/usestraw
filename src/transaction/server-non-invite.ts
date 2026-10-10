@@ -1,5 +1,5 @@
 import type { SipRequest, SipResponse } from "../message/types"
-import { type Address, isReliable } from "../transport/address"
+import { isReliable, type TransportAddress } from "../transport/address"
 import { createAlarms } from "./alarms"
 import { serverKey } from "./keys"
 import { send } from "./outputs"
@@ -10,7 +10,7 @@ export type ServerNonInviteState = "trying" | "proceeding" | "completed" | "term
 
 export function createServerNonInvite(
   request: SipRequest,
-  replyTo: Address,
+  replyTo: TransportAddress,
   timers: TimerSettings = defaultTimers,
 ): ServerTransaction<ServerNonInviteState> {
   const reliable = isReliable(replyTo)
@@ -19,7 +19,7 @@ export function createServerNonInvite(
   let state: ServerNonInviteState = "trying"
   let latest: SipResponse | undefined
 
-  function receive(_: SipRequest, from: Address): TransactionOutput[] {
+  function receive(_: SipRequest, from: TransportAddress): TransactionOutput[] {
     if (state === "terminated") return []
     to = from
     return latest ? [send(latest, to)] : []

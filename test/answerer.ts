@@ -1,4 +1,4 @@
-import type { Command, Core, MediaAddress, Output } from "../src"
+import type { Core, CoreCommand, CoreOutput, MediaAddress } from "../src"
 import { earliest } from "../src/support/time"
 
 export interface AnswererOptions {
@@ -10,7 +10,7 @@ export interface AnswererOptions {
 
 interface Pending {
   readonly at: number
-  readonly command: Command
+  readonly command: CoreCommand
 }
 
 // Wraps a phone so it picks up, rejects or hangs up its incoming calls on a script
@@ -20,12 +20,12 @@ export function answerer(core: Core, options: AnswererOptions = {}): Core {
   const live = new Set<string>()
   let pending: Pending[] = []
 
-  function react(outputs: Output[], now: number): Output[] {
+  function react(outputs: CoreOutput[], now: number): CoreOutput[] {
     for (const output of outputs) {
       if (output.type !== "event" || output.event.type !== "call") continue
       const { call, state } = output.event
       if (state === "incoming" && (answerAfter !== undefined || reject !== undefined)) {
-        const command: Command =
+        const command: CoreCommand =
           reject === undefined
             ? { type: "accept", call, media }
             : { type: "end", call, status: reject }
@@ -39,7 +39,7 @@ export function answerer(core: Core, options: AnswererOptions = {}): Core {
     return outputs
   }
 
-  function handle(input: Parameters<Core["handle"]>[0], now: number): Output[] {
+  function handle(input: Parameters<Core["handle"]>[0], now: number): CoreOutput[] {
     const outputs = react(core.handle(input, now), now)
     if (input.type !== "timeout") return outputs
     const due = pending.filter((entry) => entry.at <= now)

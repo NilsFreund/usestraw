@@ -1,9 +1,9 @@
-import type { CallEvent, Output } from "../core/types"
+import type { CallEvent, CoreOutput } from "../core/types"
 import { formatHost } from "../message/fields/host"
 import type { CallMedia } from "../sdp/types"
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 import { decode } from "./codec"
-import type { Step } from "./recorder"
+import type { RecordedStep } from "./recorder"
 
 const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu
 const WIDTH = 160
@@ -19,7 +19,7 @@ export function ladder(recording: string): string {
     .join("\n")
 }
 
-export function formatStep(step: Step): string[] {
+export function formatStep(step: RecordedStep): string[] {
   const at = (step.now / 1000).toFixed(3).padStart(9)
   const lines: string[] = []
   if (step.input.type === "receive") {
@@ -35,7 +35,7 @@ export function formatStep(step: Step): string[] {
 
 function drawLine(line: string): string[] {
   try {
-    const step = decode(line) as Step | { readonly now: number; readonly oversized: number }
+    const step = decode(line) as RecordedStep | { readonly now: number; readonly oversized: number }
     if (!("oversized" in step)) return formatStep(step)
     const at = (step.now / 1000).toFixed(3).padStart(9)
     return [printable(`${at}  … a step of ${Math.ceil(step.oversized / 1024)} KiB was left out`)]
@@ -44,7 +44,7 @@ function drawLine(line: string): string[] {
   }
 }
 
-function describe(output: Output): string | undefined {
+function describe(output: CoreOutput): string | undefined {
   if (output.type === "send") return `phone → ${place(output.to)}  ${summary(output.data)}`
   const { event } = output
   if (event.type === "call") return `● call ${call(event)}`
@@ -71,7 +71,7 @@ function describeMedia(media: CallMedia | undefined): string {
   return ` ${codec} to ${formatHost(host)}:${port}${direction === "sendrecv" ? "" : ` ${direction}`}`
 }
 
-function place(address: Address): string {
+function place(address: TransportAddress): string {
   return `${formatHost(address.host)}:${address.port}`
 }
 

@@ -1,5 +1,5 @@
 import type { SipRequest, SipResponse } from "../message/types"
-import { type Address, isReliable } from "../transport/address"
+import { isReliable, type TransportAddress } from "../transport/address"
 import { createAck } from "./ack"
 import { createAlarms } from "./alarms"
 import { clientKey } from "./keys"
@@ -11,7 +11,7 @@ export type ClientInviteState = "calling" | "proceeding" | "completed" | "accept
 
 export function createClientInvite(
   invite: SipRequest,
-  to: Address,
+  to: TransportAddress,
   timers: TimerSettings = defaultTimers,
 ): ClientTransaction<ClientInviteState> {
   const reliable = isReliable(to)
@@ -25,7 +25,11 @@ export function createClientInvite(
     return [send(invite, to)]
   }
 
-  function receive(response: SipResponse, from: Address, now: number): TransactionOutput[] {
+  function receive(
+    response: SipResponse,
+    from: TransportAddress,
+    now: number,
+  ): TransactionOutput[] {
     const passed = notify({ type: "response", response, from })
     switch (state) {
       case "calling":

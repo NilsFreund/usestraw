@@ -3,7 +3,7 @@ import { formatParams, isParams, type Params, parseParams } from "./params"
 import { isUri } from "./uri"
 
 export interface NameAddr {
-  readonly displayName?: string
+  readonly displayName?: string | undefined
   readonly uri: string
   readonly params: Params
 }

@@ -1,4 +1,4 @@
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 import type { Access } from "./network/conditions"
 import type { HostOptions } from "./network/hosts"
 import type { Simulation } from "./simulation"
@@ -43,7 +43,7 @@ export function handover(
   simulation: Simulation,
   host: string,
   at: number,
-  address: Address,
+  address: TransportAddress,
   options?: HostOptions,
 ): void {
   simulation.at(at, () => simulation.network.move(host, address, options))

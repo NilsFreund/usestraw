@@ -1,9 +1,9 @@
 import type { SipRequest, SipResponse } from "../../message/types"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import type { CallEvent } from "../types"
 import type { CallOutput } from "./types"
 
-export function send(request: SipRequest, to: Address): CallOutput {
+export function send(request: SipRequest, to: TransportAddress): CallOutput {
   return { type: "send", request, to }
 }
 

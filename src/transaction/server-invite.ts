@@ -1,5 +1,5 @@
 import type { SipRequest, SipResponse } from "../message/types"
-import { type Address, isReliable } from "../transport/address"
+import { isReliable, type TransportAddress } from "../transport/address"
 import { createAlarms } from "./alarms"
 import { acknowledges, serverKey } from "./keys"
 import { notify, send } from "./outputs"
@@ -11,7 +11,7 @@ export type ServerInviteState = "proceeding" | "completed" | "confirmed" | "acce
 
 export function createServerInvite(
   invite: SipRequest,
-  replyTo: Address,
+  replyTo: TransportAddress,
   timers: TimerSettings = defaultTimers,
 ): ServerTransaction<ServerInviteState> {
   const reliable = isReliable(replyTo)
@@ -32,7 +32,7 @@ export function createServerInvite(
     return latest ?? createTrying(invite, now - started)
   }
 
-  function receive(request: SipRequest, from: Address, now: number): TransactionOutput[] {
+  function receive(request: SipRequest, from: TransportAddress, now: number): TransactionOutput[] {
     if (request.method === "ACK") return acknowledge(request, now)
     if (state === "confirmed" || state === "terminated") return []
     to = from

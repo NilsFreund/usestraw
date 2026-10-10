@@ -2,7 +2,7 @@ import { formatContact } from "./fields/contact"
 import { formatCSeq } from "./fields/cseq"
 import { formatNameAddr } from "./fields/name-addr"
 import { formatVia } from "./fields/via"
-import type { Header, SipMessage } from "./types"
+import type { SipHeader, SipMessage } from "./types"
 
 const KNOWN = [
   "Accept",
@@ -118,7 +118,7 @@ export function isTypedHeader(name: string): boolean {
   return TYPED.has(canonicalName(name))
 }
 
-export function headerList(message: SipMessage): Header[] {
+export function headerList(message: SipMessage): SipHeader[] {
   return [
     ...message.via.map((via) => ({ name: "Via", value: formatVia(via) })),
     ...(message.maxForwards === undefined

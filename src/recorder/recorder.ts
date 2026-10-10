@@ -1,24 +1,26 @@
+import { version } from "../../package.json"
 import { type Core, type CoreOptions, createCore } from "../core/core"
-import type { Input, Output, Random } from "../core/types"
+import type { CoreInput, CoreOutput, Random } from "../core/types"
 import { show } from "../message/syntax"
 import { isIntegerIn } from "../support/integer"
+import { resolveTimers } from "../transaction/timers"
 import { decode, encode, maskSecrets } from "./codec"
 
 /** One recorded step: an input, the random draws it took, and what came out. */
-export interface Step {
+export interface RecordedStep {
   readonly now: number
-  readonly input: Input
+  readonly input: CoreInput
   readonly random: readonly number[]
   readonly next: number | null
-  readonly outputs?: readonly Output[]
+  readonly outputs?: readonly CoreOutput[]
   readonly thrown?: string
 }
 
 /** Options for {@link createRecordedCore}. */
-export interface RecorderSettings {
+export interface RecorderOptions {
   /** Maximum size in bytes; the oldest steps go first. Defaults to 512 KB. */
   readonly limit?: number | undefined
-  readonly onStep?: ((step: Step) => void) | undefined
+  readonly onStep?: ((step: RecordedStep) => void) | undefined
 }
 
 /** A core that records itself. */
@@ -32,7 +34,7 @@ const LIMIT = 512 * 1024
 /** Creates a core that records every input, random draw and output, for {@link replay}. */
 export function createRecordedCore(
   options: CoreOptions,
-  settings: RecorderSettings = {},
+  settings: RecorderOptions = {},
 ): RecordedCore {
   const { limit = LIMIT, onStep } = settings
   if (!isIntegerIn(limit, 1024, 2 ** 31 - 1)) throw new RangeError(`Invalid limit ${show(limit)}`)
@@ -47,6 +49,7 @@ export function createRecordedCore(
     encode({
       straw: "recording",
       version: 1,
+      release: version,
       options: describe(options),
       random: take(),
       next: core.nextDeadline() ?? null,
@@ -75,7 +78,7 @@ export function createRecordedCore(
     }
   }
 
-  function record(step: Step): void {
+  function record(step: RecordedStep): void {
     const line = encode(step)
     const bytes = byteLength(line)
     if (bytes > limit / 2) {
@@ -84,12 +87,12 @@ export function createRecordedCore(
     } else keep(line)
     if (!onStep) return
     try {
-      onStep(decode(line) as Step)
+      onStep(decode(line) as RecordedStep)
     } catch {}
   }
 
-  function handle(input: Input, now: number): Output[] {
-    let outputs: Output[]
+  function handle(input: CoreInput, now: number): CoreOutput[] {
+    let outputs: CoreOutput[]
     try {
       outputs = core.handle(input, now)
     } catch (error) {
@@ -109,12 +112,18 @@ export function createRecordedCore(
 }
 
 function describe(options: CoreOptions): object {
-  const { address, aor, credentials, timers } = options
+  const { address, aor, credentials, timers, maxCalls = 100 } = options
   const login = credentials && {
     username: credentials.username,
     ...(credentials.realm === undefined ? {} : { realm: credentials.realm }),
   }
-  return { address, aor, ...(login ? { credentials: login } : {}), ...(timers ? { timers } : {}) }
+  return {
+    address,
+    aor,
+    ...(login ? { credentials: login } : {}),
+    timers: resolveTimers(timers),
+    maxCalls,
+  }
 }
 
 function byteLength(text: string): number {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
-  type Command,
+  type CoreCommand,
   type CoreEvent,
+  type CoreOutput,
   createCore,
   createResponse,
   getHeader,
   getHeaders,
   isRequest,
   type MediaAddress,
-  type Output,
   parseMessage,
   type SipMessage,
   type SipRequest,
@@ -92,7 +92,7 @@ function request(method: string, options: RequestOptions = {}): string {
 
 const receive = (text: string) => ({ type: "receive", data: bytes(text), from: bob }) as const
 const timeout = { type: "timeout" } as const
-const command = (value: Command) => ({ type: "command", command: value }) as const
+const command = (value: CoreCommand) => ({ type: "command", command: value }) as const
 const accept = (call = "in1", media: MediaAddress = local) =>
   command({ type: "accept", call, media })
 const end = (status?: number, call = "in1") =>
@@ -108,7 +108,7 @@ function phone(maxCalls?: number) {
   })
 }
 
-function messages(outputs: Output[]): SipMessage[] {
+function messages(outputs: CoreOutput[]): SipMessage[] {
   return outputs.flatMap((output) => {
     if (output.type !== "send") return []
     const parsed = parseMessage(output.data)
@@ -116,14 +116,14 @@ function messages(outputs: Output[]): SipMessage[] {
   })
 }
 
-const responses = (outputs: Output[]): SipResponse[] =>
+const responses = (outputs: CoreOutput[]): SipResponse[] =>
   messages(outputs).flatMap((message) => (isRequest(message) ? [] : [message]))
-const requests = (outputs: Output[]): SipRequest[] => messages(outputs).filter(isRequest)
-const statuses = (outputs: Output[]): string[] =>
+const requests = (outputs: CoreOutput[]): SipRequest[] => messages(outputs).filter(isRequest)
+const statuses = (outputs: CoreOutput[]): string[] =>
   responses(outputs).map((response) => `${response.status} ${response.cseq.method}`)
-const events = (outputs: Output[]): CoreEvent[] =>
+const events = (outputs: CoreOutput[]): CoreEvent[] =>
   outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
-const calls = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
+const calls = (outputs: CoreOutput[]) => events(outputs).filter((event) => event.type === "call")
 
 function reply(to: SipRequest, status: number, headers: { name: string; value: string }[] = []) {
   const response = createResponse(to, status, "Reason", { headers })
@@ -148,8 +148,8 @@ function acked() {
   return { ...call, ack }
 }
 
-function run(ua: ReturnType<typeof phone>, from: number, to: number): [number, Output[]][] {
-  const steps: [number, Output[]][] = []
+function run(ua: ReturnType<typeof phone>, from: number, to: number): [number, CoreOutput[]][] {
+  const steps: [number, CoreOutput[]][] = []
   for (let at = ua.nextDeadline(); at !== undefined && at >= from && at <= to; ) {
     const outputs = ua.handle(timeout, at)
     if (outputs.length > 0) steps.push([at, outputs])
@@ -982,7 +982,7 @@ describe("validating the answer and end commands", () => {
     [{ type: "accept", call: "in1", media: { host: "192.0.2.10", port: 0 } }, RangeError],
   ] as const)("rejects %o", (value, error) => {
     const { ua } = ringing()
-    expect(() => ua.handle(command(value as Command), 10)).toThrow(error)
+    expect(() => ua.handle(command(value as CoreCommand), 10)).toThrow(error)
   })
 
   it("accepts the Call-ID of any call it was offered", () => {

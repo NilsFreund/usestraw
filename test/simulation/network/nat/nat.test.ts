@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../../../src"
+import type { TransportAddress } from "../../../../src"
 import { createNat } from "../../../../src/simulation/network/nat/nat"
 import {
   type NatBehavior,
@@ -8,10 +8,10 @@ import {
 } from "../../../../src/simulation/network/nat/types"
 import { createRandom } from "../../../../src/simulation/random"
 
-const phone: Address = { transport: "UDP", host: "192.168.1.10", port: 5060 }
-const server: Address = { transport: "UDP", host: "198.51.100.5", port: 5060 }
-const serverOtherPort: Address = { ...server, port: 5070 }
-const stranger: Address = { transport: "UDP", host: "198.51.100.99", port: 5060 }
+const phone: TransportAddress = { transport: "UDP", host: "192.168.1.10", port: 5060 }
+const server: TransportAddress = { transport: "UDP", host: "198.51.100.5", port: 5060 }
+const serverOtherPort: TransportAddress = { ...server, port: 5070 }
+const stranger: TransportAddress = { transport: "UDP", host: "198.51.100.99", port: 5060 }
 
 const nat = (options: Partial<NatOptions> = {}) =>
   createNat({ host: "203.0.113.1", ports: "sequential", ...options }, createRandom(1))
@@ -73,7 +73,7 @@ describe("createNat", () => {
   })
 
   describe("filtering behavior", () => {
-    const admitted = (filtering: NatBehavior, remote: Address) => {
+    const admitted = (filtering: NatBehavior, remote: TransportAddress) => {
       const box = nat({ filtering })
       const external = box.outbound(phone, server, 0)
       return box.inbound(external, remote, 10) !== undefined

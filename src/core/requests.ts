@@ -2,15 +2,15 @@ import type { Contact } from "../message/fields/contact"
 import { formatHost } from "../message/fields/host"
 import type { NameAddr } from "../message/fields/name-addr"
 import type { Via } from "../message/fields/via"
-import type { Header, SipRequest } from "../message/types"
-import type { Address } from "../transport/address"
+import type { SipHeader, SipRequest } from "../message/types"
+import type { TransportAddress } from "../transport/address"
 import { createBranch, createCallId, createTag } from "./ids"
 import type { Random } from "./types"
 
-export const ALLOW: Header = { name: "Allow", value: "ACK, BYE, CANCEL, INVITE, OPTIONS" }
+export const ALLOW: SipHeader = { name: "Allow", value: "ACK, BYE, CANCEL, INVITE, OPTIONS" }
 
 export interface Identity {
-  readonly address: Address
+  readonly address: TransportAddress
   readonly aor: string
   readonly random: Random
 }
@@ -21,7 +21,7 @@ export interface RequestFields {
   readonly callId: string
   readonly seq: number
   readonly contact?: Contact
-  readonly headers?: readonly Header[]
+  readonly headers?: readonly SipHeader[]
 }
 
 export function createRequest(
@@ -54,7 +54,7 @@ export function createOptionsRequest(uri: string, identity: Identity, callId?: s
   return createRequest("OPTIONS", uri, fields, identity)
 }
 
-function createVia(address: Address, random: Random): Via {
+function createVia(address: TransportAddress, random: Random): Via {
   return {
     transport: address.transport,
     host: formatHost(address.host),

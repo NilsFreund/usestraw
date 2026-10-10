@@ -1,7 +1,7 @@
 import type { NameAddr } from "../../message/fields/name-addr"
 import { getHeaders } from "../../message/headers"
 import { createResponse } from "../../message/response"
-import type { Header, SipRequest, SipResponse } from "../../message/types"
+import type { SipHeader, SipRequest, SipResponse } from "../../message/types"
 import { ALLOW } from "../requests"
 import type { Random } from "../types"
 import { SDP } from "./requests"
@@ -10,7 +10,7 @@ export interface ReplyFields {
   readonly tag?: string
   readonly contact?: NameAddr
   readonly sdp?: Uint8Array
-  readonly headers?: readonly Header[]
+  readonly headers?: readonly SipHeader[]
   readonly recordRoute?: boolean
 }
 
@@ -32,7 +32,7 @@ const PHRASES: Readonly<Record<number, string>> = {
 }
 
 // RFC 3261 §20.43: warning 305 names a media mismatch in a 488
-export const INCOMPATIBLE_MEDIA: Header = {
+export const INCOMPATIBLE_MEDIA: SipHeader = {
   name: "Warning",
   value: '305 straw "Incompatible media format"',
 }

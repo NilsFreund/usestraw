@@ -45,7 +45,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 ## Debugging
 
 - `STRAW_DEBUG=1` prints a SIP ladder to stderr.
-- `phone.trace` holds the latest 512 KB of SIP traffic, password hashes masked. `ladder(trace)` draws it and `replay(trace)` reruns it, both from `usestraw/core`.
+- `phone.trace` holds the latest 512 KB of SIP traffic, password hashes masked. `ladder(trace)` draws it and `replay(trace)` reruns it on the same usestraw version, both from `usestraw/core`.
 
 ## Docs
 

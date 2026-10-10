@@ -1,5 +1,5 @@
 import type { Random } from "../../core/types"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import { addressKey } from "./address"
 import { type Access, accessLink } from "./conditions"
 import { createCounter } from "./counter"
@@ -12,7 +12,7 @@ export interface HostOptions {
 
 export interface Host {
   readonly id: string
-  readonly address: Address
+  readonly address: TransportAddress
   readonly nat: string | undefined
   readonly up: Segment
   readonly down: Segment
@@ -20,19 +20,19 @@ export interface Host {
 }
 
 export interface Hosts {
-  add(id: string, address: Address, options: HostOptions): void
-  move(id: string, address: Address, options: HostOptions): void
+  add(id: string, address: TransportAddress, options: HostOptions): void
+  move(id: string, address: TransportAddress, options: HostOptions): void
   setAccess(id: string, access: Access): void
   disconnect(id: string): void
   reconnect(id: string): void
   has(id: string): boolean
   get(id: string): Host
-  find(address: Address, nat: string | undefined): Host | undefined
+  find(address: TransportAddress, nat: string | undefined): Host | undefined
   uses(ip: string, nat: string | undefined): boolean
 }
 
 interface HostState extends Host {
-  address: Address
+  address: TransportAddress
   nat: string | undefined
   up: Segment
   down: Segment
@@ -44,7 +44,7 @@ export function createHosts(stream: (label: string) => Random): Hosts {
   const index = new Map<string, string>()
   const ips = createCounter()
 
-  function add(id: string, address: Address, options: HostOptions): void {
+  function add(id: string, address: TransportAddress, options: HostOptions): void {
     if (hosts.has(id)) throw new Error(`Host ${id} already exists`)
     const { up, down } = accessLink(options.access ?? {})
     const links = {
@@ -65,7 +65,7 @@ export function createHosts(stream: (label: string) => Random): Hosts {
     })
   }
 
-  function move(id: string, address: Address, options: HostOptions): void {
+  function move(id: string, address: TransportAddress, options: HostOptions): void {
     const host = get(id)
     const nat = options.nat === undefined ? host.nat : (options.nat ?? undefined)
     const links = options.access ? retuned(host, options.access) : host
@@ -91,12 +91,12 @@ export function createHosts(stream: (label: string) => Random): Hosts {
     return host
   }
 
-  function find(address: Address, nat: string | undefined): Host | undefined {
+  function find(address: TransportAddress, nat: string | undefined): Host | undefined {
     const id = index.get(key(address, nat))
     return id === undefined ? undefined : hosts.get(id)
   }
 
-  function claim(id: string, address: Address, nat: string | undefined): void {
+  function claim(id: string, address: TransportAddress, nat: string | undefined): void {
     const taken = index.get(key(address, nat))
     if (taken !== undefined && taken !== id) {
       throw new Error(`Address ${addressKey(address)} is already taken by ${taken}`)
@@ -106,7 +106,7 @@ export function createHosts(stream: (label: string) => Random): Hosts {
     ips.add(ipKey(address.host, nat))
   }
 
-  function release(address: Address, nat: string | undefined): void {
+  function release(address: TransportAddress, nat: string | undefined): void {
     index.delete(key(address, nat))
     ips.remove(ipKey(address.host, nat))
   }
@@ -129,7 +129,7 @@ export function createHosts(stream: (label: string) => Random): Hosts {
   }
 }
 
-function key(address: Address, nat: string | undefined): string {
+function key(address: TransportAddress, nat: string | undefined): string {
   return `${nat ?? ""}|${addressKey(address)}`
 }
 

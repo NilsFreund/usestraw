@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Address, createResponse } from "../../../src"
+import { createResponse, type TransportAddress } from "../../../src"
 import {
   createContact,
   defaultRegistrar,
@@ -18,7 +18,7 @@ describe("createContact", () => {
     [{ ...alice, transport: "WS", port: 80 }, "sip:alice@192.0.2.10:80;transport=ws"],
     [{ ...alice, transport: "WSS", port: 443 }, "sips:alice@192.0.2.10:443;transport=ws"],
     [{ ...alice, host: "fe80::1%en0" }, "sip:alice@[fe80::1]:5060"],
-  ] as [Address, string][])("builds the Contact for %o", (address, uri) => {
+  ] as [TransportAddress, string][])("builds the Contact for %o", (address, uri) => {
     expect(createContact(address, "sip:alice@example.com")).toStrictEqual({
       uri,
       params: new Map(),

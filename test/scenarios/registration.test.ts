@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
-  type Address,
   type CoreEvent,
   type Credentials,
   createCore,
   getHeader,
   type Random,
+  type TransportAddress,
 } from "../../src"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
 import { natTypes } from "../../src/simulation/network/nat/types"
@@ -17,7 +17,7 @@ import { type Registrar, type RegistrarOptions, registrar } from "../registrar"
 
 const account: Credentials = { username: "alice", password: "secret" }
 
-function phone(address: Address, credentials: Credentials = account) {
+function phone(address: TransportAddress, credentials: Credentials = account) {
   return (random: Random) =>
     createCore({ address, aor: "sip:alice@example.com", random, credentials })
 }
@@ -47,17 +47,17 @@ function registrations(events: readonly CoreEvent[]) {
 describe("registration against a digest registrar", () => {
   it("authenticates with SHA-256 and refreshes around half the expiry", () => {
     const { simulation, ua } = setup({ algorithm: "SHA-256" })
-    simulation.run(61_000)
+    simulation.run(66_000)
     expect(formatTrace(simulation.trace)).toBe(
       [
         "     0ms  phone → registrar  REGISTER sip:example.com SIP/2.0  (+20ms)",
         "    20ms  registrar → phone  SIP/2.0 401 Unauthorized  (+20ms)",
         "    40ms  phone → registrar  REGISTER sip:example.com SIP/2.0  (+20ms)",
         "    60ms  registrar → phone  SIP/2.0 200 OK  (+20ms)",
-        " 54848ms  phone → registrar  REGISTER sip:example.com SIP/2.0  (+20ms)",
-        " 54868ms  registrar → phone  SIP/2.0 401 Unauthorized  (+20ms)",
-        " 54888ms  phone → registrar  REGISTER sip:example.com SIP/2.0  (+20ms)",
-        " 54908ms  registrar → phone  SIP/2.0 200 OK  (+20ms)",
+        " 62830ms  phone → registrar  REGISTER sip:example.com SIP/2.0  (+20ms)",
+        " 62850ms  registrar → phone  SIP/2.0 401 Unauthorized  (+20ms)",
+        " 62870ms  phone → registrar  REGISTER sip:example.com SIP/2.0  (+20ms)",
+        " 62890ms  registrar → phone  SIP/2.0 200 OK  (+20ms)",
       ].join("\n"),
     )
     expect(registrations(ua.events)).toStrictEqual([

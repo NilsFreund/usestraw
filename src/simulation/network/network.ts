@@ -1,5 +1,5 @@
 import { createAgenda } from "../../support/agenda"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import { createStreams } from "../random"
 import type { Access, LinkConditions } from "./conditions"
 import { createForwarding, type PacketState, type Transit } from "./forwarding"
@@ -19,16 +19,16 @@ export interface Network {
   readonly trace: readonly PacketRecord[]
   addNat(id: string, setup: NatSetup): void
   resetNat(id: string): void
-  attach(id: string, address: Address, options?: HostOptions): void
-  move(id: string, address: Address, options?: HostOptions): void
+  attach(id: string, address: TransportAddress, options?: HostOptions): void
+  move(id: string, address: TransportAddress, options?: HostOptions): void
   setAccess(id: string, access: Access): void
   disconnect(id: string): void
   reconnect(id: string): void
   setRoute(from: string, to: string, conditions?: LinkConditions): void
   block(from: string, to: string): void
   unblock(from: string, to: string): void
-  addressOf(id: string): Address
-  send(from: string, to: Address, data: Uint8Array, now: number): void
+  addressOf(id: string): TransportAddress
+  send(from: string, to: TransportAddress, data: Uint8Array, now: number): void
   nextEvent(): number | undefined
   step(now: number): Delivery[]
 }
@@ -45,18 +45,18 @@ export function createNetwork({ seed, internet = {} }: NetworkOptions): Network 
   const { site, label } = createNaming(hosts, nats)
   const trace: PacketState[] = []
 
-  function attach(id: string, address: Address, options: HostOptions = {}): void {
+  function attach(id: string, address: TransportAddress, options: HostOptions = {}): void {
     if (nats.has(id)) throw new Error(`Name ${id} is already taken by a NAT`)
     admit(address, options.nat ?? undefined)
     hosts.add(id, address, options)
   }
 
-  function move(id: string, address: Address, options: HostOptions = {}): void {
+  function move(id: string, address: TransportAddress, options: HostOptions = {}): void {
     admit(address, options.nat === undefined ? hosts.get(id).nat : (options.nat ?? undefined))
     hosts.move(id, address, options)
   }
 
-  function admit(address: Address, site: string | undefined): void {
+  function admit(address: TransportAddress, site: string | undefined): void {
     if (site !== undefined) nats.get(site)
     const owner = nats.at(address.host, site)
     if (owner !== undefined) {
@@ -72,7 +72,7 @@ export function createNetwork({ seed, internet = {} }: NetworkOptions): Network 
     nats.add(id, setup)
   }
 
-  function send(from: string, to: Address, data: Uint8Array, now: number): void {
+  function send(from: string, to: TransportAddress, data: Uint8Array, now: number): void {
     const { address, nat } = hosts.get(from)
     const packet: PacketState = {
       id: trace.length + 1,

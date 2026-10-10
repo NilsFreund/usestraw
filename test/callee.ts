@@ -1,15 +1,15 @@
 import {
-  type Address,
   type Core,
+  type CoreOutput,
   createResponse,
   getHeader,
   isRequest,
-  type Output,
   parseMessage,
   type Random,
   type SipRequest,
   type SipResponse,
   serializeMessage,
+  type TransportAddress,
 } from "../src"
 import { computeAuthorization } from "../src/auth/digest"
 import { resolveOffer } from "../src/auth/offer"
@@ -46,12 +46,12 @@ type SipMessage = SipRequest | SipResponse
 
 interface Timer {
   readonly at: number
-  readonly run: (now: number) => Output[]
+  readonly run: (now: number) => CoreOutput[]
 }
 
 interface Answered {
   readonly invite: SipRequest
-  readonly from: Address
+  readonly from: TransportAddress
   final?: SipResponse
   readonly finals: SipResponse[]
   readonly pending: Timer[]
@@ -88,15 +88,15 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
     const calls = new Map<string, Answered>()
     let timers: Timer[] = []
     const nonce = Math.floor(random() * 2 ** 48).toString(16)
-    const self: Address = { transport: "UDP", host: "192.0.2.20", port: 5060 }
-    const caller: Address = { transport: "UDP", host: "192.0.2.10", port: 5060 }
+    const self: TransportAddress = { transport: "UDP", host: "192.0.2.20", port: 5060 }
+    const caller: TransportAddress = { transport: "UDP", host: "192.0.2.10", port: 5060 }
 
-    function out(message: SipMessage, to: Address): Output {
+    function out(message: SipMessage, to: TransportAddress): CoreOutput {
       sent.push(message)
       return { type: "send", data: serializeMessage(message), to }
     }
 
-    function later(at: number, run: (now: number) => Output[]): Timer {
+    function later(at: number, run: (now: number) => CoreOutput[]): Timer {
       const timer = { at, run }
       timers.push(timer)
       return timer
@@ -125,7 +125,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return expected.response === params.get("response")
     }
 
-    function onInvite(invite: SipRequest, from: Address, now: number): Output[] {
+    function onInvite(invite: SipRequest, from: TransportAddress, now: number): CoreOutput[] {
       const branch = topVia(invite).params.get("branch") ?? ""
       const known = calls.get(branch)
       const to = replyAddress(topVia(invite), from)
@@ -159,13 +159,13 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return outputs
     }
 
-    function finish(entry: Answered, to: Address, now: number): Output[] {
+    function finish(entry: Answered, to: TransportAddress, now: number): CoreOutput[] {
       if (answer >= 300) {
         entry.final = createResponse(entry.invite, answer, "Scripted", { toTag: "fork0" })
         retransmit(entry.final, to, now, t1)
         return [out(entry.final, to)]
       }
-      const outputs: Output[] = []
+      const outputs: CoreOutput[] = []
       for (let index = 0; index < forks; index++) {
         const response = success(entry.invite, `fork${index}`)
         entry.finals.push(response)
@@ -191,13 +191,18 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
     }
 
     // RFC 3261 §13.3.1.4 and §17.2.1: finals are retransmitted with T1 doubling until the ACK arrives
-    function retransmit(response: SipResponse, to: Address, now: number, interval: number): void {
+    function retransmit(
+      response: SipResponse,
+      to: TransportAddress,
+      now: number,
+      interval: number,
+    ): void {
       repeat(response, to, now, interval, () => acked.has(response.to.params.get("tag") ?? ""))
     }
 
     function repeat(
       message: SipMessage,
-      to: Address,
+      to: TransportAddress,
       now: number,
       interval: number,
       done: () => boolean,
@@ -209,7 +214,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       })
     }
 
-    function onAck(ack: SipRequest, now: number): Output[] {
+    function onAck(ack: SipRequest, now: number): CoreOutput[] {
       const tag = ack.to.params.get("tag") ?? ""
       if (acked.has(tag) || tag === "challenge") return []
       acked.add(tag)
@@ -223,7 +228,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
     }
 
     // RFC 3264 §8.4: the far end puts the call on hold and back with a re-INVITE in the same dialog
-    function reinvite(ack: SipRequest, now: number, direction: string): Output {
+    function reinvite(ack: SipRequest, now: number, direction: string): CoreOutput {
       const number = ++seq
       const contact = [{ uri: "sip:bob@192.0.2.20:5060", params: new Map() }]
       const headers = [{ name: "Content-Type", value: "application/sdp" }]
@@ -247,7 +252,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return out(request, caller)
     }
 
-    function confirm(response: SipResponse): Output[] {
+    function confirm(response: SipResponse): CoreOutput[] {
       finals.add(response.cseq.seq)
       if (!dialog || response.status >= 300) return []
       const fields = {
@@ -265,7 +270,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return target?.uri ?? ack.from.uri
     }
 
-    function hangup(ack: SipRequest, now: number): Output {
+    function hangup(ack: SipRequest, now: number): CoreOutput {
       const bye = createRequest(
         "BYE",
         targetOf(ack),
@@ -276,7 +281,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return out(bye, caller)
     }
 
-    function onCancel(cancel: SipRequest, from: Address, now: number): Output[] {
+    function onCancel(cancel: SipRequest, from: TransportAddress, now: number): CoreOutput[] {
       const to = replyAddress(topVia(cancel), from)
       const entry = calls.get(topVia(cancel).params.get("branch") ?? "")
       const ok = out(createResponse(cancel, 200, "OK", { toTag: "fork0" }), to)
@@ -294,7 +299,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return createResponse(bye, challengeBye, "Unauthorized", { headers: [{ name, value }] })
     }
 
-    function handle(input: Parameters<Core["handle"]>[0], now: number): Output[] {
+    function handle(input: Parameters<Core["handle"]>[0], now: number): CoreOutput[] {
       if (input.type === "timeout") {
         const due = timers.filter((timer) => timer.at <= now)
         timers = timers.filter((timer) => timer.at > now)

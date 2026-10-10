@@ -1,4 +1,4 @@
-import type { Address } from "../../src"
+import type { TransportAddress } from "../../src"
 import type { Link, LinkHandlers } from "../../src/node/links"
 import { createRandom } from "../../src/simulation/random"
 import { type Registrar, type RegistrarOptions, registrar } from "../registrar"
@@ -10,7 +10,7 @@ export interface MemoryNetwork {
   readonly link: Link
   readonly registrar: Registrar
   readonly sent: number
-  readonly destinations: readonly Address[]
+  readonly destinations: readonly TransportAddress[]
   readonly closed: boolean
   online: boolean
   replace(options: RegistrarOptions): void
@@ -21,7 +21,7 @@ export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
   let server = registrar(options)(createRandom(3))
   let handlers: LinkHandlers | undefined
   let sent = 0
-  const destinations: Address[] = []
+  const destinations: TransportAddress[] = []
   let closed = false
   const inject = (data: Uint8Array) => handlers?.receive(data, remote)
   const network = {
@@ -46,7 +46,7 @@ export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
       start: (next: LinkHandlers) => {
         handlers = next
       },
-      send: (data: Uint8Array, to: Address) => {
+      send: (data: Uint8Array, to: TransportAddress) => {
         sent++
         destinations.push(to)
         if (!network.online) return

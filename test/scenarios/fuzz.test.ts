@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
-  type Address,
-  type Command,
+  type CoreCommand,
+  type CoreOutput,
   createCore,
   isRequest,
-  type Output,
   parseMessage,
+  type TransportAddress,
 } from "../../src"
 import { between, createRandom } from "../../src/simulation/random"
 import { alice, bob, fixture, sdp } from "../helpers"
@@ -37,7 +37,7 @@ const SPICE = [
   "\\\r",
   '"a\\"b"',
 ]
-const SOURCES: Address[] = [
+const SOURCES: TransportAddress[] = [
   bob,
   { transport: "UDP", host: "2001:db8::20", port: 5060 },
   { transport: "UDP", host: "fe80::2%en0", port: 40_000 },
@@ -117,7 +117,7 @@ function inDialog(callId: string, tag: string, random: () => number): string {
   ].join("\r\n")
 }
 
-function sends(outputs: Output[]): Uint8Array[] {
+function sends(outputs: CoreOutput[]): Uint8Array[] {
   return outputs.flatMap((output) => (output.type === "send" ? [output.data] : []))
 }
 
@@ -184,7 +184,7 @@ describe("fuzzing the core with mutated torture messages", () => {
         if (output.event.state !== "incoming") continue
         calls++
         const command = random() < 0.8 ? { type: "accept", media } : { type: "end", status: 603 }
-        const call = { ...command, call: output.event.call } as Command
+        const call = { ...command, call: output.event.call } as CoreCommand
         core.handle({ type: "command", command: call }, round * 100)
       }
       if (random() < 0.1 && dialog) {

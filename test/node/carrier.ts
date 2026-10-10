@@ -1,12 +1,12 @@
 import { createSocket } from "node:dgram"
 import {
-  type Address,
   type CallEnd,
-  type Command,
+  type CoreCommand,
   type CoreEvent,
   createCore,
   isRequest,
   parseMessage,
+  type TransportAddress,
 } from "../../src"
 import { type CallAudio, openAudio } from "../../src/node/audio"
 import { createRandom } from "../../src/simulation/random"
@@ -38,14 +38,14 @@ const host = "127.0.0.1"
 export async function startCarrier(answer: Answer = "echo"): Promise<Carrier> {
   const socket = createSocket("udp4")
   await new Promise<void>((resolve) => socket.bind(0, host, resolve))
-  const address: Address = { transport: "UDP", host, port: socket.address().port }
+  const address: TransportAddress = { transport: "UDP", host, port: socket.address().port }
   const registry = registrar()(createRandom(9))
   const far = createCore({ address, aor: `sip:bob@${host}`, random: createRandom(11) })
   const audios = new Map<string, CallAudio>()
   const events: CoreEvent[] = []
   const methods: string[] = []
   const ended = new Map<string, CallEnd>()
-  let phone: Address | undefined
+  let phone: TransportAddress | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let counter = 0
   const carrier: Carrier = {
@@ -76,7 +76,7 @@ export async function startCarrier(answer: Answer = "echo"): Promise<Carrier> {
       timer = setTimeout(() => run({ type: "timeout" }), Math.max(0, at - performance.now()))
   }
 
-  const command = (value: Command) => run({ type: "command", command: value })
+  const command = (value: CoreCommand) => run({ type: "command", command: value })
 
   async function notice(event: CoreEvent): Promise<void> {
     events.push(event)
@@ -154,7 +154,7 @@ export async function startCarrier(answer: Answer = "echo"): Promise<Carrier> {
 
   socket.on("message", (data, info) => {
     if (carrier.deaf) return
-    const from: Address = { transport: "UDP", host: info.address, port: info.port }
+    const from: TransportAddress = { transport: "UDP", host: info.address, port: info.port }
     const parsed = parseMessage(new Uint8Array(data))
     if (!parsed.ok) return
     const { message } = parsed

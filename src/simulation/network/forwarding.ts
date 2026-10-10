@@ -1,5 +1,5 @@
 import type { Agenda } from "../../support/agenda"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import { addressKey, sameAddress } from "./address"
 import type { Host, Hosts } from "./hosts"
 import type { Nats } from "./nats"
@@ -16,8 +16,8 @@ export interface Transit {
   readonly packet: PacketState
   readonly sender: string
   readonly receiver: string
-  readonly source: Address
-  readonly destination: Address
+  readonly source: TransportAddress
+  readonly destination: TransportAddress
   readonly data: Uint8Array
   readonly corrupted: boolean
   readonly hop: Hop
@@ -81,7 +81,7 @@ export function createForwarding({ hosts, nats, routes, agenda }: Fabric): Forwa
     return proceed(transit, { source, hop: "internet" }, now)
   }
 
-  function inside(destination: Address, site: string): boolean {
+  function inside(destination: TransportAddress, site: string): boolean {
     return (
       hosts.find(destination, site) !== undefined || nats.at(destination.host, site) !== undefined
     )

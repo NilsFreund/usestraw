@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Address, isRequest } from "../../src"
+import { isRequest, type TransportAddress } from "../../src"
 import type { LinkConditions } from "../../src/simulation/network/conditions"
 import { type ProfileName, profiles } from "../../src/simulation/network/profiles"
 import { createSimulation } from "../../src/simulation/simulation"
@@ -117,7 +117,7 @@ describe("path MTU", () => {
 describe("queueing", () => {
   function burst(access: LinkConditions, count: number) {
     const simulation = createSimulation({ seed: 1 })
-    const sink: Address = bob
+    const sink: TransportAddress = bob
     simulation.network.attach("alice", alice, { access: { up: access, down: {} } })
     simulation.network.attach("bob", sink)
     for (let index = 0; index < count; index++) {

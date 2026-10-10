@@ -1,7 +1,8 @@
+import { version } from "../../package.json"
 import { type Core, type CoreOptions, createCore } from "../core/core"
-import type { Credentials, Output } from "../core/types"
+import type { CoreOutput, Credentials } from "../core/types"
 import { decode, encode, maskSecrets } from "./codec"
-import type { Step } from "./recorder"
+import type { RecordedStep } from "./recorder"
 
 /** Whether a replay matched the recording, and where it first diverged if not. */
 export type ReplayResult =
@@ -13,9 +14,11 @@ export type ReplayResult =
       readonly expected: string
       readonly actual: string
     }
+  | { readonly ok: false; readonly reason: "version"; readonly version: string }
   | { readonly ok: false; readonly reason: "truncated" | "invalid" }
 
-interface Header {
+interface RecordingHeader {
+  readonly release: string
   readonly truncated: boolean
   readonly random: readonly number[]
   readonly next: number | null
@@ -24,11 +27,15 @@ interface Header {
   }
 }
 
-/** Reruns a recording on a fresh core and checks that every step gives the same outputs. */
+/**
+ * Reruns a recording on a fresh core and checks that every step gives the same outputs. It needs
+ * the usestraw version that made the recording, and says which one otherwise.
+ */
 export function replay(recording: string): ReplayResult {
   const [first = "", ...rest] = recording.split("\n").filter((line) => line !== "")
   const header = readHeader(first)
   if (!header) return { ok: false, reason: "invalid" }
+  if (header.release !== version) return { ok: false, reason: "version", version: header.release }
   if (header.truncated) return { ok: false, reason: "truncated" }
   const steps = readSteps(rest)
   if (!steps) return { ok: false, reason: "invalid" }
@@ -71,7 +78,7 @@ export function replay(recording: string): ReplayResult {
   return { ok: true, steps: steps.length }
 }
 
-function outcome(handle: () => Output[], deadline: () => number | undefined): string {
+function outcome(handle: () => CoreOutput[], deadline: () => number | undefined): string {
   try {
     const outputs = handle()
     return encode({ outputs, next: deadline() ?? null })
@@ -80,21 +87,22 @@ function outcome(handle: () => Output[], deadline: () => number | undefined): st
   }
 }
 
-function readHeader(line: string): Header | undefined {
+function readHeader(line: string): RecordingHeader | undefined {
   const header = parse(line)
   if (!isObject(header) || header["straw"] !== "recording" || header["version"] !== 1) {
     return undefined
   }
-  const { random, options, next, truncated } = header
+  const { release, random, options, next, truncated } = header
   const valid =
+    typeof release === "string" &&
     isDraws(random) &&
     isObject(options) &&
     (next === null || typeof next === "number") &&
     typeof truncated === "boolean"
-  return valid ? (header as unknown as Header) : undefined
+  return valid ? (header as unknown as RecordingHeader) : undefined
 }
 
-function readSteps(lines: readonly string[]): Step[] | undefined {
+function readSteps(lines: readonly string[]): RecordedStep[] | undefined {
   const steps = lines.map(parse)
   const valid = steps.every(
     (step) =>
@@ -105,7 +113,7 @@ function readSteps(lines: readonly string[]): Step[] | undefined {
       (step["next"] === null || typeof step["next"] === "number") &&
       (Array.isArray(step["outputs"]) || typeof step["thrown"] === "string"),
   )
-  return valid ? (steps as Step[]) : undefined
+  return valid ? (steps as RecordedStep[]) : undefined
 }
 
 function parse(line: string): unknown {

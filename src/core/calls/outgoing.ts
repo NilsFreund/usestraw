@@ -2,7 +2,7 @@ import type { SipRequest, SipResponse } from "../../message/types"
 import type { MediaAddress } from "../../sdp/types"
 import { sameBytes } from "../../support/bytes"
 import { transactionTimeout } from "../../transaction/timers"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import { createAuthenticator } from "../authenticator"
 import { createTag } from "../ids"
 import type { CallEnd } from "../types"
@@ -17,7 +17,7 @@ import type { Call, CallContext, CallOutput } from "./types"
 export interface OutgoingSetup {
   readonly call: string
   readonly uri: string
-  readonly to: Address
+  readonly to: TransportAddress
   readonly media: MediaAddress
 }
 

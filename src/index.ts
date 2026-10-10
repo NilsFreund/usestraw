@@ -13,17 +13,18 @@
  */
 export { type Core, type CoreOptions, createCore } from "./core/core"
 export type {
+  AuthChallenge,
   AuthFailure,
   CallEnd,
   CallEvent,
   CallParty,
   CallReason,
-  Command,
+  CoreCommand,
   CoreEvent,
+  CoreInput,
+  CoreOutput,
   Credentials,
-  Input,
   LocalMedia,
-  Output,
   Random,
   RegistrationEvent,
   RegistrationFailure,
@@ -38,9 +39,9 @@ export { type ParseResult, parseMessage } from "./message/parse"
 export { createResponse, type ResponseOptions } from "./message/response"
 export { serializeMessage } from "./message/serialize"
 export {
-  type Header,
   isRequest,
   type MessageFields,
+  type SipHeader,
   type SipMessage,
   type SipRequest,
   type SipResponse,
@@ -49,11 +50,10 @@ export { ladder } from "./recorder/ladder"
 export {
   createRecordedCore,
   type RecordedCore,
-  type RecorderSettings,
-  type Step,
+  type RecordedStep,
+  type RecorderOptions,
 } from "./recorder/recorder"
 export { type ReplayResult, replay } from "./recorder/replay"
 export type { CallMedia, Codec, MediaAddress, MediaDirection } from "./sdp/types"
 export { defaultTimers, type TimerSettings } from "./transaction/timers"
-export type { TransactionEvent } from "./transaction/types"
-export type { Address, Transport } from "./transport/address"
+export type { TransportAddress, TransportProtocol } from "./transport/address"

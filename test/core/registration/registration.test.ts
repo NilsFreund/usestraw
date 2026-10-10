@@ -3,7 +3,7 @@ import {
   type Credentials,
   createResponse,
   getHeader,
-  type Header,
+  type SipHeader,
   type SipRequest,
 } from "../../../src"
 import { createRegistration } from "../../../src/core/registration/registration"
@@ -29,7 +29,7 @@ function events(outputs: RegistrationOutput[]) {
   return outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
 }
 
-function reply(request: SipRequest, status: number, headers: Header[] = [], reason = "Reason") {
+function reply(request: SipRequest, status: number, headers: SipHeader[] = [], reason = "Reason") {
   return {
     type: "response",
     response: createResponse(request, status, reason, { headers }),

@@ -1,4 +1,4 @@
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 
 export type DropReason = "outage" | "mtu" | "loss" | "congestion" | "nat" | "unroutable"
 
@@ -31,6 +31,6 @@ export interface PacketRecord {
 
 export interface Delivery {
   readonly host: string
-  readonly from: Address
+  readonly from: TransportAddress
   readonly data: Uint8Array
 }

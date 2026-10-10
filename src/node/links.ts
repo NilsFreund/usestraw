@@ -3,20 +3,20 @@ import { lookup } from "node:dns/promises"
 import { once } from "node:events"
 import { type AddressInfo, isIP } from "node:net"
 import { connect } from "node:tls"
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 import { createStreamFramer } from "../transport/stream"
 import type { Server } from "./options"
 
 export interface LinkHandlers {
-  receive(data: Uint8Array, from: Address): void
+  receive(data: Uint8Array, from: TransportAddress): void
   close(error?: Error): void
 }
 
 export interface Link {
-  readonly local: Address
-  readonly remote: Address
+  readonly local: TransportAddress
+  readonly remote: TransportAddress
   start(handlers: LinkHandlers): void
-  send(data: Uint8Array, to: Address): void
+  send(data: Uint8Array, to: TransportAddress): void
   close(): void
 }
 
@@ -106,7 +106,7 @@ export async function openTls(
   })
   socket.on("close", () => handlers?.close(failure))
   const framer = createStreamFramer()
-  const remote: Address = {
+  const remote: TransportAddress = {
     transport: "TLS",
     host: String(socket.remoteAddress),
     port: Number(socket.remotePort),

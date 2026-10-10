@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { type Address, defaultPort, isAddress, isReliable } from "../../src/transport/address"
+import {
+  defaultPort,
+  isAddress,
+  isReliable,
+  type TransportAddress,
+} from "../../src/transport/address"
 import { alice } from "../helpers"
 
 describe("isReliable", () => {
@@ -23,7 +28,7 @@ describe("defaultPort", () => {
 })
 
 describe("isAddress", () => {
-  const valid: Address[] = [
+  const valid: TransportAddress[] = [
     alice,
     { transport: "TLS", host: "sip.example.com", port: 5061 },
     { transport: "WSS", host: "2001:db8::1", port: 443 },
@@ -35,9 +40,9 @@ describe("isAddress", () => {
     expect(isAddress(address)).toBe(true)
   })
 
-  const invalid: Address[] = [
-    { ...alice, transport: "SCTP" as Address["transport"] },
-    { ...alice, transport: "udp" as Address["transport"] },
+  const invalid: TransportAddress[] = [
+    { ...alice, transport: "SCTP" as TransportAddress["transport"] },
+    { ...alice, transport: "udp" as TransportAddress["transport"] },
     { ...alice, host: "" },
     { ...alice, host: "evil host" },
     { ...alice, host: "192.0.2.10\r\nX: y" },

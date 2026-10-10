@@ -1,8 +1,8 @@
 import type { Core } from "../core/core"
-import type { Command, CoreEvent, Output, Random } from "../core/types"
+import type { CoreCommand, CoreEvent, CoreOutput, Random } from "../core/types"
 import { createAgenda } from "../support/agenda"
 import { earliest } from "../support/time"
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 import type { LinkConditions } from "./network/conditions"
 import type { HostOptions } from "./network/hosts"
 import { createNetwork, type Network } from "./network/network"
@@ -17,7 +17,7 @@ export interface SimulationOptions {
 
 export interface SimulationNode {
   readonly name: string
-  readonly address: Address
+  readonly address: TransportAddress
   readonly core: Core
   readonly events: readonly CoreEvent[]
 }
@@ -28,11 +28,11 @@ export interface Simulation {
   readonly trace: readonly PacketRecord[]
   addNode(
     name: string,
-    address: Address,
+    address: TransportAddress,
     create: (random: Random) => Core,
     options?: HostOptions,
   ): SimulationNode
-  command(node: SimulationNode, command: Command): void
+  command(node: SimulationNode, command: CoreCommand): void
   at(time: number, action: () => void): void
   run(until?: number): void
 }
@@ -50,7 +50,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
 
   function addNode(
     name: string,
-    address: Address,
+    address: TransportAddress,
     create: (random: Random) => Core,
     hostOptions: HostOptions = {},
   ): NodeState {
@@ -68,7 +68,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
     return node
   }
 
-  function command(node: SimulationNode, command: Command): void {
+  function command(node: SimulationNode, command: CoreCommand): void {
     const target = nodes.get(node.name)
     if (target !== node) throw new Error(`Unknown node ${node.name}`)
     process(target, target.core.handle({ type: "command", command }, now))
@@ -109,7 +109,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
     if (node) process(node, node.core.handle({ type: "receive", data, from }, now))
   }
 
-  function process(node: NodeState, outputs: Output[]): void {
+  function process(node: NodeState, outputs: CoreOutput[]): void {
     for (const output of outputs) {
       if (output.type === "event") node.events.push(output.event)
       else network.send(node.name, output.to, output.data, now)

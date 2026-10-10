@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../../src"
+import type { TransportAddress } from "../../../src"
 import { latency, loss } from "../../../src/simulation/network/conditions"
 import { type NatType, natTypes } from "../../../src/simulation/network/nat/types"
 import { createNetwork, type Network } from "../../../src/simulation/network/network"
 import { alice, bob, bytes } from "../../helpers"
 import { settle } from "../support"
 
-const phone: Address = { transport: "UDP", host: "192.168.1.10", port: 5060 }
-const laptop: Address = { transport: "UDP", host: "192.168.1.11", port: 5060 }
+const phone: TransportAddress = { transport: "UDP", host: "192.168.1.10", port: 5060 }
+const laptop: TransportAddress = { transport: "UDP", host: "192.168.1.11", port: 5060 }
 const ping = bytes("OPTIONS sip:bob@example.com SIP/2.0\r\n\r\n")
 
 function network(): Network {
@@ -62,7 +62,7 @@ describe("createNetwork", () => {
       return net
     }
 
-    const mapped: Address = { transport: "UDP", host: "203.0.113.1", port: 49152 }
+    const mapped: TransportAddress = { transport: "UDP", host: "203.0.113.1", port: 49152 }
 
     it("rewrites the source and lets replies back in", () => {
       const net = home()
@@ -312,7 +312,7 @@ describe("createNetwork", () => {
       net.attach("bob", bob)
       net.send("bob", alice, ping, 0)
       net.step(0)
-      const moved: Address = { ...alice, host: "192.0.2.99" }
+      const moved: TransportAddress = { ...alice, host: "192.0.2.99" }
       net.move("alice", moved)
       expect(net.addressOf("alice")).toEqual(moved)
       settle(net)

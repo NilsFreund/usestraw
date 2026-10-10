@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
   type CoreEvent,
+  type CoreOutput,
   createCore,
   getHeader,
   isRequest,
-  type Output,
   parseMessage,
   type SipRequest,
   serializeMessage,
@@ -36,7 +36,7 @@ function phone() {
   return createCore({ address: alice, aor: "sip:alice@example.com", random: createRandom(1) })
 }
 
-function sentRequests(outputs: Output[]): SipRequest[] {
+function sentRequests(outputs: CoreOutput[]): SipRequest[] {
   return outputs.flatMap((output) => {
     if (output.type !== "send") return []
     const parsed = parseMessage(output.data)
@@ -44,7 +44,7 @@ function sentRequests(outputs: Output[]): SipRequest[] {
   })
 }
 
-function sentResponses(outputs: Output[]): number[] {
+function sentResponses(outputs: CoreOutput[]): number[] {
   return outputs.flatMap((output) => {
     if (output.type !== "send") return []
     const parsed = parseMessage(output.data)
@@ -52,7 +52,7 @@ function sentResponses(outputs: Output[]): number[] {
   })
 }
 
-const events = (outputs: Output[]): CoreEvent[] =>
+const events = (outputs: CoreOutput[]): CoreEvent[] =>
   outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
 
 function reply(
@@ -212,7 +212,7 @@ describe("calls in the core", () => {
     const { ua } = live()
     const [bye] = sentRequests(ua.handle(end(), 100))
     expect(bye?.method).toBe("BYE")
-    let outputs: Output[] = []
+    let outputs: CoreOutput[] = []
     for (let now = 100; now <= 40_000; now += 500)
       outputs = [...outputs, ...ua.handle({ type: "timeout" }, now)]
     expect(events(outputs)).toContainEqual({
@@ -264,7 +264,7 @@ describe("re-INVITEs on an outgoing call (RFC 3261 §14.2)", () => {
         : `Content-Type: application/sdp\r\nContent-Length: ${body.length}\r\n\r\n${body}`,
     )
 
-  const responses = (outputs: Output[]) =>
+  const responses = (outputs: CoreOutput[]) =>
     outputs.flatMap((output) => {
       if (output.type !== "send") return []
       const parsed = parseMessage(output.data)
@@ -452,7 +452,7 @@ describe("calls when the far end misbehaves", () => {
     expect(sentRequests(ua.handle(end(), 20)).map((request) => request.method)).toStrictEqual([
       "CANCEL",
     ])
-    const outputs: Output[] = []
+    const outputs: CoreOutput[] = []
     for (let now = 520; now <= 40_000; now += 500)
       outputs.push(...ua.handle({ type: "timeout" }, now))
     expect(events(outputs)).toContainEqual({
@@ -496,7 +496,7 @@ describe("calls when the far end misbehaves", () => {
     const { ua, invite } = live()
     const fork = sentRequests(ua.handle(receive(reply(invite, 200, [], "t3")), 20))
     expect(fork.map((request) => request.method)).toStrictEqual(["ACK", "BYE"])
-    const outputs: Output[] = []
+    const outputs: CoreOutput[] = []
     for (let now = 520; now <= 40_000; now += 500)
       outputs.push(...ua.handle({ type: "timeout" }, now))
     expect(events(outputs).filter((event) => event.type === "call")).toStrictEqual([])
@@ -699,7 +699,7 @@ describe("calls in rarer situations", () => {
     const ua = phone()
     ua.handle(call(), 0)
     expect(ua.handle(end(), 10)).toStrictEqual([])
-    const outputs: Output[] = []
+    const outputs: CoreOutput[] = []
     for (let now = 500; now <= 33_000; now += 500)
       outputs.push(...ua.handle({ type: "timeout" }, now))
     expect(events(outputs)).toContainEqual({
@@ -729,7 +729,7 @@ describe("calls in rarer situations", () => {
     const silent = live()
     silent.ua.handle(end(), 100)
     silent.ua.handle(receive(inDialog("BYE", 7, silent.ourTag)), 110)
-    const later: Output[] = []
+    const later: CoreOutput[] = []
     for (let now = 500; now <= 40_000; now += 500)
       later.push(...silent.ua.handle({ type: "timeout" }, now))
     expect(events(later)).toStrictEqual([])
@@ -743,8 +743,10 @@ describe("calls under pressure from the details", () => {
       type: "command",
       command: { type: "call", call: id, uri: "sip:bob@example.com", to: tls, media },
     }) as const
-  const methodsOf = (outputs: Output[]) => sentRequests(outputs).map((request) => request.method)
-  const callEvents = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
+  const methodsOf = (outputs: CoreOutput[]) =>
+    sentRequests(outputs).map((request) => request.method)
+  const callEvents = (outputs: CoreOutput[]) =>
+    events(outputs).filter((event) => event.type === "call")
 
   it("reports ringing once and cancels once however often it rings", () => {
     const ua = phone()
@@ -849,7 +851,8 @@ describe("calls against a hostile far end", () => {
       "",
       body,
     ].join("\r\n")
-  const callEvents = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
+  const callEvents = (outputs: CoreOutput[]) =>
+    events(outputs).filter((event) => event.type === "call")
 
   it("ignores answers that do not belong to its INVITE", () => {
     const ua = phone()
@@ -941,8 +944,10 @@ describe("calls against a hostile far end", () => {
 })
 
 describe("calls through forking proxies and late answers", () => {
-  const callEvents = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
-  const methodsOf = (outputs: Output[]) => sentRequests(outputs).map((request) => request.method)
+  const callEvents = (outputs: CoreOutput[]) =>
+    events(outputs).filter((event) => event.type === "call")
+  const methodsOf = (outputs: CoreOutput[]) =>
+    sentRequests(outputs).map((request) => request.method)
 
   it("hangs up a 2xx from one branch that follows a final from another", () => {
     const ua = phone()
@@ -983,7 +988,7 @@ describe("calls through forking proxies and late answers", () => {
     const ua = phone()
     const [invite] = sentRequests(ua.handle(call(), 0))
     if (!invite) throw new Error("No INVITE")
-    const outputs: Output[] = []
+    const outputs: CoreOutput[] = []
     for (let now = 500; now <= 32_000; now += 500)
       outputs.push(...ua.handle({ type: "timeout" }, now))
     expect(callEvents(outputs)).toMatchObject([{ state: "ended", ended: { reason: "timeout" } }])

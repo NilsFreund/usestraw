@@ -2,20 +2,22 @@ import { isPort, isSocketHost } from "../message/fields/host"
 
 const TRANSPORTS = ["UDP", "TCP", "TLS", "WS", "WSS"] as const
 
-export type Transport = (typeof TRANSPORTS)[number]
+/** How SIP travels; Straw itself speaks UDP and TLS. */
+export type TransportProtocol = (typeof TRANSPORTS)[number]
 
-export interface Address {
-  readonly transport: Transport
+/** A socket address: where to send SIP, or where it came from. */
+export interface TransportAddress {
+  readonly transport: TransportProtocol
   readonly host: string
   readonly port: number
 }
 
-export function isAddress(address: Address): boolean {
+export function isAddress(address: TransportAddress): boolean {
   const { transport, host, port } = address
   return TRANSPORTS.includes(transport) && isSocketHost(host) && isPort(port)
 }
 
-export function isReliable(address: Address): boolean {
+export function isReliable(address: TransportAddress): boolean {
   return address.transport !== "UDP"
 }
 

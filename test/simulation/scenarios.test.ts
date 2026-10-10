@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../src"
+import type { TransportAddress } from "../../src"
 import { latency } from "../../src/simulation/network/conditions"
 import type { Fate } from "../../src/simulation/network/types"
 import { degrade, flapping, handover, outage, partition } from "../../src/simulation/scenarios"
@@ -88,7 +88,7 @@ describe("scenario helpers", () => {
 
   it("moves a host to a new address at the handover time", () => {
     const { simulation, address } = world()
-    const lte: Address = { ...alice, host: "100.64.12.34" }
+    const lte: TransportAddress = { ...alice, host: "100.64.12.34" }
     handover(simulation, "alice", 1000, lte)
     simulation.run(999)
     expect(address()).toEqual(alice)
@@ -99,7 +99,7 @@ describe("scenario helpers", () => {
   it("passes NAT and access options along with a handover", () => {
     const { simulation, address } = world()
     simulation.network.addNat("carrier", { host: "198.51.100.1" })
-    const cgnat: Address = { ...alice, host: "100.64.0.9" }
+    const cgnat: TransportAddress = { ...alice, host: "100.64.0.9" }
     handover(simulation, "alice", 10, cgnat, {
       nat: "carrier",
       access: { latency: latency.fixed(40) },

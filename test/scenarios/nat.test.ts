@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest"
-import type { Address, CoreEvent } from "../../src"
+import type { CoreEvent, TransportAddress } from "../../src"
 import { latency } from "../../src/simulation/network/conditions"
 import { type NatType, natTypes } from "../../src/simulation/network/nat/types"
 import type { NatSetup } from "../../src/simulation/network/nats"
 import { createSimulation } from "../../src/simulation/simulation"
 import { bob, bytes, options, outcomes, userAgent } from "../helpers"
 
-const phoneAddress: Address = { transport: "UDP", host: "192.168.1.10", port: 5060 }
-const server: Address = bob
-const carolAddress: Address = { transport: "UDP", host: "198.51.100.77", port: 5060 }
+const phoneAddress: TransportAddress = { transport: "UDP", host: "192.168.1.10", port: 5060 }
+const server: TransportAddress = bob
+const carolAddress: TransportAddress = { transport: "UDP", host: "198.51.100.77", port: 5060 }
 const types = Object.keys(natTypes) as NatType[]
 
 function home(type: NatType, setup: Partial<NatSetup> = {}) {
@@ -24,18 +24,18 @@ function home(type: NatType, setup: Partial<NatSetup> = {}) {
   })
   const box = simulation.addNode("server", server, userAgent("server", server))
   const carol = simulation.addNode("carol", carolAddress, userAgent("carol", carolAddress))
-  const ping = (at: number, from: typeof phone, to: Address) =>
+  const ping = (at: number, from: typeof phone, to: TransportAddress) =>
     simulation.at(at, () => simulation.command(from, options(to, "sip:phone@example.com")))
   return { simulation, phone, box, carol, ping }
 }
 
-function requestSource(events: readonly CoreEvent[]): Address {
+function requestSource(events: readonly CoreEvent[]): TransportAddress {
   const request = events.find((event) => event.type === "answered")
   if (request?.type !== "answered") throw new Error("No request received")
   return request.from
 }
 
-const mapped: Address = { transport: "UDP", host: "203.0.113.1", port: 49152 }
+const mapped: TransportAddress = { transport: "UDP", host: "203.0.113.1", port: 49152 }
 
 describe("behind a home NAT", () => {
   it.each(types)("reaches a public server from a %s NAT thanks to rport", (type) => {

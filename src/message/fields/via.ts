@@ -4,9 +4,10 @@ import { bareHost, HOST_PATTERN, isHost, isPort, sameHost } from "./host"
 import { formatParams, isParams, type Params, parseParams } from "./params"
 
 export interface Via {
+  /** Any transport a hop wrote, such as `"UDP"`, `"TLS"` or `"WSS"`. The parser upper-cases it. */
   readonly transport: string
   readonly host: string
-  readonly port?: number
+  readonly port?: number | undefined
   readonly params: Params
 }
 

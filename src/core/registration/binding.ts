@@ -4,7 +4,7 @@ import type { NameAddr } from "../../message/fields/name-addr"
 import { splitSipUri } from "../../message/fields/uri"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
-import type { Address } from "../../transport/address"
+import type { TransportAddress } from "../../transport/address"
 import type { Random } from "../types"
 
 const MIN_REFRESH = 5000
@@ -17,7 +17,7 @@ const TRANSPORT_PARAMS = {
 }
 
 // RFC 3261 §10.2.1 and §26.2.2: sips for TLS; RFC 7118 §5.2: transport=ws for WebSocket
-export function createContact(address: Address, aor: string): NameAddr {
+export function createContact(address: TransportAddress, aor: string): NameAddr {
   const user = splitSipUri(aor)?.user
   const scheme = address.transport === "TLS" || address.transport === "WSS" ? "sips" : "sip"
   const host = `${formatHost(address.host)}:${address.port}`

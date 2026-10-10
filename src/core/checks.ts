@@ -1,25 +1,39 @@
 import { isCallId } from "../message/fields/call-id"
 import { isIp } from "../message/fields/host"
-import { isRequestUri, splitSipUri } from "../message/fields/uri"
+import { isRequestUri, isUri, splitSipUri } from "../message/fields/uri"
 import { hasLineBreak, isText, show } from "../message/syntax"
 import { familyOf, isUnspecified } from "../sdp/address"
 import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
-import { type Address, isAddress } from "../transport/address"
+import { isAddress, type TransportAddress } from "../transport/address"
 import type { Credentials, LocalMedia } from "./types"
 
-export function checkAddress(address: Address): void {
+export function checkAddress(address: TransportAddress): void {
   if (!isAddress(address)) throw new TypeError(`Invalid address ${show(address)}`)
 }
 
-export function checkSource(from: Address): void {
+export function checkSource(from: TransportAddress): void {
   checkAddress(from)
   if (!isIp(from.host))
     throw new TypeError(`The source must be an IP address, got ${show(from.host)}`)
 }
 
+const MAX_TEXT = 4096
+
 export function checkRequestUri(uri: string): void {
   if (!isRequestUri(uri)) throw new TypeError(`Invalid Request-URI ${show(uri)}`)
+  checkLength(uri, "URI")
+}
+
+export function checkAor(aor: string): void {
+  if (!isUri(aor)) throw new TypeError(`Invalid address of record ${show(aor)}`)
+  checkLength(aor, "URI")
+}
+
+function checkLength(value: string, what: string): void {
+  if (value.length > MAX_TEXT) {
+    throw new RangeError(`A ${what} must be at most ${MAX_TEXT} characters, got ${value.length}`)
+  }
 }
 
 // RFC 3261 §25.1: callid = word [ "@" word ]
@@ -37,6 +51,7 @@ export function checkRegistrar(registrar: string | undefined): asserts registrar
   if (registrar === undefined || !parts || parts.user !== undefined || !isRequestUri(registrar)) {
     throw new TypeError(`Invalid registrar ${show(registrar)}`)
   }
+  checkLength(registrar, "URI")
 }
 
 export function checkExpires(expires: number): void {
@@ -47,6 +62,8 @@ export function checkCredentials(credentials: Credentials): void {
   const { username, password, realm = "" } = credentials
   const valid = [username, password, realm].every((value) => isText(value) && !hasLineBreak(value))
   if (!valid) throw new TypeError("Credentials must be strings without line breaks")
+  checkLength(username, "user name")
+  checkLength(realm, "realm")
 }
 
 export function checkCall(call: string): void {

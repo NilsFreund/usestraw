@@ -1,7 +1,6 @@
-import type { SipMessage, SipRequest } from "../message/types"
+import type { SipMessage, SipRequest, SipResponse } from "../message/types"
 import type { CallMedia } from "../sdp/types"
-import type { TransactionEvent } from "../transaction/types"
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 
 /** A number in `[0, 1)` like `Math.random`, but cryptographically secure. */
 export type Random = () => number
@@ -10,42 +9,43 @@ export type Random = () => number
 export interface Credentials {
   readonly username: string
   readonly password: string
-  readonly realm?: string
+  readonly realm?: string | undefined
 }
 
 /** What the app wants: register, call, accept, end, ping or send a raw message. */
-export type Command =
+export type CoreCommand =
   | {
       readonly type: "options"
       readonly uri: string
-      readonly to: Address
-      readonly callId?: string
+      readonly to: TransportAddress
+      readonly callId?: string | undefined
     }
-  | { readonly type: "send"; readonly message: SipMessage; readonly to: Address }
+  | { readonly type: "send"; readonly message: SipMessage; readonly to: TransportAddress }
   | {
       readonly type: "register"
-      readonly to: Address
-      readonly registrar?: string
-      readonly expires?: number
+      readonly to: TransportAddress
+      readonly registrar?: string | undefined
+      readonly expires?: number | undefined
     }
   | { readonly type: "unregister" }
   | {
       readonly type: "call"
       readonly call: string
       readonly uri: string
-      readonly to: Address
+      readonly to: TransportAddress
       readonly media: LocalMedia
     }
   | { readonly type: "accept"; readonly call: string; readonly media: LocalMedia }
-  | { readonly type: "end"; readonly call: string; readonly status?: number }
+  | { readonly type: "end"; readonly call: string; readonly status?: number | undefined }
 
 /** Where this phone receives RTP. `host` defaults to the core's own address. */
 export interface LocalMedia {
-  readonly host?: string
+  readonly host?: string | undefined
   readonly port: number
 }
 
-export interface OfferedChallenge {
+/** A challenge the server offered: its scheme, realm and algorithm. */
+export interface AuthChallenge {
   readonly scheme: string
   readonly realm?: string
   readonly algorithm?: string
@@ -53,7 +53,7 @@ export interface OfferedChallenge {
 
 export type AuthFailure =
   | { readonly reason: "no-credentials" }
-  | { readonly reason: "unsupported-challenge"; readonly offered: readonly OfferedChallenge[] }
+  | { readonly reason: "unsupported-challenge"; readonly offered: readonly AuthChallenge[] }
   | { readonly reason: "unauthorized"; readonly status: number }
 
 export type RegistrationFailure =
@@ -121,7 +121,7 @@ export type CallEvent =
       readonly state: "incoming"
       readonly from: CallParty
       readonly to: CallParty
-      readonly source: Address
+      readonly source: TransportAddress
     }
   | {
       readonly type: "call"
@@ -144,26 +144,36 @@ export type CallEvent =
     }
 
 /** A received datagram, a passed deadline, or an app command. */
-export type Input =
-  | { readonly type: "receive"; readonly data: Uint8Array; readonly from: Address }
+export type CoreInput =
+  | { readonly type: "receive"; readonly data: Uint8Array; readonly from: TransportAddress }
   | { readonly type: "timeout" }
-  | { readonly type: "command"; readonly command: Command }
+  | { readonly type: "command"; readonly command: CoreCommand }
 
-/** What the core reports: registration and call changes, requests, and invalid input. */
+/**
+ * What the core reports: registration and call changes, answers to pings, and invalid input.
+ * A `request` is an ACK that matched nothing.
+ */
 export type CoreEvent =
-  | Exclude<TransactionEvent, { readonly type: "request" }>
-  | { readonly type: "request"; readonly request: SipRequest; readonly from: Address }
+  | { readonly type: "response"; readonly response: SipResponse; readonly from: TransportAddress }
+  | { readonly type: "stray"; readonly response: SipResponse; readonly from: TransportAddress }
+  | { readonly type: "timeout"; readonly request: SipRequest }
+  | {
+      readonly type: "unacknowledged"
+      readonly request: SipRequest
+      readonly response: SipResponse
+    }
+  | { readonly type: "request"; readonly request: SipRequest; readonly from: TransportAddress }
   | {
       readonly type: "answered"
       readonly request: SipRequest
-      readonly from: Address
+      readonly from: TransportAddress
       readonly status: number
     }
-  | { readonly type: "invalid"; readonly error: string; readonly from: Address }
+  | { readonly type: "invalid"; readonly error: string; readonly from: TransportAddress }
   | RegistrationEvent
   | CallEvent
 
 /** Bytes to send, or an event for the app. */
-export type Output =
-  | { readonly type: "send"; readonly data: Uint8Array; readonly to: Address }
+export type CoreOutput =
+  | { readonly type: "send"; readonly data: Uint8Array; readonly to: TransportAddress }
   | { readonly type: "event"; readonly event: CoreEvent }

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { createRecordedCore, ladder, type Output, type Step } from "../../src"
+import { type CoreOutput, createRecordedCore, ladder, type RecordedStep } from "../../src"
 import { formatStep } from "../../src/recorder/ladder"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes } from "../helpers"
 
 const registration = (event: object) =>
-  ({ type: "event", event: { type: "registration", ...event } }) as Output
+  ({ type: "event", event: { type: "registration", ...event } }) as CoreOutput
 
-function step(fields: Partial<Step>): Step {
+function step(fields: Partial<RecordedStep>): RecordedStep {
   return {
     now: 1234,
     input: { type: "timeout" },
@@ -15,7 +15,7 @@ function step(fields: Partial<Step>): Step {
     next: null,
     outputs: [],
     ...fields,
-  } as Step
+  } as RecordedStep
 }
 
 describe("formatStep", () => {
@@ -71,7 +71,7 @@ describe("formatStep", () => {
       direction: "sendrecv",
     }
     const call = (event: Record<string, unknown>) =>
-      ({ type: "event", event: { type: "call", call: "c1", ...event } }) as Output
+      ({ type: "event", event: { type: "call", call: "c1", ...event } }) as CoreOutput
     const lines = formatStep(
       step({
         outputs: [

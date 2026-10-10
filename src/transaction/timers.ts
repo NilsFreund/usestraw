@@ -1,4 +1,7 @@
-/** The RFC 3261 §17 transaction timers, in milliseconds. */
+/**
+ * The RFC 3261 §17 transaction timers, in milliseconds: T2 at least T1, Timer D at least 64·T1,
+ * none above 2³¹−1.
+ */
 export interface TimerSettings {
   readonly t1: number
   readonly t2: number
@@ -16,14 +19,31 @@ export const defaultTimers: TimerSettings = Object.freeze({
   trying: 200,
 })
 
+const MAX_TIMER = 2 ** 31 - 1
+
+// T2 and Timer D grow with T1, so setting T1 alone stays valid
+export function resolveTimers(
+  timers?: Partial<Record<keyof TimerSettings, number | undefined>> | null,
+): TimerSettings {
+  const given = timers ?? {}
+  const { t1 = defaultTimers.t1 } = given
+  const {
+    t2 = Math.max(defaultTimers.t2, t1),
+    t4 = defaultTimers.t4,
+    d = Math.max(defaultTimers.d, 64 * t1),
+    trying = defaultTimers.trying,
+  } = given
+  return { t1, t2, t4, d, trying }
+}
+
 export function transactionTimeout(timers: TimerSettings): number {
   return 64 * timers.t1
 }
 
 export function validateTimers(timers: TimerSettings): void {
   const { t1, t2, t4, d, trying } = timers
-  if (![t1, t2, t4, d, trying].every(Number.isFinite)) {
-    throw new RangeError("Timer settings must be finite numbers")
+  if (![t1, t2, t4, d, trying].every((value) => Number.isFinite(value) && value <= MAX_TIMER)) {
+    throw new RangeError(`Timer settings must be finite numbers up to ${MAX_TIMER} ms`)
   }
   if (t1 <= 0) throw new RangeError(`T1 must be positive, got ${t1}`)
   if (t2 < t1) throw new RangeError(`T2 must be at least T1 (${t1}), got ${t2}`)

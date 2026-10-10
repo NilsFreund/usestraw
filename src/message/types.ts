@@ -3,7 +3,7 @@ import type { CSeq } from "./fields/cseq"
 import type { NameAddr } from "./fields/name-addr"
 import type { Via } from "./fields/via"
 
-export interface Header {
+export interface SipHeader {
   readonly name: string
   readonly value: string
 }
@@ -14,9 +14,9 @@ export interface MessageFields {
   readonly to: NameAddr
   readonly callId: string
   readonly cseq: CSeq
-  readonly maxForwards?: number
+  readonly maxForwards?: number | undefined
   readonly contact: Contact
-  readonly headers: readonly Header[]
+  readonly headers: readonly SipHeader[]
   readonly body: Uint8Array
 }
 

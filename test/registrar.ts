@@ -2,11 +2,11 @@ import {
   type Core,
   createResponse,
   getHeader,
-  type Header,
   isRequest,
   type NameAddr,
   parseMessage,
   type Random,
+  type SipHeader,
   type SipRequest,
   type SipResponse,
   serializeMessage,
@@ -101,7 +101,7 @@ export function registrar(options: RegistrarOptions = {}): (random: Random) => R
       }))
     }
 
-    function challenge(stale: boolean, now: number): Header {
+    function challenge(stale: boolean, now: number): SipHeader {
       const nonce = Math.floor(random() * 2 ** 48).toString(16)
       nonces.set(nonce, { issued: now, nc: 0 })
       const params = [

@@ -1,19 +1,21 @@
-import { isUri } from "../message/fields/uri"
 import { withReceived } from "../message/fields/via"
+import { MAX_MESSAGE_SIZE } from "../message/limits"
 import { parseMessage } from "../message/parse"
+import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
 import { isRequest, type SipRequest } from "../message/types"
 import { isPlayable } from "../sdp/negotiate"
 import { checkTime, earliest } from "../support/time"
-import { defaultTimers, type TimerSettings } from "../transaction/timers"
+import { resolveTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
 import type { TransactionEvent, TransactionOutput } from "../transaction/types"
-import type { Address } from "../transport/address"
+import type { TransportAddress } from "../transport/address"
 import { createCalls } from "./calls/calls"
 import { INCOMPATIBLE_MEDIA } from "./calls/replies"
 import type { CallOutput } from "./calls/types"
 import {
   checkAddress,
+  checkAor,
   checkCall,
   checkCallId,
   checkCredentials,
@@ -31,7 +33,7 @@ import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
 import { createResponder } from "./responder"
-import type { Command, Credentials, Input, Output, Random } from "./types"
+import type { CoreCommand, CoreInput, CoreOutput, Credentials, Random } from "./types"
 import { type Answer, answerWith, checkInvite } from "./uas"
 
 const LOOP: Answer = answerWith(482, "Loop Detected")
@@ -39,19 +41,26 @@ const BUSY: Answer = answerWith(486, "Busy Here")
 const INCOMPATIBLE: Answer = answerWith(488, "Not Acceptable Here", [INCOMPATIBLE_MEDIA])
 const FULL: Answer = answerWith(503, "Service Unavailable", [{ name: "Retry-After", value: "5" }])
 
+// A far end can make us build a message too big for any parser; it is dropped like a lost packet
+const fits = (output: CoreOutput) =>
+  output.type !== "send" || output.data.length <= MAX_MESSAGE_SIZE
+
 /** Options for {@link createCore}. */
 export interface CoreOptions {
   /** Where this phone receives SIP, as the far end sees it. */
-  readonly address: Address
+  readonly address: TransportAddress
   /** The address of record, e.g. `"sip:alice@example.com"`. */
   readonly aor: string
   /** Source of tags, branches and nonces. Must be cryptographically secure. */
   readonly random: Random
-  readonly credentials?: Credentials
-  /** RFC 3261 timers, for tests and unusual networks. Defaults to {@link defaultTimers}. */
-  readonly timers?: TimerSettings
+  readonly credentials?: Credentials | undefined
+  /**
+   * RFC 3261 timers, for tests and unusual networks. Unset ones use {@link defaultTimers}, with T2
+   * and Timer D raised to fit T1.
+   */
+  readonly timers?: Partial<Record<keyof TimerSettings, number | undefined>> | undefined
   /** Turns incoming calls away as busy (486) while this many calls run. Defaults to 100. */
-  readonly maxCalls?: number
+  readonly maxCalls?: number | undefined
 }
 
 /**
@@ -59,8 +68,12 @@ export interface CoreOptions {
  * do what it returns, and send a `timeout` input once `nextDeadline()` has passed.
  */
 export interface Core {
-  /** Runs one input at time `now` (milliseconds, any monotonic clock) and returns what to do. */
-  handle(input: Input, now: number): Output[]
+  /**
+   * Runs one input at time `now` (milliseconds, any monotonic clock) and returns what to do.
+   *
+   * @throws {TypeError | RangeError} for an invalid command or time, never for network input
+   */
+  handle(input: CoreInput, now: number): CoreOutput[]
   /** When the core next wants a `timeout` input, on the clock of `now`; `undefined` if never. */
   nextDeadline(): number | undefined
 }
@@ -72,7 +85,7 @@ export interface Core {
  * @example
  * ```ts
  * const core = createCore({ address, aor: "sip:alice@example.com", random })
- * function run(input: Input) {
+ * function run(input: CoreInput) {
  *   for (const output of core.handle(input, performance.now())) {
  *     if (output.type === "send") socket.send(output.data, output.to.port, output.to.host)
  *     else console.log(output.event)
@@ -81,17 +94,18 @@ export interface Core {
  * run({ type: "command", command: { type: "register", to: server } })
  * ```
  * @throws {TypeError} for an invalid address, address of record or credentials
+ * @throws {RangeError} for timers, `maxCalls` or lengths out of range
  */
 export function createCore(options: CoreOptions): Core {
   const { address, aor, random, maxCalls = 100 } = options
   checkAddress(address)
-  if (!isUri(aor)) throw new TypeError(`Invalid address of record ${show(aor)}`)
+  checkAor(aor)
   const credentials = options.credentials && Object.freeze({ ...options.credentials })
   if (credentials) checkCredentials(credentials)
   checkMaxCalls(maxCalls)
   // Ended calls linger for 64·T1, so a flood of short calls is capped before it costs memory
   const capacity = Math.max(64, 4 * maxCalls)
-  const timers = options.timers ?? defaultTimers
+  const timers = resolveTimers(options.timers)
   const transactions = createTransactions({ local: address, timers })
   const identity = { address, aor, random }
   const responder = createResponder(random)
@@ -99,8 +113,12 @@ export function createCore(options: CoreOptions): Core {
   const contact = createContact(address, aor)
   const calls = createCalls({ identity, contact, credentials, timers })
 
-  function handle(input: Input, now: number): Output[] {
+  function handle(input: CoreInput, now: number): CoreOutput[] {
     checkTime(now)
+    return run(input, now).filter(fits)
+  }
+
+  function run(input: CoreInput, now: number): CoreOutput[] {
     switch (input.type) {
       case "receive":
         return receive(input.data, input.from, now)
@@ -117,7 +135,7 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  function receive(data: Uint8Array, from: Address, now: number): Output[] {
+  function receive(data: Uint8Array, from: TransportAddress, now: number): CoreOutput[] {
     checkSource(from)
     const result = parseMessage(data)
     if (!result.ok) return [event({ type: "invalid", error: result.error, from })]
@@ -159,11 +177,11 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  function execute(command: Command, now: number): Output[] {
+  function execute(command: CoreCommand, now: number): CoreOutput[] {
     switch (command.type) {
       case "send":
         checkAddress(command.to)
-        return [send(command.message, command.to)]
+        return [{ type: "send", data: serializeMessage(command.message), to: command.to }]
       case "options": {
         checkAddress(command.to)
         checkRequestUri(command.uri)
@@ -205,7 +223,7 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  function translate(outputs: TransactionOutput[], now: number): Output[] {
+  function translate(outputs: TransactionOutput[], now: number): CoreOutput[] {
     return outputs.flatMap((output) => {
       if (output.type === "send") return [send(output.message, output.to)]
       const happened = output.event
@@ -235,7 +253,7 @@ export function createCore(options: CoreOptions): Core {
     return calls.request(request, transaction, now)
   }
 
-  function translateCalls(outputs: CallOutput[], now: number): Output[] {
+  function translateCalls(outputs: CallOutput[], now: number): CoreOutput[] {
     return outputs.flatMap((output) => {
       if (output.type === "event") return [event(output.event)]
       if (output.type === "abandon") {
@@ -250,7 +268,7 @@ export function createCore(options: CoreOptions): Core {
     })
   }
 
-  function translateRegistration(outputs: RegistrationOutput[], now: number): Output[] {
+  function translateRegistration(outputs: RegistrationOutput[], now: number): CoreOutput[] {
     return outputs.flatMap((output) =>
       output.type === "send"
         ? translate(transactions.send(output.request, output.to, now), now)

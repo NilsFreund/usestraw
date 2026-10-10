@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../src"
+import type { TransportAddress } from "../../src"
 import { createResponse, isRequest } from "../../src"
 import { parseVia } from "../../src/message/fields/via"
 import { parsed, register } from "../helpers"
@@ -10,7 +10,7 @@ const parsedResponse = createResponse(registerRequest, 200, "OK")
 
 import { acceptsResponse, replyAddress } from "../../src/transport/routing"
 
-const source: Address = { transport: "UDP", host: "203.0.113.7", port: 40123 }
+const source: TransportAddress = { transport: "UDP", host: "203.0.113.7", port: 40123 }
 
 describe("replyAddress (RFC 3261 §18.2.2, RFC 3581)", () => {
   it("replies to the source address and port when rport is present", () => {
@@ -32,7 +32,7 @@ describe("replyAddress (RFC 3261 §18.2.2, RFC 3581)", () => {
   })
 
   it("replies over the same flow on reliable transports", () => {
-    const tcp: Address = { ...source, transport: "TCP" }
+    const tcp: TransportAddress = { ...source, transport: "TCP" }
     expect(replyAddress(parseVia("SIP/2.0/TCP 10.0.0.5:5070"), tcp)).toEqual(tcp)
   })
 
@@ -42,7 +42,7 @@ describe("replyAddress (RFC 3261 §18.2.2, RFC 3581)", () => {
 })
 
 describe("acceptsResponse (RFC 3261 §18.1.2)", () => {
-  const local: Address = { transport: "UDP", host: "192.0.2.10", port: 5060 }
+  const local: TransportAddress = { transport: "UDP", host: "192.0.2.10", port: 5060 }
   const ownVia = parseVia("SIP/2.0/UDP 192.0.2.10:5060;branch=z9hG4bK1")
   const reply = (via: ReturnType<typeof parseVia>[]) =>
     ({ ...parsedResponse, via }) as typeof parsedResponse

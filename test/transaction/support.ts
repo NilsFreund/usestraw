@@ -1,16 +1,16 @@
 import {
-  type Address,
   createResponse,
   isRequest,
   type SipMessage,
   type SipRequest,
   type SipResponse,
+  type TransportAddress,
 } from "../../src"
 import type { Transaction, TransactionOutput } from "../../src/transaction/types"
 import { bob, parsed } from "../helpers"
 
-export const udp: Address = bob
-export const tcp: Address = { ...bob, transport: "TCP" }
+export const udp: TransportAddress = bob
+export const tcp: TransportAddress = { ...bob, transport: "TCP" }
 
 export function request(
   method = "OPTIONS",

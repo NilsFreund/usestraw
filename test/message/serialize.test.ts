@@ -22,6 +22,18 @@ describe("serializeMessage", () => {
     )
   })
 
+  it("writes up to 65535 bytes and refuses more, like the parser", () => {
+    const message = parsed(register)
+    const sized = (size: number) => {
+      const room = size - serializeMessage(message).length
+      return { ...message, body: new Uint8Array(room - String(room).length + 1) }
+    }
+    expect(serializeMessage(sized(65_535))).toHaveLength(65_535)
+    expect(() => serializeMessage(sized(65_536))).toThrow(
+      new RangeError("Message exceeds 65535 bytes"),
+    )
+  })
+
   it("appends the body and sets Content-Length from it", () => {
     const body = new TextEncoder().encode("v=0\r\n")
     const text = new TextDecoder().decode(serializeMessage({ ...parsed(register), body }))

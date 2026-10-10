@@ -4,7 +4,7 @@ import { decode, encode } from "../../src/recorder/codec"
 import { latency, loss } from "../../src/simulation/network/conditions"
 import { createRandom } from "../../src/simulation/random"
 import { createSimulation } from "../../src/simulation/simulation"
-import { alice, bob, bytes } from "../helpers"
+import { alice, bob, bytes, sdp } from "../helpers"
 import { registrar } from "../registrar"
 
 const credentials = { username: "alice", password: "secret" }
@@ -82,6 +82,36 @@ describe("replay", () => {
     expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 5 })
   })
 
+  it("replays a phone that turns calls away with its own maxCalls", () => {
+    const core = createRecordedCore({
+      address: alice,
+      aor: "sip:alice@example.com",
+      random: createRandom(5),
+      maxCalls: 0,
+      timers: { t1: 100 },
+    })
+    const body = sdp()
+    const invite = [
+      "INVITE sip:alice@example.com SIP/2.0",
+      "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK1",
+      "Max-Forwards: 70",
+      "From: <sip:bob@example.com>;tag=b1",
+      "To: <sip:alice@example.com>",
+      "Call-ID: c1",
+      "CSeq: 1 INVITE",
+      "Contact: <sip:bob@192.0.2.20>",
+      "Content-Type: application/sdp",
+      `Content-Length: ${body.length}`,
+      "",
+      body,
+    ].join("\r\n")
+    const outputs = core.handle({ type: "receive", data: bytes(invite), from: bob }, 0)
+    expect(outputs).toContainEqual(
+      expect.objectContaining({ event: expect.objectContaining({ status: 486 }) }),
+    )
+    expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 1 })
+  })
+
   it("points at the first step that does not match", () => {
     const recording = recordRegistration(1, 0).recording()
     const changed = rewrite(recording, 3, (step) => ({ ...step, now: (step["now"] as number) + 1 }))
@@ -141,6 +171,15 @@ describe("replay", () => {
     expect(replay(rewrite(recording, 0, (head) => ({ ...head, version: 2 })))).toStrictEqual({
       ok: false,
       reason: "invalid",
+    })
+    expect(replay(rewrite(recording, 0, (head) => ({ ...head, release: 1 })))).toStrictEqual({
+      ok: false,
+      reason: "invalid",
+    })
+    expect(replay(rewrite(recording, 0, (head) => ({ ...head, release: "9.9.9" })))).toStrictEqual({
+      ok: false,
+      reason: "version",
+      version: "9.9.9",
     })
     expect(replay(rewrite(recording, 0, (head) => ({ ...head, truncated: true })))).toStrictEqual({
       ok: false,

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
-import type { Address } from "../../../src"
+import type { TransportAddress } from "../../../src"
 import { createHosts } from "../../../src/simulation/network/hosts"
 import { createNaming } from "../../../src/simulation/network/naming"
 import { createNats } from "../../../src/simulation/network/nats"
 import { createStreams } from "../../../src/simulation/random"
 import { alice, bob } from "../../helpers"
 
-const phone: Address = { transport: "UDP", host: "192.168.1.10", port: 5060 }
-const laptop: Address = { transport: "UDP", host: "100.64.0.20", port: 5060 }
+const phone: TransportAddress = { transport: "UDP", host: "192.168.1.10", port: 5060 }
+const laptop: TransportAddress = { transport: "UDP", host: "100.64.0.20", port: 5060 }
 
 function world() {
   const stream = createStreams(1)
