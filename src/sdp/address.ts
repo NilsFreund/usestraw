@@ -14,3 +14,22 @@ export function familyOf(host: string): Family | undefined {
 export function isUnspecified(host: string): boolean {
   return /^[0.:]+$/.test(host)
 }
+
+// Hosts compare by value: case and the shorthand of IPv6 do not make another address
+export function sameHost(a: string, b: string): boolean {
+  return canonical(a) === canonical(b)
+}
+
+function canonical(host: string): string {
+  const lower = host.toLowerCase()
+  const halves = lower.split("::")
+  if (!lower.includes(":") || lower.includes(".") || halves.length > 2) return lower
+  const [head = "", tail = ""] = halves
+  const left = head === "" ? [] : head.split(":")
+  const right = tail === "" ? [] : tail.split(":")
+  const zeros =
+    halves.length === 2 ? Array(Math.max(0, 8 - left.length - right.length)).fill("0") : []
+  return [...left, ...zeros, ...right]
+    .map((group) => Number.parseInt(group, 16).toString(16))
+    .join(":")
+}

@@ -27,7 +27,7 @@ const CODECS: readonly [number, Codec][] = [
   [0, "PCMU"],
   [8, "PCMA"],
 ]
-const STATIC: ReadonlyMap<number, Codec> = new Map(CODECS)
+export const STATIC_CODECS: ReadonlyMap<number, Codec> = new Map(CODECS)
 const EVENTS: RtpMap = { name: "telephone-event", rate: 8000 }
 const PROTOCOLS: ReadonlySet<string> = new Set(["RTP/AVP", "RTP/AVPF"])
 const DTMF = 101
@@ -163,7 +163,7 @@ function accept(line: MediaDescription, call: CallMedia, local: MediaAddress): M
 
 function codecOf(line: MediaDescription, type: number): Codec | undefined {
   const map = line.rtpmap.get(type)
-  if (!map) return STATIC.get(type)
+  if (!map) return STATIC_CODECS.get(type)
   const name = map.name.toUpperCase()
   const mono = map.rate === 8000 && (map.channels ?? 1) === 1
   return mono && (name === "PCMU" || name === "PCMA") ? name : undefined
