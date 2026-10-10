@@ -32,6 +32,7 @@ export interface SipResponse extends MessageFields {
 
 export type SipMessage = SipRequest | SipResponse
 
+/** `true` for requests, `false` for responses. */
 export function isRequest(message: SipMessage): message is SipRequest {
   return "method" in message
 }

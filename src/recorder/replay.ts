@@ -3,6 +3,7 @@ import type { Credentials, Output } from "../core/types"
 import { decode, encode, maskSecrets } from "./codec"
 import type { Step } from "./recorder"
 
+/** Whether a replay matched the recording, and where it first diverged if not. */
 export type ReplayResult =
   | { readonly ok: true; readonly steps: number }
   | {
@@ -23,6 +24,7 @@ interface Header {
   }
 }
 
+/** Reruns a recording on a fresh core and checks that every step gives the same outputs. */
 export function replay(recording: string): ReplayResult {
   const [first = "", ...rest] = recording.split("\n").filter((line) => line !== "")
   const header = readHeader(first)

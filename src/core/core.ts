@@ -39,20 +39,49 @@ const BUSY: Answer = answerWith(486, "Busy Here")
 const INCOMPATIBLE: Answer = answerWith(488, "Not Acceptable Here", [INCOMPATIBLE_MEDIA])
 const FULL: Answer = answerWith(503, "Service Unavailable", [{ name: "Retry-After", value: "5" }])
 
+/** Options for {@link createCore}. */
 export interface CoreOptions {
+  /** Where this phone receives SIP, as the far end sees it. */
   readonly address: Address
+  /** The address of record, e.g. `"sip:alice@example.com"`. */
   readonly aor: string
+  /** Source of tags, branches and nonces. Must be cryptographically secure. */
   readonly random: Random
   readonly credentials?: Credentials
+  /** RFC 3261 timers, for tests and unusual networks. Defaults to {@link defaultTimers}. */
   readonly timers?: TimerSettings
+  /** Turns incoming calls away as busy (486) while this many calls run. Defaults to 100. */
   readonly maxCalls?: number
 }
 
+/**
+ * SIP as a pure state machine, with no sockets or clocks. Pass every input with the current time,
+ * do what it returns, and send a `timeout` input once `nextDeadline()` has passed.
+ */
 export interface Core {
+  /** Runs one input at time `now` (milliseconds, any monotonic clock) and returns what to do. */
   handle(input: Input, now: number): Output[]
+  /** When the core next wants a `timeout` input, on the clock of `now`; `undefined` if never. */
   nextDeadline(): number | undefined
 }
 
+/**
+ * Creates a sans-I/O SIP user agent with registration, calls, SDP offer/answer and digest auth.
+ * The same inputs and random draws always give the same outputs.
+ *
+ * @example
+ * ```ts
+ * const core = createCore({ address, aor: "sip:alice@example.com", random })
+ * function run(input: Input) {
+ *   for (const output of core.handle(input, performance.now())) {
+ *     if (output.type === "send") socket.send(output.data, output.to.port, output.to.host)
+ *     else console.log(output.event)
+ *   }
+ * }
+ * run({ type: "command", command: { type: "register", to: server } })
+ * ```
+ * @throws {TypeError} for an invalid address, address of record or credentials
+ */
 export function createCore(options: CoreOptions): Core {
   const { address, aor, random, maxCalls = 100 } = options
   checkAddress(address)

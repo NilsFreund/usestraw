@@ -5,6 +5,11 @@ import { validateMessage } from "./validate"
 
 const encoder = new TextEncoder()
 
+/**
+ * Serializes a message for the wire. Every field is validated first.
+ *
+ * @throws {TypeError} for a message that would not be valid SIP
+ */
 export function serializeMessage(message: SipMessage): Uint8Array {
   validateMessage(message)
   const startLine = isRequest(message)

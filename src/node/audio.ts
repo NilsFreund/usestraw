@@ -10,7 +10,8 @@ import { secureRandom } from "./random"
 
 export interface CallAudio {
   readonly local: MediaAddress
-  readonly sampleRate: number
+  readonly sampleRate: 8000
+  readonly played: number
   readonly readable: ReadableStream<Int16Array<ArrayBuffer>>
   readonly writable: WritableStream<Int16Array>
   update(media: CallMedia): void
@@ -22,10 +23,10 @@ const FIRST_PORT = 16_384
 const PORTS = 8192
 const ATTEMPTS = 16
 const MAX_WAITING_FRAMES = 25
-const BACKLOG_SAMPLES = 200 * SAMPLES_PER_MS
+const AHEAD_SAMPLES = 30_000 * SAMPLES_PER_MS
 
 // One UDP socket per call on an even port (RFC 3550 §11), PCM in and out as Web Streams; a slow
-// reader loses the oldest frames, and a writer waits while more than 200 ms is still to be sent
+// reader loses the oldest frames, a writer may run 30 s ahead, and clear() drops all of that at once
 export async function openAudio(host: string, random: Random = secureRandom): Promise<CallAudio> {
   const socket = await bindEven(host, random)
   const engine = createMediaEngine(random)
@@ -33,6 +34,7 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
   const waiting: Int16Array<ArrayBuffer>[] = []
   let open = true
   let drained: (() => void) | undefined
+  let flushed: (() => void) | undefined
   let pulling: ReadableStreamDefaultController<Int16Array<ArrayBuffer>> | undefined
   let frames: ReadableStreamDefaultController<Int16Array<ArrayBuffer>> | undefined
   let writes: WritableStreamDefaultController | undefined
@@ -48,7 +50,8 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
       close(error)
       return
     }
-    if (engine.queued <= BACKLOG_SAMPLES) release()
+    if (engine.queued <= AHEAD_SAMPLES) release()
+    if (engine.queued === 0) settle()
     clock.schedule(engine.nextDeadline(), () => run({ type: "timeout" }))
   }
 
@@ -67,6 +70,11 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
     drained = undefined
   }
 
+  function settle(): void {
+    flushed?.()
+    flushed = undefined
+  }
+
   function close(error?: unknown): void {
     if (!open) return
     open = false
@@ -76,6 +84,7 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
     else frames?.error(error)
     writes?.error(error ?? new DOMException("The call ended", "AbortError"))
     release()
+    settle()
   }
 
   socket.on("message", (data, info) => {
@@ -109,9 +118,15 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
       if (!(pcm instanceof Int16Array))
         throw new TypeError("Audio must be an Int16Array of 8 kHz PCM")
       run({ type: "audio", pcm: new Int16Array(pcm) })
-      if (!open || engine.queued <= BACKLOG_SAMPLES) return undefined
+      if (!open || engine.queued <= AHEAD_SAMPLES) return undefined
       return new Promise<void>((resolve) => {
         drained = resolve
+      })
+    },
+    close: () => {
+      if (engine.queued === 0) return undefined
+      return new Promise<void>((resolve) => {
+        flushed = resolve
       })
     },
     abort: () => run({ type: "clear" }),
@@ -119,7 +134,10 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
 
   return {
     local: { host, port: socket.address().port },
-    sampleRate: 1000 * SAMPLES_PER_MS,
+    sampleRate: 8000,
+    get played() {
+      return engine.played / SAMPLES_PER_MS
+    },
     readable,
     writable,
     update: (media) => run({ type: "media", media }),

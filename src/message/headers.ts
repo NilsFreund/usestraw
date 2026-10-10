@@ -134,6 +134,7 @@ export function headerList(message: SipMessage): Header[] {
   ]
 }
 
+/** All values of a header, in order. Compact names like `v` for `Via` work. */
 export function getHeaders(message: SipMessage, name: string): string[] {
   const wanted = canonicalName(name).toLowerCase()
   return headerList(message)
@@ -141,6 +142,7 @@ export function getHeaders(message: SipMessage, name: string): string[] {
     .map((header) => header.value)
 }
 
+/** The first value of a header, or `undefined`. */
 export function getHeader(message: SipMessage, name: string): string | undefined {
   return getHeaders(message, name)[0]
 }

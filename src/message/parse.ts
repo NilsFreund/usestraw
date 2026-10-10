@@ -12,6 +12,7 @@ import { isStatusCode } from "./status"
 import { fail, hasControl, hasRawControl, isToken, ParseError, show, TOKEN_CHARS } from "./syntax"
 import type { Header, MessageFields, SipMessage } from "./types"
 
+/** A parsed message, or why the input is not one. */
 export type ParseResult =
   | { readonly ok: true; readonly message: SipMessage }
   | { readonly ok: false; readonly error: string }
@@ -23,6 +24,10 @@ const DATE =
 
 const encoder = new TextEncoder()
 
+/**
+ * Parses one SIP message (RFC 3261 §7). Never throws: bad input gives `ok: false` with an error.
+ * Size and header limits keep hostile input cheap.
+ */
 export function parseMessage(data: Uint8Array | string): ParseResult {
   try {
     return { ok: true, message: parse(typeof data === "string" ? encoder.encode(data) : data) }

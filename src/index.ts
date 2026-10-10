@@ -1,3 +1,16 @@
+/**
+ * The sans-I/O SIP core behind `usestraw`, for custom transports, tests and tools.
+ *
+ * @example
+ * ```ts
+ * import { createCore } from "usestraw/core"
+ *
+ * const core = createCore({ address, aor: "sip:alice@example.com", random })
+ * const outputs = core.handle({ type: "receive", data, from }, performance.now())
+ * ```
+ *
+ * @module
+ */
 export { type Core, type CoreOptions, createCore } from "./core/core"
 export type {
   AuthFailure,

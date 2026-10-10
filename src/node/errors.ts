@@ -4,6 +4,15 @@ import { show } from "../message/syntax"
 
 export type PhoneFailure = RegistrationFailure | { readonly reason: "network" }
 
+/**
+ * - `"wrong-password"`: credentials refused.
+ * - `"password-missing"`: the server wants a password.
+ * - `"unsupported-auth"`: the server wants auth that Straw doesn't speak.
+ * - `"refused"`: registration denied for good, e.g. 403.
+ * - `"unavailable"`: the server can't register you right now, e.g. 503.
+ * - `"no-answer"`: no response. Check host, port and transport.
+ * - `"network"`: the connection failed or broke.
+ */
 export type ConnectReason =
   | "wrong-password"
   | "password-missing"
@@ -13,6 +22,7 @@ export type ConnectReason =
   | "no-answer"
   | "network"
 
+/** Constructor options for {@link ConnectError}. */
 export interface ConnectErrorOptions {
   readonly reason: ConnectReason
   readonly sip?: { readonly status: number } | undefined
@@ -26,9 +36,24 @@ export interface ErrorContext {
 
 const UNTRUSTED = /SELF_SIGNED|UNABLE_TO_(?:GET|VERIFY)/
 
+/**
+ * Why a phone couldn't connect, or why it's reconnecting or offline. Show `message` to people,
+ * switch on `reason` in code.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await connect(process.env.SIP_URL)
+ * } catch (error) {
+ *   if (error instanceof ConnectError && error.reason === "wrong-password") askForPassword()
+ *   else throw error
+ * }
+ * ```
+ */
 export class ConnectError extends Error {
   override readonly name = "ConnectError"
   readonly reason: ConnectReason
+  /** The server's SIP status, e.g. `{ status: 403 }`, if it sent one. */
   readonly sip: { readonly status: number } | undefined
 
   constructor(message: string, options: ConnectErrorOptions) {

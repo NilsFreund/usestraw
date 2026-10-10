@@ -1,10 +1,12 @@
 import type { Header, SipRequest, SipResponse } from "./types"
 
+/** Options for {@link createResponse}. */
 export interface ResponseOptions {
   readonly toTag?: string
   readonly headers?: readonly Header[]
 }
 
+/** Builds a response to `request`, copying the headers RFC 3261 §8.2.6 requires. */
 export function createResponse(
   request: SipRequest,
   status: number,

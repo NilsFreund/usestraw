@@ -19,6 +19,7 @@ export type MediaOutput =
 
 export interface MediaEngine {
   readonly queued: number
+  readonly played: number
   handle(input: MediaInput, now: number): MediaOutput[]
   nextDeadline(): number | undefined
 }
@@ -53,6 +54,7 @@ export function createMediaEngine(random: Random): MediaEngine {
   let playAt: number | undefined
   let queue: Int16Array[] = []
   let queued = 0
+  let played = 0
 
   function handle(input: MediaInput, now: number): MediaOutput[] {
     switch (input.type) {
@@ -145,6 +147,7 @@ export function createMediaEngine(random: Random): MediaEngine {
       else queue[0] = head.subarray(part.length)
     }
     queued -= filled
+    played += filled
     return frame
   }
 
@@ -173,6 +176,9 @@ export function createMediaEngine(random: Random): MediaEngine {
   return {
     get queued() {
       return queued
+    },
+    get played() {
+      return played
     },
     handle,
     nextDeadline: () => {

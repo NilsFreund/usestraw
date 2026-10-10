@@ -76,12 +76,15 @@ describe("openAudio", () => {
     writer.releaseLock()
   })
 
-  it("holds a writer back while more than 200 ms waits, and lets go on clear", async () => {
+  it("lets a writer run 30 s ahead, holds it back beyond that and lets go on clear", async () => {
     const [left, right] = await Promise.all([open(), open()])
     left.update(towards(right))
     const writer = left.writable.getWriter()
+    const started = performance.now()
+    await writer.write(tone(8000 * 29))
+    expect(performance.now() - started).toBeLessThan(100)
     let done = false
-    void writer.write(tone(8000)).then(() => {
+    void writer.write(tone(8000 * 2)).then(() => {
       done = true
     })
     await pause(100)
@@ -89,6 +92,24 @@ describe("openAudio", () => {
     left.clear()
     await pause(40)
     expect(done).toBe(true)
+  })
+
+  it("counts what it played and closes the writer once the last sample went out", async () => {
+    const [left, right] = await Promise.all([open(), open()])
+    left.update(towards(right))
+    expect(left.played).toBe(0)
+    const writer = left.writable.getWriter()
+    await writer.write(tone(1600))
+    const started = performance.now()
+    await writer.close()
+    expect(performance.now() - started).toBeGreaterThan(150)
+    expect(left.played).toBe(200)
+  })
+
+  it("closes a writer at once when nothing waits to be played", async () => {
+    const audio = await open()
+    await audio.writable.getWriter().close()
+    expect(audio.played).toBe(0)
   })
 
   it("ends both streams when the call ends, so pipes stop pulling", async () => {

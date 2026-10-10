@@ -9,6 +9,7 @@ const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu
 const WIDTH = 160
 const firstLine = new TextDecoder()
 
+/** Draws a recording as a ladder, one line per message or event, like `STRAW_DEBUG=1`. */
 export function ladder(recording: string): string {
   return recording
     .split("\n")

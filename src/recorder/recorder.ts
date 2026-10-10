@@ -4,6 +4,7 @@ import { show } from "../message/syntax"
 import { isIntegerIn } from "../support/integer"
 import { decode, encode, maskSecrets } from "./codec"
 
+/** One recorded step: an input, the random draws it took, and what came out. */
 export interface Step {
   readonly now: number
   readonly input: Input
@@ -13,17 +14,22 @@ export interface Step {
   readonly thrown?: string
 }
 
+/** Options for {@link createRecordedCore}. */
 export interface RecorderSettings {
+  /** Maximum size in bytes; the oldest steps go first. Defaults to 512 KB. */
   readonly limit?: number | undefined
   readonly onStep?: ((step: Step) => void) | undefined
 }
 
+/** A core that records itself. */
 export interface RecordedCore extends Core {
+  /** The recording as newline-separated JSON, with password hashes masked. */
   recording(): string
 }
 
 const LIMIT = 512 * 1024
 
+/** Creates a core that records every input, random draw and output, for {@link replay}. */
 export function createRecordedCore(
   options: CoreOptions,
   settings: RecorderSettings = {},

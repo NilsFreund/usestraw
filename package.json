@@ -1,30 +1,37 @@
 {
   "name": "usestraw",
   "version": "0.0.0",
-  "description": "SIP without the hangover. A modern TypeScript SIP stack for voice apps and AI agents (WebRTC, VoIP).",
+  "description": "SIP without the hangover: make and take phone calls from Node, with the audio as Web Streams. For voice apps and AI agents.",
   "keywords": [
     "sip",
     "voip",
-    "webrtc",
     "telephony",
+    "phone",
     "softphone",
-    "typescript",
+    "rtp",
+    "g711",
     "voice-ai",
+    "voice-agent",
     "ai-agents",
     "asterisk",
-    "freeswitch"
+    "freeswitch",
+    "typescript"
   ],
   "homepage": "https://usestraw.dev",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/NilsFreund/usestraw.git"
   },
+  "bugs": {
+    "url": "https://github.com/NilsFreund/usestraw/issues"
+  },
   "license": "MIT",
   "author": "Nils Freund",
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "llms.txt"
   ],
   "engines": {
     "node": ">=22.12"
@@ -35,10 +42,10 @@
     "dev": "tsdown --watch",
     "test": "vitest",
     "coverage": "vitest run --coverage",
-    "typecheck": "tsc",
+    "typecheck": "tsc && tsc -p examples",
     "lint": "biome check",
     "format": "biome check --write",
-    "check": "biome check && tsc && vitest run --coverage",
+    "check": "biome check && bun run typecheck && vitest run --coverage",
     "prepublishOnly": "bun run check && bun run build"
   },
   "devDependencies": {
@@ -54,7 +61,7 @@
   },
   "exports": {
     ".": "./dist/index.js",
-    "./node": "./dist/node/index.js",
+    "./core": "./dist/core.js",
     "./package.json": "./package.json"
   }
 }

@@ -1,4 +1,4 @@
-import { checkCredentials } from "../core/checks"
+import { checkCredentials, checkMaxCalls } from "../core/checks"
 import type { Credentials } from "../core/types"
 import { formatHost, isSocketHost } from "../message/fields/host"
 import { isUri, splitSipUri } from "../message/fields/uri"
@@ -8,20 +8,43 @@ import { defaultPort } from "../transport/address"
 import type { TlsSettings } from "./links"
 import { parseConnectionUrl } from "./url"
 
+/** TLS settings for a `tls://` server. */
 export interface TlsOptions {
+  /** A PEM certificate authority to trust, for servers with a private certificate. */
   readonly ca?: string | undefined
 }
 
+/** Options for {@link connect}. */
 export interface ConnectUrlOptions {
+  /** The SIP password, if it's not in the URL. */
   readonly password?: string | undefined
+  /** The auth user, if your provider's differs from your SIP user. */
   readonly authUser?: string | undefined
   readonly tls?: TlsOptions | undefined
+  /** Aborts connecting. Once connected, aborting closes the phone. */
   readonly signal?: AbortSignal | undefined
+  /**
+   * Records the latest 512 KB of SIP traffic in {@link Phone.trace}.
+   *
+   * @default true
+   */
   readonly trace?: boolean | undefined
+  /**
+   * Incoming calls get busy while this many calls run, in either direction. `0` refuses them all.
+   *
+   * @default 100
+   */
+  readonly maxCalls?: number | undefined
 }
 
+/** {@link connect} options without a URL. */
 export interface ConnectOptions extends ConnectUrlOptions {
+  /** Your SIP address, e.g. `"sip:+4930123456@sip.example.com"`. */
   readonly uri: string
+  /**
+   * `tls://host[:port]` (port 5061 by default) or `udp://host[:port]` (5060). Defaults to the
+   * domain of `uri`, over UDP, or TLS for `sips:`.
+   */
   readonly server?: string | undefined
 }
 
@@ -44,6 +67,7 @@ export interface PhoneSettings {
   readonly signal?: AbortSignal
   readonly tls?: TlsSettings
   readonly trace: boolean
+  readonly maxCalls?: number
 }
 
 const SERVER = /^(udp|tls):\/\/(\[[^\]]*\]|[^:/[\]]+)(?::(\d{1,5}))?$/i
@@ -57,7 +81,8 @@ export function resolveOptions(
   if (!options) {
     throw new TypeError("Missing connection URL: pass tls://user:password@host[:port]")
   }
-  const { uri, password, signal, tls, trace = true } = options
+  const { uri, password, signal, tls, trace = true, maxCalls } = options
+  if (maxCalls !== undefined) checkMaxCalls(maxCalls)
   const invalidUri = new TypeError(`Invalid uri ${show(redact(uri))}: use sip:user@domain`)
   const parts = isUri(uri) ? splitSipUri(uri) : undefined
   if (!parts?.user) throw invalidUri
@@ -85,6 +110,7 @@ export function resolveOptions(
     trace,
     ...(credentials ? { credentials } : {}),
     ...(signal ? { signal } : {}),
+    ...(maxCalls === undefined ? {} : { maxCalls }),
     ...(tls?.ca === undefined ? {} : { tls: { ca: tls.ca } }),
   }
 }

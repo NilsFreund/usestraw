@@ -1,3 +1,4 @@
+/** The RFC 3261 §17 transaction timers, in milliseconds. */
 export interface TimerSettings {
   readonly t1: number
   readonly t2: number
@@ -6,6 +7,7 @@ export interface TimerSettings {
   readonly trying: number
 }
 
+/** The RFC 3261 defaults: T1 500 ms, T2 4 s, T4 5 s, Timer D 32 s, 100 Trying after 200 ms. */
 export const defaultTimers: TimerSettings = Object.freeze({
   t1: 500,
   t2: 4000,
