@@ -12,6 +12,20 @@ function serverKey(outputs: TransactionOutput[]): string {
 }
 
 describe("createTransactions", () => {
+  it("abandons a client transaction so later answers are strays", () => {
+    const transactions = createTransactions({ local: alice })
+    const invite = request("INVITE")
+    transactions.send(invite, udp, 0)
+    expect(transactions.nextDeadline()).toBe(500)
+    transactions.abandon(invite)
+    transactions.abandon(invite)
+    expect(transactions.nextDeadline()).toBeUndefined()
+    expect(transactions.expire(40_000)).toEqual([])
+    expect(transactions.receive(response(invite, 200), bob, 50)).toMatchObject([
+      { type: "event", event: { type: "stray" } },
+    ])
+  })
+
   it("rejects invalid timer settings", () => {
     const timers = { t1: 500, t2: 100, t4: 0, d: 32_000, trying: 0 }
     expect(() => createTransactions({ local: alice, timers })).toThrow(

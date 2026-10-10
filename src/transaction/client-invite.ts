@@ -32,7 +32,9 @@ export function createClientInvite(
       case "proceeding":
         return [...advance(response, now), passed]
       case "completed":
-        return response.status >= 300 ? [send(createAck(invite, response), to)] : []
+        // RFC 6026 §8.4: a 2xx from another branch after a final still reaches the TU
+        if (response.status >= 300) return [send(createAck(invite, response), to)]
+        return response.status >= 200 ? [passed] : []
       case "accepted":
         return response.status >= 200 && response.status < 300 ? [passed] : []
       case "terminated":

@@ -21,6 +21,7 @@ export interface Transactions {
   respond(transaction: string, response: SipResponse, now: number): TransactionOutput[]
   receive(message: SipMessage, from: Address, now: number): TransactionOutput[]
   hasInvite(cancel: SipRequest): boolean
+  abandon(request: SipRequest): void
   expire(now: number): TransactionOutput[]
   nextDeadline(): number | undefined
 }
@@ -121,6 +122,11 @@ export function createTransactions(options: TransactionOptions): Transactions {
     respond,
     receive,
     hasInvite: (cancel) => servers.has(serverKey({ ...cancel, method: "INVITE" })),
+    abandon: (request) => {
+      const transaction = clients.get(clientKey(request))
+      clients.delete(clientKey(request))
+      if (transaction) scheduled.delete(transaction)
+    },
     expire,
     nextDeadline,
   }

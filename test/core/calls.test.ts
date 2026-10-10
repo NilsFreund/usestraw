@@ -1,0 +1,637 @@
+import { describe, expect, it } from "vitest"
+import {
+  type CoreEvent,
+  createCore,
+  isRequest,
+  type Output,
+  parseMessage,
+  type SipRequest,
+  serializeMessage,
+} from "../../src"
+import { reasonFor } from "../../src/core/calls/reasons"
+import { createRandom } from "../../src/simulation/random"
+import { alice, bob, bytes } from "../helpers"
+
+const offer = bytes("v=0\r\n")
+
+const call = (id = "c1") =>
+  ({
+    type: "command",
+    command: { type: "call", call: id, uri: "sip:bob@example.com", to: bob, sdp: offer },
+  }) as const
+const end = (id = "c1") => ({ type: "command", command: { type: "end", call: id } }) as const
+const receive = (text: string) => ({ type: "receive", data: bytes(text), from: bob }) as const
+
+function phone() {
+  return createCore({ address: alice, aor: "sip:alice@example.com", random: createRandom(1) })
+}
+
+function sentRequests(outputs: Output[]): SipRequest[] {
+  return outputs.flatMap((output) => {
+    if (output.type !== "send") return []
+    const parsed = parseMessage(output.data)
+    return parsed.ok && isRequest(parsed.message) ? [parsed.message] : []
+  })
+}
+
+function sentResponses(outputs: Output[]): number[] {
+  return outputs.flatMap((output) => {
+    if (output.type !== "send") return []
+    const parsed = parseMessage(output.data)
+    return parsed.ok && !isRequest(parsed.message) ? [parsed.message.status] : []
+  })
+}
+
+const events = (outputs: Output[]): CoreEvent[] =>
+  outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
+
+function reply(
+  invite: SipRequest,
+  status: number,
+  extra: string[] = [],
+  tag = "t2",
+  contact: string | null = "<sip:bob@192.0.2.20:5060>",
+): string {
+  const head = new TextDecoder().decode(serializeMessage(invite)).split("\r\n")
+  const lines = head.filter((line) => /^(Via|From|Call-ID|CSeq):/.test(line))
+  return [
+    `SIP/2.0 ${status} Answer`,
+    ...lines,
+    `To: <sip:bob@example.com>;tag=${tag}`,
+    ...(contact === null ? [] : [`Contact: ${contact}`]),
+    ...extra,
+    "Content-Length: 0",
+    "",
+    "",
+  ].join("\r\n")
+}
+
+function inDialog(method: string, seq: number, ourTag: string, branch = "z9hG4bKin1"): string {
+  return [
+    `${method} sip:alice@192.0.2.10:5060 SIP/2.0`,
+    `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=${branch}`,
+    "From: <sip:bob@example.com>;tag=t2",
+    `To: <sip:alice@example.com>;tag=${ourTag}`,
+    "Call-ID: c1",
+    `CSeq: ${seq} ${method}`,
+    "Content-Length: 0",
+    "",
+    "",
+  ].join("\r\n")
+}
+
+function live() {
+  const ua = phone()
+  const [invite] = sentRequests(ua.handle(call(), 0))
+  if (!invite) throw new Error("No INVITE")
+  const outputs = ua.handle(receive(reply(invite, 200)), 10)
+  const ourTag = invite.from.params.get("tag") ?? ""
+  return { ua, invite, outputs, ourTag }
+}
+
+describe("calls in the core", () => {
+  it("checks a call before it starts one", () => {
+    const ua = phone()
+    expect(() =>
+      ua.handle(
+        {
+          type: "command",
+          command: { type: "call", call: "a b", uri: "sip:b@x", to: bob, sdp: offer },
+        },
+        0,
+      ),
+    ).toThrow("Invalid Call-ID")
+    expect(() =>
+      ua.handle(
+        {
+          type: "command",
+          command: { type: "call", call: "c1", uri: "bad uri", to: bob, sdp: offer },
+        },
+        0,
+      ),
+    ).toThrow("Invalid Request-URI")
+    expect(() =>
+      ua.handle(
+        {
+          type: "command",
+          command: {
+            type: "call",
+            call: "c1",
+            uri: "sip:b@x",
+            to: { ...bob, port: 70_000 },
+            sdp: offer,
+          },
+        },
+        0,
+      ),
+    ).toThrow("Invalid address")
+    expect(() =>
+      ua.handle(
+        {
+          type: "command",
+          command: { type: "call", call: "c1", uri: "sip:b@x", to: bob, sdp: "v=0" as never },
+        },
+        0,
+      ),
+    ).toThrow(new TypeError("The SDP offer must be a Uint8Array"))
+    ua.handle(call(), 0)
+    expect(() => ua.handle(call(), 0)).toThrow('Call "c1" already exists')
+    expect(() => ua.handle({ type: "command", command: { type: "end", call: "a b" } }, 0)).toThrow(
+      "Invalid Call-ID",
+    )
+    expect(ua.handle(end("unknown"), 0)).toStrictEqual([])
+  })
+
+  it("answers the BYE that ends the dialog with 200 and every later one with 481", () => {
+    const { ua, ourTag } = live()
+    const bye = ua.handle(receive(inDialog("BYE", 6, ourTag, "z9hG4bKb1")), 20)
+    expect(sentResponses(bye)).toStrictEqual([200])
+    expect(events(bye)).toContainEqual({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "remote", reason: "hangup" },
+    })
+    expect(
+      sentResponses(ua.handle(receive(inDialog("BYE", 6, ourTag, "z9hG4bKb1")), 25)),
+    ).toStrictEqual([200])
+    const later = ua.handle(receive(inDialog("BYE", 7, ourTag, "z9hG4bKb2")), 30)
+    expect(sentResponses(later)).toStrictEqual([481])
+    expect(events(later).filter((event) => event.type === "call")).toStrictEqual([])
+  })
+
+  it("answers other requests in the dialog once and statelessly", () => {
+    const { ua, ourTag } = live()
+    const before = ua.nextDeadline()
+    expect(sentResponses(ua.handle(receive(inDialog("INFO", 5, ourTag)), 20))).toStrictEqual([405])
+    expect(sentResponses(ua.handle(receive(inDialog("INVITE", 6, ourTag)), 30))).toStrictEqual([
+      405,
+    ])
+    expect(ua.nextDeadline()).toBe(before)
+  })
+
+  it("leaves requests with our Call-ID but another dialog to the stateless answers", () => {
+    const { ua } = live()
+    expect(sentResponses(ua.handle(receive(inDialog("BYE", 9, "someone-else")), 20))).toStrictEqual(
+      [481],
+    )
+  })
+
+  it("ends after its BYE goes unanswered", () => {
+    const { ua } = live()
+    const [bye] = sentRequests(ua.handle(end(), 100))
+    expect(bye?.method).toBe("BYE")
+    let outputs: Output[] = []
+    for (let now = 100; now <= 40_000; now += 500)
+      outputs = [...outputs, ...ua.handle({ type: "timeout" }, now)]
+    expect(events(outputs)).toContainEqual({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "local", reason: "hangup" },
+    })
+    expect(ua.handle(end(), 41_000)).toStrictEqual([])
+  })
+
+  it("forgets ended calls after 64·T1 and then treats their messages as stray", () => {
+    const ua = phone()
+    const first = sentRequests(ua.handle(call("c1"), 0))[0]
+    const second = sentRequests(ua.handle(call("c2"), 1000))[0]
+    if (!first || !second) throw new Error("No INVITE")
+    ua.handle(receive(reply(first, 486)), 10)
+    ua.handle(receive(reply(second, 486)), 1010)
+    expect(ua.nextDeadline()).toBeLessThanOrEqual(32_010)
+    ua.handle({ type: "timeout" }, 32_010)
+    ua.handle({ type: "timeout" }, 33_010)
+    expect(ua.nextDeadline()).toBeUndefined()
+    const late = ua.handle(receive(reply(first, 200)), 40_000)
+    expect(events(late)).toMatchObject([{ type: "stray" }])
+  })
+
+  it("drops a Record-Route it cannot read", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const answer = reply(invite, 200, [
+      "Record-Route: <sip:edge.example.com;lr>",
+      "Record-Route: <<broken",
+    ])
+    ua.handle(receive(answer), 10)
+    const [bye] = sentRequests(ua.handle(end(), 20))
+    expect(bye?.headers.filter((header) => header.name === "Route")).toStrictEqual([
+      { name: "Route", value: "<sip:edge.example.com;lr>" },
+    ])
+  })
+})
+
+describe("calls when the far end misbehaves", () => {
+  it("counts an INVITE as cancelled when its CANCEL is never answered", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    ua.handle(receive(reply(invite, 180)), 10)
+    expect(sentRequests(ua.handle(end(), 20)).map((request) => request.method)).toStrictEqual([
+      "CANCEL",
+    ])
+    const outputs: Output[] = []
+    for (let now = 520; now <= 40_000; now += 500)
+      outputs.push(...ua.handle({ type: "timeout" }, now))
+    expect(events(outputs)).toContainEqual({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "local", reason: "cancelled" },
+    })
+    expect(sentRequests(ua.handle(receive(reply(invite, 487)), 40_050))).toStrictEqual([])
+    const late = ua.handle(receive(reply(invite, 200)), 40_100)
+    expect(sentRequests(late).map((request) => request.method)).toStrictEqual(["ACK", "BYE"])
+  })
+
+  it("passes an ACK inside the dialog on as a request", () => {
+    const { ua, ourTag } = live()
+    expect(events(ua.handle(receive(inDialog("ACK", 1, ourTag)), 20))).toMatchObject([
+      { type: "request", request: { method: "ACK" } },
+    ])
+  })
+
+  it("stays live when the BYE to an extra fork goes unanswered", () => {
+    const { ua, invite } = live()
+    const fork = sentRequests(ua.handle(receive(reply(invite, 200, [], "t3")), 20))
+    expect(fork.map((request) => request.method)).toStrictEqual(["ACK", "BYE"])
+    const outputs: Output[] = []
+    for (let now = 520; now <= 40_000; now += 500)
+      outputs.push(...ua.handle({ type: "timeout" }, now))
+    expect(events(outputs).filter((event) => event.type === "call")).toStrictEqual([])
+    expect(sentRequests(ua.handle(end(), 40_100)).map((request) => request.method)).toStrictEqual([
+      "BYE",
+    ])
+  })
+
+  it.each([
+    ["no Contact", null],
+    ["a star Contact", "*"],
+  ])("sends its BYE to the original target after a 200 with %s", (_, contact) => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    ua.handle(receive(reply(invite, 200, [], "t2", contact)), 10)
+    const [bye] = sentRequests(ua.handle(end(), 20))
+    expect(bye?.uri).toBe("sip:bob@example.com")
+  })
+})
+
+describe("calls in rarer situations", () => {
+  it("reports early media with the ringing state", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const early = reply(invite, 183, ["Content-Type: application/sdp"]).replace(
+      "Content-Length: 0\r\n\r\n",
+      "Content-Length: 5\r\n\r\nv=0\r\n",
+    )
+    expect(events(ua.handle(receive(early), 10))).toStrictEqual([
+      { type: "call", call: "c1", state: "ringing", status: 183, sdp: bytes("v=0\r\n") },
+    ])
+  })
+
+  it("copes with a 200 that has no To tag", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const tagless = reply(invite, 200).replace(";tag=t2", "")
+    expect(events(ua.handle(receive(tagless), 10))).toMatchObject([{ state: "live" }])
+    expect(
+      sentRequests(ua.handle(receive(tagless), 20)).map((request) => request.method),
+    ).toStrictEqual(["ACK"])
+    const ours = invite.from.params.get("tag") ?? ""
+    const hangup = ua.handle(receive(inDialog("BYE", 3, ours).replace(";tag=t2", "")), 30)
+    expect(sentResponses(hangup)).toStrictEqual([200])
+    expect(events(hangup)).toMatchObject([{ state: "ended", ended: { by: "remote" } }])
+  })
+
+  it("acknowledges a retransmitted 200 from an extra fork without another BYE", () => {
+    const { ua, invite } = live()
+    ua.handle(receive(reply(invite, 200, [], "t3")), 20)
+    expect(
+      sentRequests(ua.handle(receive(reply(invite, 200, [], "t3")), 30)).map(
+        (request) => request.method,
+      ),
+    ).toStrictEqual(["ACK"])
+  })
+
+  it("counts a call as cancelled when it ended before any answer and the INVITE timed out", () => {
+    const ua = phone()
+    ua.handle(call(), 0)
+    expect(ua.handle(end(), 10)).toStrictEqual([])
+    const outputs: Output[] = []
+    for (let now = 500; now <= 33_000; now += 500)
+      outputs.push(...ua.handle({ type: "timeout" }, now))
+    expect(events(outputs)).toContainEqual({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "local", reason: "cancelled" },
+    })
+  })
+
+  it("answers the far end's BYE that crosses its own and ends once as its own hang-up", () => {
+    const { ua, ourTag } = live()
+    ua.handle(end(), 100)
+    const crossing = ua.handle(receive(inDialog("BYE", 7, ourTag)), 110)
+    expect(sentResponses(crossing)).toStrictEqual([200])
+    expect(events(crossing)).toStrictEqual([
+      { type: "call", call: "c1", state: "ended", ended: { by: "local", reason: "hangup" } },
+    ])
+  })
+})
+
+describe("calls under pressure from the details", () => {
+  const tls = { transport: "TLS", host: "192.0.2.20", port: 5061 } as const
+  const overTls = (id: string) =>
+    ({
+      type: "command",
+      command: { type: "call", call: id, uri: "sip:bob@example.com", to: tls, sdp: offer },
+    }) as const
+  const methodsOf = (outputs: Output[]) => sentRequests(outputs).map((request) => request.method)
+  const callEvents = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
+
+  it("reports ringing once and cancels once however often it rings", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    expect(callEvents(ua.handle(receive(reply(invite, 180)), 10))).toHaveLength(1)
+    expect(callEvents(ua.handle(receive(reply(invite, 180)), 20))).toStrictEqual([])
+    expect(methodsOf(ua.handle(end(), 30))).toStrictEqual(["CANCEL"])
+    expect(methodsOf(ua.handle(receive(reply(invite, 180)), 40))).toStrictEqual([])
+    expect(callEvents(ua.handle(receive(reply(invite, 183)), 50))).toStrictEqual([])
+  })
+
+  it("does not answer a challenge for a call it already ended", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    ua.handle(receive(reply(invite, 100)), 10)
+    expect(methodsOf(ua.handle(end(), 20))).toStrictEqual(["CANCEL"])
+    const challenged = ua.handle(
+      receive(reply(invite, 407, ['Proxy-Authenticate: Digest realm="x", nonce="n"'])),
+      30,
+    )
+    expect(methodsOf(challenged)).toStrictEqual(["ACK"])
+    expect(callEvents(challenged)).toMatchObject([
+      { state: "ended", ended: { reason: "cancelled" } },
+    ])
+  })
+
+  it("waits for a provisional answer to the new INVITE before it cancels after a challenge", () => {
+    const ua = createCore({
+      address: alice,
+      aor: "sip:alice@example.com",
+      random: createRandom(1),
+      credentials: { username: "alice", password: "secret" },
+    })
+    const [first] = sentRequests(ua.handle(call(), 0))
+    if (!first) throw new Error("No INVITE")
+    ua.handle(receive(reply(first, 100)), 10)
+    const retry = sentRequests(
+      ua.handle(
+        receive(reply(first, 407, ['Proxy-Authenticate: Digest realm="x", nonce="n"'])),
+        20,
+      ),
+    )
+    const second = retry.find((request) => request.method === "INVITE")
+    if (!second) throw new Error("No second INVITE")
+    expect(second.cseq.seq).toBe(2)
+    expect(methodsOf(ua.handle(end(), 30))).toStrictEqual([])
+    const cancel = sentRequests(ua.handle(receive(reply(second, 180)), 40))
+    expect(cancel.map((request) => [request.method, request.cseq.seq])).toStrictEqual([
+      ["CANCEL", 2],
+    ])
+  })
+
+  it("waits for the final answer to its BYE", () => {
+    const { ua } = live()
+    const [bye] = sentRequests(ua.handle(end(), 100))
+    if (!bye) throw new Error("No BYE")
+    const trying = ua.handle(receive(reply(bye, 100)), 110)
+    expect(callEvents(trying)).toStrictEqual([])
+    expect(callEvents(ua.handle(receive(reply(bye, 200)), 120))).toMatchObject([{ state: "ended" }])
+  })
+
+  it("gives the BYE to an extra fork the next CSeq of that fork", () => {
+    const { ua, invite } = live()
+    const fork = sentRequests(ua.handle(receive(reply(invite, 200, [], "t3")), 20))
+    expect(fork.map((request) => [request.method, request.cseq.seq])).toStrictEqual([
+      ["ACK", 1],
+      ["BYE", 2],
+    ])
+  })
+
+  it("keeps ended calls for exactly 64·T1 from the moment they ended", () => {
+    const ua = phone()
+    const [first] = sentRequests(ua.handle(overTls("c1"), 0))
+    if (!first) throw new Error("No INVITE")
+    ua.handle(receive(reply(first, 486)), 10)
+    expect(ua.nextDeadline()).toBe(32_010)
+    const [second] = sentRequests(ua.handle(overTls("c2"), 500))
+    if (!second) throw new Error("No INVITE")
+    ua.handle(receive(reply(second, 486)), 600)
+    expect(ua.nextDeadline()).toBe(32_010)
+    ua.handle(receive(reply(first, 486)), 20_000)
+    expect(ua.nextDeadline()).toBe(32_010)
+    ua.handle({ type: "timeout" }, 32_010)
+    expect(ua.nextDeadline()).toBe(32_600)
+  })
+})
+
+describe("calls against a hostile far end", () => {
+  const forged = (invite: SipRequest, status: number, fromTag: string, seq = 1, body = "") =>
+    [
+      `SIP/2.0 ${status} Forged`,
+      "Via: SIP/2.0/UDP 192.0.2.10:5060;branch=z9hG4bKforged",
+      `From: <sip:alice@example.com>;tag=${fromTag}`,
+      "To: <sip:bob@example.com>;tag=evil",
+      `Call-ID: ${invite.callId}`,
+      `CSeq: ${seq} INVITE`,
+      "Contact: <sip:evil@203.0.113.66>",
+      ...(body ? ["Content-Type: application/sdp"] : []),
+      `Content-Length: ${body.length}`,
+      "",
+      body,
+    ].join("\r\n")
+  const callEvents = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
+
+  it("ignores answers that do not belong to its INVITE", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const ours = invite.from.params.get("tag") ?? ""
+    for (const status of [183, 200, 486, 407]) {
+      const body = status === 183 || status === 200 ? "v=0\r\n" : ""
+      const outputs = ua.handle(receive(forged(invite, status, "someone", 1, body)), 10)
+      expect(callEvents(outputs), `${status}`).toStrictEqual([])
+      expect(sentRequests(outputs), `${status}`).toStrictEqual([])
+    }
+    expect(callEvents(ua.handle(receive(forged(invite, 200, ours, 9)), 20))).toStrictEqual([])
+    expect(callEvents(ua.handle(receive(reply(invite, 200)), 30))).toMatchObject([
+      { state: "live" },
+    ])
+    const late = ua.handle(receive(forged(invite, 486, ours)), 40)
+    expect(callEvents(late)).toStrictEqual([])
+    expect(sentRequests(late)).toStrictEqual([])
+  })
+
+  it("ends a call whose CANCEL was answered but whose INVITE never was", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    ua.handle(receive(reply(invite, 180)), 10)
+    const [cancel] = sentRequests(ua.handle(end(), 20))
+    if (!cancel) throw new Error("No CANCEL")
+    ua.handle(receive(reply(cancel, 200)), 30)
+    expect(ua.nextDeadline()).toBe(5030)
+    expect(ua.handle({ type: "timeout" }, 5030)).toStrictEqual([])
+    expect(ua.nextDeadline()).toBe(32_020)
+    expect(ua.handle({ type: "timeout" }, 32_019)).toStrictEqual([])
+    expect(callEvents(ua.handle({ type: "timeout" }, 32_020))).toStrictEqual([
+      { type: "call", call: "c1", state: "ended", ended: { by: "local", reason: "cancelled" } },
+    ])
+    expect(sentRequests(ua.handle(receive(reply(invite, 487)), 32_100))).toStrictEqual([])
+  })
+
+  it("hangs up at most 16 extra forks", () => {
+    const { ua, invite } = live()
+    let byes = 0
+    for (let fork = 0; fork < 40; fork++) {
+      const outputs = ua.handle(receive(reply(invite, 200, [], `f${fork}`)), 20 + fork)
+      byes += sentRequests(outputs).filter((request) => request.method === "BYE").length
+    }
+    expect(byes).toBe(16)
+  })
+
+  it.each([
+    [
+      "more than 32 routes",
+      Array.from({ length: 33 }, (_, index) => `Record-Route: <sip:p${index}.example.com;lr>`),
+    ],
+    [
+      "a route with headers",
+      ["Record-Route: <sip:edge.example.com;lr>", "Record-Route: <sip:x.example.com?Subject=y>"],
+    ],
+  ])("drops a route set with %s", (_, headers) => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    ua.handle(receive(reply(invite, 200, headers)), 10)
+    const [bye] = sentRequests(ua.handle(end(), 20))
+    expect(bye?.headers.filter((header) => header.name === "Route")).toStrictEqual([])
+  })
+
+  it("does not trip over a Contact it cannot send to", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const answer = reply(invite, 200, [], "t2", "<sip:bob@192.0.2.20?Subject=x>")
+    const [ack] = sentRequests(ua.handle(receive(answer), 10))
+    expect(ack?.uri).toBe("sip:bob@example.com")
+    for (let now = 500; now < 33_000; now += 500) ua.handle({ type: "timeout" }, now)
+    expect(sentRequests(ua.handle(end(), 33_000))[0]?.uri).toBe("sip:bob@example.com")
+  })
+
+  it("keeps its own copy of the offer and refuses an oversized one", () => {
+    const ua = phone()
+    const sdp = bytes("v=0\r\n")
+    const [invite] = sentRequests(
+      ua.handle(
+        { type: "command", command: { type: "call", call: "c1", uri: "sip:b@x", to: bob, sdp } },
+        0,
+      ),
+    )
+    sdp.fill(0x41)
+    const [again] = sentRequests(ua.handle({ type: "timeout" }, 500))
+    expect(again?.body).toStrictEqual(invite?.body)
+    const huge = new Uint8Array(32 * 1024 + 1)
+    expect(() =>
+      ua.handle(
+        {
+          type: "command",
+          command: { type: "call", call: "c2", uri: "sip:b@x", to: bob, sdp: huge },
+        },
+        0,
+      ),
+    ).toThrow(new RangeError("The SDP has 32769 bytes, at most 32768 fit"))
+  })
+})
+
+describe("calls through forking proxies and late answers", () => {
+  const callEvents = (outputs: Output[]) => events(outputs).filter((event) => event.type === "call")
+  const methodsOf = (outputs: Output[]) => sentRequests(outputs).map((request) => request.method)
+  const withBody = (text: string, body: string) =>
+    text.replace("Content-Length: 0\r\n\r\n", `Content-Length: ${body.length}\r\n\r\n${body}`)
+
+  it("hangs up a 2xx from one branch that follows a final from another", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const declined = ua.handle(receive(reply(invite, 603, [], "a")), 10)
+    expect(methodsOf(declined)).toStrictEqual(["ACK"])
+    expect(callEvents(declined)).toMatchObject([{ state: "ended", ended: { reason: "declined" } }])
+    expect(methodsOf(ua.handle(receive(reply(invite, 200, [], "b")), 20))).toStrictEqual([
+      "ACK",
+      "BYE",
+    ])
+  })
+
+  it("reports early media again when another fork or other SDP rings", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const first = withBody(
+      reply(invite, 183, ["Content-Type: application/sdp"], "a"),
+      "c=IN IP4 10.0.0.1",
+    )
+    const other = withBody(
+      reply(invite, 183, ["Content-Type: application/sdp"], "b"),
+      "c=IN IP4 10.0.0.2",
+    )
+    const changed = withBody(
+      reply(invite, 183, ["Content-Type: application/sdp"], "b"),
+      "c=IN IP4 10.0.0.3",
+    )
+    expect(callEvents(ua.handle(receive(first), 10))).toHaveLength(1)
+    expect(callEvents(ua.handle(receive(other), 20))).toMatchObject([
+      { sdp: bytes("c=IN IP4 10.0.0.2") },
+    ])
+    expect(callEvents(ua.handle(receive(other), 30))).toStrictEqual([])
+    expect(callEvents(ua.handle(receive(changed), 40))).toMatchObject([
+      { sdp: bytes("c=IN IP4 10.0.0.3") },
+    ])
+    const longer = withBody(
+      reply(invite, 183, ["Content-Type: application/sdp"], "b"),
+      "c=IN IP4 10.0.0.30",
+    )
+    expect(callEvents(ua.handle(receive(longer), 50))).toHaveLength(1)
+    expect(callEvents(ua.handle(receive(reply(invite, 180, [], "c")), 60))).toHaveLength(1)
+    expect(callEvents(ua.handle(receive(reply(invite, 180, [], "d")), 70))).toHaveLength(1)
+  })
+
+  it("acknowledges and hangs up a 200 that arrives after the INVITE timed out", () => {
+    const ua = phone()
+    const [invite] = sentRequests(ua.handle(call(), 0))
+    if (!invite) throw new Error("No INVITE")
+    const outputs: Output[] = []
+    for (let now = 500; now <= 32_000; now += 500)
+      outputs.push(...ua.handle({ type: "timeout" }, now))
+    expect(callEvents(outputs)).toMatchObject([{ state: "ended", ended: { reason: "timeout" } }])
+    expect(methodsOf(ua.handle(receive(reply(invite, 200)), 32_100))).toStrictEqual(["ACK", "BYE"])
+  })
+})
+
+describe("reasonFor", () => {
+  it("calls a 487 the callee sent on its own cancelled", () => {
+    expect(reasonFor(487)).toBe("cancelled")
+  })
+
+  it("calls other 6xx answers rejected", () => {
+    expect(reasonFor(606)).toBe("rejected")
+  })
+})

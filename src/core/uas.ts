@@ -25,12 +25,14 @@ const KNOWN_METHODS: ReadonlySet<string> = new Set([
   "UPDATE",
 ])
 
-const ALLOW: Header = { name: "Allow", value: "ACK, CANCEL, OPTIONS" }
+const ALLOW: Header = { name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }
 const ACCEPT_NOTHING: Header = { name: "Accept", value: "" }
 
 export function answer(request: SipRequest): Answer {
   const { method } = request
-  if (method === "CANCEL") return answerWith(481, "Call/Transaction Does Not Exist")
+  if (method === "CANCEL" || method === "BYE") {
+    return answerWith(481, "Call/Transaction Does Not Exist")
+  }
   if (!KNOWN_METHODS.has(method)) return answerWith(501, "Not Implemented")
   if (method !== "OPTIONS") return answerWith(405, "Method Not Allowed", [ALLOW])
   if (!isSipUri(request.uri)) return answerWith(416, "Unsupported URI Scheme")

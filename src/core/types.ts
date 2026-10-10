@@ -25,6 +25,14 @@ export type Command =
       readonly expires?: number
     }
   | { readonly type: "unregister" }
+  | {
+      readonly type: "call"
+      readonly call: string
+      readonly uri: string
+      readonly to: Address
+      readonly sdp: Uint8Array
+    }
+  | { readonly type: "end"; readonly call: string }
 
 export interface OfferedChallenge {
   readonly scheme: string
@@ -53,6 +61,45 @@ export type RegistrationEvent =
       readonly retryIn?: number
     }
 
+export type CallReason =
+  | "hangup"
+  | "cancelled"
+  | "busy"
+  | "declined"
+  | "not-found"
+  | "no-answer"
+  | "unavailable"
+  | "rejected"
+  | "unauthorized"
+  | "timeout"
+
+export interface CallEnd {
+  readonly by: "local" | "remote"
+  readonly reason: CallReason
+  readonly status?: number
+}
+
+export type CallEvent =
+  | {
+      readonly type: "call"
+      readonly call: string
+      readonly state: "ringing"
+      readonly status: number
+      readonly sdp?: Uint8Array
+    }
+  | {
+      readonly type: "call"
+      readonly call: string
+      readonly state: "live"
+      readonly sdp?: Uint8Array
+    }
+  | {
+      readonly type: "call"
+      readonly call: string
+      readonly state: "ended"
+      readonly ended: CallEnd
+    }
+
 export type Input =
   | { readonly type: "receive"; readonly data: Uint8Array; readonly from: Address }
   | { readonly type: "timeout" }
@@ -69,6 +116,7 @@ export type CoreEvent =
     }
   | { readonly type: "invalid"; readonly error: string; readonly from: Address }
   | RegistrationEvent
+  | CallEvent
 
 export type Output =
   | { readonly type: "send"; readonly data: Uint8Array; readonly to: Address }

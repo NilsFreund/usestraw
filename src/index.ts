@@ -1,6 +1,9 @@
 export { type Core, type CoreOptions, createCore } from "./core/core"
 export type {
   AuthFailure,
+  CallEnd,
+  CallEvent,
+  CallReason,
   Command,
   CoreEvent,
   Credentials,

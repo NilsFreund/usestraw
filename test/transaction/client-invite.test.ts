@@ -111,7 +111,8 @@ describe("createClientInvite (RFC 3261 §17.1.1, RFC 6026)", () => {
     expect(ack?.to.params.get("tag")).toBe("b1")
     expect(ack?.via).toEqual(invite.via)
     expect(kinds(transaction.receive(failure, bob, 600))).toEqual(["ACK"])
-    expect(transaction.receive(response(invite, 200), bob, 700)).toEqual([])
+    expect(transaction.receive(response(invite, 180), bob, 650)).toEqual([])
+    expect(kinds(transaction.receive(response(invite, 200), bob, 700))).toEqual(["response"])
     expect(run(transaction)).toEqual([[32_100, []]])
   })
 

@@ -21,7 +21,7 @@ function request(method: string, uri = "sip:alice@example.com", extra: string[] 
   return message
 }
 
-const allow = { name: "Allow", value: "ACK, CANCEL, OPTIONS" }
+const allow = { name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }
 
 describe("answer (RFC 3261 §8.2)", () => {
   it("accepts OPTIONS with 200 and Allow", () => {
@@ -34,7 +34,6 @@ describe("answer (RFC 3261 §8.2)", () => {
 
   it.each([
     "INVITE",
-    "BYE",
     "INFO",
     "MESSAGE",
     "NOTIFY",
@@ -56,6 +55,14 @@ describe("answer (RFC 3261 §8.2)", () => {
     expect(answer(request(method))).toEqual({
       status: 501,
       reason: "Not Implemented",
+      headers: [],
+    })
+  })
+
+  it("rejects a BYE outside any dialog with 481 (§15.1.2)", () => {
+    expect(answer(request("BYE"))).toEqual({
+      status: 481,
+      reason: "Call/Transaction Does Not Exist",
       headers: [],
     })
   })

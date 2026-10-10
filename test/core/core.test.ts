@@ -359,7 +359,7 @@ describe("createCore", () => {
         reason: "OK",
         callId: "ping-1",
         cseq: { seq: 7, method: "OPTIONS" },
-        headers: [{ name: "Allow", value: "ACK, CANCEL, OPTIONS" }],
+        headers: [{ name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }],
       })
       expect(response.to.params.get("tag")).toMatch(/^[a-z0-9]+$/)
     })
@@ -372,13 +372,18 @@ describe("createCore", () => {
       expect(sent(repeat)).toEqual([reply])
     })
 
-    it.each(["MESSAGE", "NOTIFY", "BYE"])("rejects %s with 405 and Allow", (method) => {
+    it.each(["MESSAGE", "NOTIFY"])("rejects %s with 405 and Allow", (method) => {
       const response = message(sent(core().handle(receive(incoming(method)), 0))[0])
       expect(response).toMatchObject({
         status: 405,
         reason: "Method Not Allowed",
-        headers: [{ name: "Allow", value: "ACK, CANCEL, OPTIONS" }],
+        headers: [{ name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }],
       })
+    })
+
+    it("rejects a BYE for an unknown dialog with 481", () => {
+      const response = message(sent(core().handle(receive(incoming("BYE")), 0))[0])
+      expect(response).toMatchObject({ status: 481, reason: "Call/Transaction Does Not Exist" })
     })
 
     it("rejects unknown methods with 501", () => {
