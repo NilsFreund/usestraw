@@ -9,6 +9,7 @@ export type {
   CoreEvent,
   Credentials,
   Input,
+  LocalMedia,
   Output,
   Random,
   RegistrationEvent,
@@ -39,6 +40,7 @@ export {
   type Step,
 } from "./recorder/recorder"
 export { type ReplayResult, replay } from "./recorder/replay"
+export type { CallMedia, Codec, MediaAddress, MediaDirection } from "./sdp/types"
 export { defaultTimers, type TimerSettings } from "./transaction/timers"
 export type { TransactionEvent } from "./transaction/types"
 export type { Address, Transport } from "./transport/address"

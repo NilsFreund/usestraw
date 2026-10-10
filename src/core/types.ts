@@ -1,4 +1,5 @@
 import type { SipMessage, SipRequest } from "../message/types"
+import type { CallMedia } from "../sdp/types"
 import type { TransactionEvent } from "../transaction/types"
 import type { Address } from "../transport/address"
 
@@ -30,10 +31,15 @@ export type Command =
       readonly call: string
       readonly uri: string
       readonly to: Address
-      readonly sdp: Uint8Array
+      readonly media: LocalMedia
     }
-  | { readonly type: "accept"; readonly call: string; readonly sdp: Uint8Array }
+  | { readonly type: "accept"; readonly call: string; readonly media: LocalMedia }
   | { readonly type: "end"; readonly call: string; readonly status?: number }
+
+export interface LocalMedia {
+  readonly host?: string
+  readonly port: number
+}
 
 export interface OfferedChallenge {
   readonly scheme: string
@@ -72,6 +78,7 @@ export type CallReason =
   | "unavailable"
   | "rejected"
   | "unauthorized"
+  | "incompatible"
   | "timeout"
 
 export interface CallEnd {
@@ -93,20 +100,19 @@ export type CallEvent =
       readonly from: CallParty
       readonly to: CallParty
       readonly source: Address
-      readonly sdp?: Uint8Array
     }
   | {
       readonly type: "call"
       readonly call: string
       readonly state: "ringing"
       readonly status: number
-      readonly sdp?: Uint8Array
+      readonly media?: CallMedia
     }
   | {
       readonly type: "call"
       readonly call: string
       readonly state: "live"
-      readonly sdp?: Uint8Array
+      readonly media?: CallMedia
     }
   | {
       readonly type: "call"

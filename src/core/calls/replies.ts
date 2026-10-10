@@ -31,6 +31,12 @@ const PHRASES: Readonly<Record<number, string>> = {
   603: "Decline",
 }
 
+// RFC 3261 §20.43: warning 305 names a media mismatch in a 488
+export const INCOMPATIBLE_MEDIA: Header = {
+  name: "Warning",
+  value: '305 straw "Incompatible media format"',
+}
+
 export function phraseFor(status: number): string {
   return PHRASES[status] ?? "Rejected"
 }

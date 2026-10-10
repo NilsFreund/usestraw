@@ -1,11 +1,11 @@
-import type { Command, Core, Output } from "../src"
+import type { Command, Core, MediaAddress, Output } from "../src"
 import { earliest } from "../src/support/time"
 
 export interface AnswererOptions {
   readonly answerAfter?: number
   readonly reject?: number
   readonly hangupAfter?: number
-  readonly sdp?: Uint8Array
+  readonly media?: MediaAddress
 }
 
 interface Pending {
@@ -16,7 +16,7 @@ interface Pending {
 // Wraps a phone so it picks up, rejects or hangs up its incoming calls on a script
 export function answerer(core: Core, options: AnswererOptions = {}): Core {
   const { answerAfter, reject, hangupAfter } = options
-  const sdp = options.sdp ?? new TextEncoder().encode("v=0\r\no=alice 1 1 IN IP4 192.0.2.10\r\n")
+  const media = options.media ?? { host: "192.0.2.10", port: 40_000 }
   const live = new Set<string>()
   let pending: Pending[] = []
 
@@ -27,7 +27,7 @@ export function answerer(core: Core, options: AnswererOptions = {}): Core {
       if (state === "incoming" && (answerAfter !== undefined || reject !== undefined)) {
         const command: Command =
           reject === undefined
-            ? { type: "accept", call, sdp }
+            ? { type: "accept", call, media }
             : { type: "end", call, status: reject }
         pending.push({ at: now + (answerAfter ?? 0), command })
       }

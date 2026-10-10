@@ -63,6 +63,13 @@ describe("formatStep", () => {
   })
 
   it("shows how calls go", () => {
+    const media = {
+      remote: { host: "192.0.2.20", port: 4000 },
+      codec: "PCMA",
+      payloadType: 8,
+      ptime: 20,
+      direction: "sendrecv",
+    }
     const call = (event: Record<string, unknown>) =>
       ({ type: "event", event: { type: "call", call: "c1", ...event } }) as Output
     const lines = formatStep(
@@ -74,8 +81,18 @@ describe("formatStep", () => {
             to: { uri: "sip:alice@example.com" },
             source: bob,
           }),
-          call({ state: "ringing", status: 183 }),
-          call({ state: "live", sdp: bytes("v=0") }),
+          call({ state: "ringing", status: 180 }),
+          call({
+            state: "ringing",
+            status: 183,
+            media: { ...media, remote: { host: "192.0.2.20", port: 5004 } },
+          }),
+          call({ state: "live" }),
+          call({ state: "live", media }),
+          call({
+            state: "live",
+            media: { ...media, remote: { host: "2001:db8::5", port: 4000 }, direction: "recvonly" },
+          }),
           call({ state: "ended", ended: { by: "remote", reason: "busy", status: 486 } }),
           call({ state: "ended", ended: { by: "local", reason: "hangup" } }),
         ],
@@ -83,8 +100,11 @@ describe("formatStep", () => {
     )
     expect(lines).toStrictEqual([
       "    1.234  ● call incoming from sip:bob@example.com",
-      "    1.234  ● call ringing 183",
+      "    1.234  ● call ringing 180",
+      "    1.234  ● call ringing 183 PCMA to 192.0.2.20:5004",
       "    1.234  ● call live",
+      "    1.234  ● call live PCMA to 192.0.2.20:4000",
+      "    1.234  ● call live PCMA to [2001:db8::5]:4000 recvonly",
       "    1.234  ● call ended by remote: busy 486",
       "    1.234  ● call ended by local: hangup",
     ])

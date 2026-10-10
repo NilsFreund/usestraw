@@ -1,5 +1,6 @@
 import type { CallEvent, Output } from "../core/types"
 import { formatHost } from "../message/fields/host"
+import type { CallMedia } from "../sdp/types"
 import type { Address } from "../transport/address"
 import { decode } from "./codec"
 import type { Step } from "./recorder"
@@ -56,10 +57,17 @@ function describe(output: Output): string | undefined {
 
 function call(event: CallEvent): string {
   if (event.state === "incoming") return `incoming from ${event.from.uri}`
-  if (event.state === "ringing") return `ringing ${event.status}`
-  if (event.state === "live") return "live"
+  if (event.state === "ringing") return `ringing ${event.status}${describeMedia(event.media)}`
+  if (event.state === "live") return `live${describeMedia(event.media)}`
   const { by, reason, status } = event.ended
   return `ended by ${by}: ${reason}${status === undefined ? "" : ` ${status}`}`
+}
+
+function describeMedia(media: CallMedia | undefined): string {
+  if (!media) return ""
+  const { codec, remote, direction } = media
+  const { host, port } = remote
+  return ` ${codec} to ${formatHost(host)}:${port}${direction === "sendrecv" ? "" : ` ${direction}`}`
 }
 
 function place(address: Address): string {

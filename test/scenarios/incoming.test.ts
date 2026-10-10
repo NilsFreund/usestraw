@@ -7,7 +7,7 @@ import { formatTrace } from "../../src/simulation/trace"
 import { type AnswererOptions, answerer } from "../answerer"
 import { alice, bob } from "../helpers"
 
-const offer = new TextEncoder().encode("v=0\r\no=bob 1 1 IN IP4 192.0.2.20\r\n")
+const media = { host: "192.0.2.20", port: 4000 } as const
 const lossy: LinkConditions = {
   latency: latency.uniform(10, 80),
   loss: loss.random(0.3),
@@ -32,7 +32,7 @@ function setup(
       call: "c1",
       uri: "sip:alice@192.0.2.10",
       to: alice,
-      sdp: offer,
+      media,
     })
   const end = (at: number) =>
     simulation.at(at, () => simulation.command(caller, { type: "end", call: "c1" }))
@@ -69,6 +69,19 @@ describe("incoming calls from another Straw phone", () => {
     expect(states(caller.events)).toStrictEqual(["ringing", "live", "ended"])
     expect(ended(phone.events)).toStrictEqual({ by: "remote", reason: "hangup" })
     expect(ended(caller.events)).toStrictEqual({ by: "local", reason: "hangup" })
+    const agreed = { codec: "PCMU", payloadType: 0, dtmf: 101, ptime: 20, direction: "sendrecv" }
+    expect(phone.events).toContainEqual({
+      type: "call",
+      call: "c1",
+      state: "live",
+      media: { remote: { host: "192.0.2.20", port: 4000 }, ...agreed },
+    })
+    expect(caller.events).toContainEqual({
+      type: "call",
+      call: "c1",
+      state: "live",
+      media: { remote: { host: "192.0.2.10", port: 40_000 }, ...agreed },
+    })
   })
 
   it("hangs up on its own and the caller follows", () => {
@@ -112,7 +125,7 @@ describe("incoming calls from another Straw phone", () => {
       call: "c1",
       uri: "sip:alice@192.0.2.10",
       to: alice,
-      sdp: offer,
+      media,
     })
     simulation.run(60_000)
     expect(states(caller.events)).toContain("ended")

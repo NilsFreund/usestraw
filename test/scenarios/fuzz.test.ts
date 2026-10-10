@@ -8,7 +8,7 @@ import {
   parseMessage,
 } from "../../src"
 import { between, createRandom } from "../../src/simulation/random"
-import { alice, bob, fixture } from "../helpers"
+import { alice, bob, fixture, sdp } from "../helpers"
 
 const BASES = ["wsinv", "intmeth", "esc01", "lwsdisp", "semiuri", "unreason", "bext01", "unkscm"]
 const SPICE = [
@@ -69,6 +69,13 @@ function mutateBytes(text: string, random: () => number): Uint8Array {
   return bytes
 }
 
+const OFFER = sdp()
+const BODIES = [
+  sdp({ direction: "sendonly", version: 2 }),
+  sdp({ formats: [18] }),
+  sdp({ port: 0 }),
+]
+
 function invite(round: number): string {
   return [
     "INVITE sip:alice@192.0.2.10 SIP/2.0",
@@ -81,9 +88,9 @@ function invite(round: number): string {
     "Contact: <sip:bob@192.0.2.20:5060>",
     "Record-Route: <sip:proxy.example.com;lr>",
     "Content-Type: application/sdp",
-    "Content-Length: 5",
+    `Content-Length: ${OFFER.length}`,
     "",
-    "v=0\r\n",
+    OFFER,
   ].join("\r\n")
 }
 
@@ -93,7 +100,7 @@ function inDialog(callId: string, tag: string, random: () => number): string {
   const method = METHODS[between(random, 0, METHODS.length - 1)] ?? "BYE"
   const seq = between(random, 0, 3)
   const branch = random() < 0.3 ? "z9hG4bKfuzz0" : `z9hG4bKd${between(random, 0, 99)}`
-  const body = random() < 0.5 ? "v=0\r\na=sendonly\r\n" : ""
+  const body = random() < 0.5 ? (BODIES[between(random, 0, BODIES.length - 1)] ?? "") : ""
   return [
     `${method} sip:alice@192.0.2.10:5060 SIP/2.0`,
     `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=${branch};rport`,
@@ -140,7 +147,7 @@ describe("fuzzing the core with mutated torture messages", () => {
     const random = createRandom(3261)
     const core = createCore({ address: alice, aor: "sip:alice@example.com", random })
     const texts = BASES.map((name) => decoder.decode(fixture(name)))
-    const sdp = encoder.encode("v=0\r\n")
+    const media = { host: "192.0.2.10", port: 40_000 }
     const dialogs: { readonly call: string; readonly tag: string }[] = []
     const seen = new Set<string>()
     let calls = 0
@@ -176,7 +183,7 @@ describe("fuzzing the core with mutated torture messages", () => {
         if (output.type !== "event" || output.event.type !== "call") continue
         if (output.event.state !== "incoming") continue
         calls++
-        const command = random() < 0.8 ? { type: "accept", sdp } : { type: "end", status: 603 }
+        const command = random() < 0.8 ? { type: "accept", media } : { type: "end", status: 603 }
         const call = { ...command, call: output.event.call } as Command
         core.handle({ type: "command", command: call }, round * 100)
       }

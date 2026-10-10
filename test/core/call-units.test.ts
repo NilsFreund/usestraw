@@ -7,7 +7,7 @@ import { createReply, createRetryLater, phraseFor } from "../../src/core/calls/r
 import type { CallContext } from "../../src/core/calls/types"
 import { createRandom } from "../../src/simulation/random"
 import { defaultTimers } from "../../src/transaction/timers"
-import { alice, bob, bytes, parsedRequest } from "../helpers"
+import { alice, aliceMedia, bob, bytes, parsedRequest, sdp } from "../helpers"
 
 const context: CallContext = {
   identity: { address: alice, aor: "sip:alice@example.com", random: createRandom(1) },
@@ -109,11 +109,23 @@ describe("call paths the core never takes", () => {
 
   it("answers a request to an outgoing call that has no dialog yet with 481", () => {
     const call = createOutgoing(
-      { call: "c1", uri: "sip:bob@example.com", to: bob, sdp: bytes("v=0") },
+      { call: "c1", uri: "sip:bob@example.com", to: bob, media: aliceMedia },
       context,
     )
     expect(call.request(bye, "t1", 0)).toMatchObject([
       { type: "respond", response: { status: 481 } },
+    ])
+  })
+
+  it("rejects with 488 when accepting an offer it cannot play, which admission would refuse", () => {
+    const g729 = { ...invite, body: bytes(sdp({ formats: [18] })) }
+    const call = createIncoming({ invite: g729, transaction: "t1", from: bob }, context, 0)
+    expect(call.accept(aliceMedia, 10)).toMatchObject([
+      { type: "respond", response: { status: 488 } },
+      {
+        type: "event",
+        event: { state: "ended", ended: { by: "local", reason: "incompatible", status: 488 } },
+      },
     ])
   })
 

@@ -17,6 +17,7 @@ import { parseAuthParams } from "../src/auth/params"
 import { createRequest } from "../src/core/requests"
 import { topVia } from "../src/transaction/keys"
 import { replyAddress } from "../src/transport/routing"
+import { sdp } from "./helpers"
 
 export interface CalleeOptions {
   readonly ring?: readonly number[]
@@ -30,6 +31,8 @@ export interface CalleeOptions {
   readonly challengeBye?: 401 | 407
   readonly users?: Readonly<Record<string, string>>
   readonly hangupAfter?: number
+  readonly holdAfter?: number
+  readonly resumeAfter?: number
   readonly t1?: number
 }
 
@@ -64,11 +67,13 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
     answer = 200,
     answerAfter = 0,
     forks = 1,
-    sdp = "v=0\r\n",
+    sdp: body = sdp({ formats: [0, 101] }),
     recordRoute = [],
     challenge,
     users = { alice: "secret" },
     hangupAfter,
+    holdAfter,
+    resumeAfter,
     challengeBye,
     t1 = 500,
   } = options
@@ -77,10 +82,14 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
     const sent: SipMessage[] = []
     const acked = new Set<string>()
     let byeAnswered = false
+    let seq = 0
+    let dialog: SipRequest | undefined
+    const finals = new Set<number>()
     const calls = new Map<string, Answered>()
     let timers: Timer[] = []
     const nonce = Math.floor(random() * 2 ** 48).toString(16)
     const self: Address = { transport: "UDP", host: "192.0.2.20", port: 5060 }
+    const caller: Address = { transport: "UDP", host: "192.0.2.10", port: 5060 }
 
     function out(message: SipMessage, to: Address): Output {
       sent.push(message)
@@ -177,7 +186,7 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       return {
         ...base,
         contact: [{ uri: `sip:bob@192.0.2.20:5060;${tag}`, params: new Map() }],
-        body: new TextEncoder().encode(sdp),
+        body: new TextEncoder().encode(body),
       }
     }
 
@@ -204,20 +213,65 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       const tag = ack.to.params.get("tag") ?? ""
       if (acked.has(tag) || tag === "challenge") return []
       acked.add(tag)
-      if (hangupAfter === undefined || tag !== "fork0") return []
-      later(now + hangupAfter, (at) => [hangup(ack, at)])
+      if (tag !== "fork0") return []
+      dialog = ack
+      if (holdAfter !== undefined) later(now + holdAfter, (at) => [reinvite(ack, at, "sendonly")])
+      if (resumeAfter !== undefined)
+        later(now + resumeAfter, (at) => [reinvite(ack, at, "sendrecv")])
+      if (hangupAfter !== undefined) later(now + hangupAfter, (at) => [hangup(ack, at)])
       return []
     }
 
-    function hangup(ack: SipRequest, now: number): Output {
+    // RFC 3264 §8.4: the far end puts the call on hold and back with a re-INVITE in the same dialog
+    function reinvite(ack: SipRequest, now: number, direction: string): Output {
+      const number = ++seq
+      const contact = [{ uri: "sip:bob@192.0.2.20:5060", params: new Map() }]
+      const headers = [{ name: "Content-Type", value: "application/sdp" }]
+      const fields = {
+        from: ack.to,
+        to: ack.from,
+        callId: ack.callId,
+        seq: number,
+        contact,
+        headers,
+      }
+      const request = {
+        ...createRequest("INVITE", targetOf(ack), fields, {
+          address: self,
+          aor: "sip:bob@example.com",
+          random,
+        }),
+        body: new TextEncoder().encode(sdp({ formats: [0, 101], direction, version: number + 1 })),
+      }
+      repeat(request, caller, now, t1, () => finals.has(number))
+      return out(request, caller)
+    }
+
+    function confirm(response: SipResponse): Output[] {
+      finals.add(response.cseq.seq)
+      if (!dialog || response.status >= 300) return []
+      const fields = {
+        from: response.from,
+        to: response.to,
+        callId: response.callId,
+        seq: response.cseq.seq,
+      }
+      const identity = { address: self, aor: "sip:bob@example.com", random }
+      return [out(createRequest("ACK", targetOf(dialog), fields, identity), caller)]
+    }
+
+    function targetOf(ack: SipRequest): string {
       const target = ack.contact === "*" ? undefined : ack.contact[0]
+      return target?.uri ?? ack.from.uri
+    }
+
+    function hangup(ack: SipRequest, now: number): Output {
       const bye = createRequest(
         "BYE",
-        target?.uri ?? ack.from.uri,
-        { from: ack.to, to: ack.from, callId: ack.callId, seq: 1 },
+        targetOf(ack),
+        { from: ack.to, to: ack.from, callId: ack.callId, seq: ++seq },
         { address: self, aor: "sip:bob@example.com", random },
       )
-      const caller: Address = { transport: "UDP", host: "192.0.2.10", port: 5060 }
       repeat(bye, caller, now, t1, () => byeAnswered)
       return out(bye, caller)
     }
@@ -250,8 +304,9 @@ export function callee(options: CalleeOptions = {}): (random: Random) => Callee 
       const result = parseMessage(input.data)
       if (!result.ok) return []
       if (!isRequest(result.message)) {
-        if (result.message.cseq.method === "BYE") byeAnswered = true
-        return []
+        const { cseq, status } = result.message
+        if (cseq.method === "BYE") byeAnswered = true
+        return cseq.method === "INVITE" && status >= 200 ? confirm(result.message) : []
       }
       const request = result.message
       received.push(request)

@@ -1,15 +1,17 @@
 import type { NameAddr } from "../../message/fields/name-addr"
 import { getHeader } from "../../message/headers"
-import type { SipRequest } from "../../message/types"
+import type { Header, SipRequest } from "../../message/types"
+import type { MediaAddress } from "../../sdp/types"
 import { serverKey } from "../../transaction/keys"
 import type { Address } from "../../transport/address"
 import { createAuthenticator } from "../authenticator"
 import { createTag } from "../ids"
 import type { CallEnd, CallParty } from "../types"
+import { createMedia } from "./media"
 import { emit, respond } from "./outputs"
 import { reasonFor } from "./reasons"
 import { repeatAnswer } from "./repeat"
-import { createReply, createRetryLater } from "./replies"
+import { createReply, createRetryLater, INCOMPATIBLE_MEDIA } from "./replies"
 import { createServerDialog, inDialogOf } from "./requests"
 import { createSession, type Session } from "./session"
 import type { Call, CallContext, CallOutput } from "./types"
@@ -31,7 +33,6 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
   const call = invite.callId
   const tag = createTag(identity.random)
   const dialog = createServerDialog(invite, tag)
-  const offer = invite.body.length > 0 ? { sdp: invite.body } : {}
   const ringing = createReply(invite, 180, { tag, contact, recordRoute: true })
   const expires = expiresOf(invite)
   const limited = expires !== undefined && expires < RING_LIMIT
@@ -40,30 +41,38 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
   let session: Session | undefined
   let refreshAt = now + RING_REFRESH
 
-  function reject(status: number, ended: CallEnd): CallOutput[] {
+  function reject(status: number, ended: CallEnd, headers: readonly Header[] = []): CallOutput[] {
     if (state === "ended") return []
     state = "ended"
-    const response = createReply(invite, status, { tag })
+    const response = createReply(invite, status, { tag, headers })
     return [respond(transaction, response), emit({ type: "call", call, state: "ended", ended })]
   }
 
   function start(): CallOutput[] {
     const parties = { from: party(invite.from), to: party(invite.to), source: to }
-    const event = { type: "call", call, state: "incoming", ...parties, ...offer } as const
-    return [respond(transaction, ringing), emit(event)]
+    return [
+      respond(transaction, ringing),
+      emit({ type: "call", call, state: "incoming", ...parties }),
+    ]
   }
 
-  function accept(sdp: Uint8Array, now: number): CallOutput[] {
+  // RFC 3264 §4: we answer the offer in the INVITE, or offer in the 200 and read the answer from the ACK
+  function accept(local: MediaAddress, now: number): CallOutput[] {
     if (session || state === "ended") return []
+    const media = createMedia(local, identity.random)
+    const offered = invite.body.length === 0
+    const sdp = offered ? media.offer() : media.answer(invite.body)
+    if (!sdp)
+      return reject(488, { by: "local", reason: "incompatible", status: 488 }, [INCOMPATIBLE_MEDIA])
     const ok = createReply(invite, 200, { tag, contact, sdp, recordRoute: true })
-    const pending = repeatAnswer(transaction, ok, now, timers)
+    const pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered }
     const authenticator = createAuthenticator(credentials, identity.random)
-    const remote = { remoteSeq: invite.cseq.seq, remoteSdp: invite.body }
     session = createSession(
-      { call, dialog, to, seq: 0, sdp, pending, ...remote },
+      { call, dialog, to, seq: 0, remoteSeq: invite.cseq.seq, media, pending },
       { identity, contact, authenticator, timers },
     )
-    return [respond(transaction, ok), emit({ type: "call", call, state: "live", ...offer })]
+    const negotiated = media.current ? { media: media.current } : {}
+    return [respond(transaction, ok), emit({ type: "call", call, state: "live", ...negotiated })]
   }
 
   function end(_now: number, status = 486): CallOutput[] {

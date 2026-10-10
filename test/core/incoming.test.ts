@@ -7,6 +7,7 @@ import {
   getHeader,
   getHeaders,
   isRequest,
+  type MediaAddress,
   type Output,
   parseMessage,
   type SipMessage,
@@ -15,11 +16,20 @@ import {
   serializeMessage,
 } from "../../src"
 import { createRandom } from "../../src/simulation/random"
-import { alice, bob, bytes } from "../helpers"
+import { alice, aliceMedia, bob, bytes, sdp } from "../helpers"
 
-const local = bytes("v=0\r\no=alice 1 1 IN IP4 192.0.2.10\r\n")
-const remote = "v=0\r\no=bob 1 1 IN IP4 192.0.2.20\r\n"
-const hold = "v=0\r\no=bob 1 2 IN IP4 192.0.2.20\r\na=sendonly\r\n"
+const local = aliceMedia
+const remote = sdp()
+const hold = sdp({ direction: "sendonly", version: 2 })
+const negotiated = {
+  remote: { host: "192.0.2.20", port: 4000 },
+  codec: "PCMU",
+  payloadType: 0,
+  dtmf: 101,
+  ptime: 20,
+  direction: "sendrecv",
+} as const
+const text = (data: Uint8Array | undefined) => new TextDecoder().decode(data)
 
 interface InviteOptions {
   readonly callId?: string
@@ -83,7 +93,8 @@ function request(method: string, options: RequestOptions = {}): string {
 const receive = (text: string) => ({ type: "receive", data: bytes(text), from: bob }) as const
 const timeout = { type: "timeout" } as const
 const command = (value: Command) => ({ type: "command", command: value }) as const
-const accept = (call = "in1", sdp = local) => command({ type: "accept", call, sdp })
+const accept = (call = "in1", media: MediaAddress = local) =>
+  command({ type: "accept", call, media })
 const end = (status?: number, call = "in1") =>
   command(status === undefined ? { type: "end", call } : { type: "end", call, status })
 
@@ -172,7 +183,6 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
         from: { uri: "sip:bob@example.com", name: "Bob" },
         to: { uri: "sip:alice@example.com" },
         source: bob,
-        sdp: bytes(remote),
       },
     ])
   })
@@ -240,14 +250,17 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     const [ok] = responses(outputs)
     expect(ok).toMatchObject({ status: 200, reason: "OK" })
     expect(ok?.to.params.get("tag")).toBe(ourTag)
-    expect(ok?.body).toStrictEqual(local)
+    expect(text(ok?.body)).toContain(
+      "c=IN IP4 192.0.2.10\r\nt=0 0\r\nm=audio 40000 RTP/AVP 0 101\r\n",
+    )
+    expect(text(ok?.body)).toContain("a=sendrecv\r\n")
     expect(ok && getHeader(ok, "Content-Type")).toBe("application/sdp")
     expect(ok?.contact).toStrictEqual([{ uri: "sip:alice@192.0.2.10:5060", params: new Map() }])
     expect(ok && getHeaders(ok, "Record-Route")).toStrictEqual([
       "<sip:p2.example.com;lr>, <sip:p1.example.com;lr>",
     ])
     expect(calls(outputs)).toStrictEqual([
-      { type: "call", call: "in1", state: "live", sdp: bytes(remote) },
+      { type: "call", call: "in1", state: "live", media: negotiated },
     ])
   })
 
@@ -257,14 +270,14 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(ua.handle(accept("unknown"), 1001)).toStrictEqual([])
   })
 
-  it("copies the answer so later changes to the caller's buffer do not leak", () => {
+  it("copies the media address so later changes to the caller's object do not leak", () => {
     const { ua } = ringing()
-    const sdp = bytes("v=0\r\n")
-    const [ok] = responses(ua.handle(accept("in1", sdp), 1000))
-    sdp[0] = 0
+    const media = { host: "192.0.2.10", port: 40_000 }
+    const [ok] = responses(ua.handle(accept("in1", media), 1000))
+    media.port = 1
     const [again] = responses(ua.handle(timeout, 1500))
     expect(again?.body).toStrictEqual(ok?.body)
-    expect(again?.body[0]).toBe(118)
+    expect(text(again?.body)).toContain("m=audio 40000 ")
   })
 
   it("resends the 200 with T1 doubling up to T2 until 64·T1, then hangs up (§13.3.1.4)", () => {
@@ -317,10 +330,10 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(events(outputs)).toMatchObject([{ state: "incoming" }])
     expect(events(outputs)[0]).not.toHaveProperty("sdp")
     const [ok] = responses(ua.handle(accept(), 1000))
-    expect(ok?.body).toStrictEqual(local)
+    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 8 101\r\n")
     const ack = ua.handle(receive(request("ACK", { toTag: ourTag, body: remote })), 1100)
     expect(calls(ack)).toStrictEqual([
-      { type: "call", call: "in1", state: "live", sdp: bytes(remote) },
+      { type: "call", call: "in1", state: "live", media: negotiated },
     ])
   })
 
@@ -455,7 +468,7 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     [603, "Decline", "declined"],
     [480, "Temporarily Unavailable", "no-answer"],
     [404, "Not Found", "not-found"],
-    [488, "Not Acceptable Here", "rejected"],
+    [488, "Not Acceptable Here", "incompatible"],
     [499, "Rejected", "rejected"],
   ])("rejects with %i %s", (status, phrase, reason) => {
     const { ua } = ringing()
@@ -614,6 +627,14 @@ describe("admitting INVITEs (RFC 3261 §8.2)", () => {
     expect(ua.nextDeadline()).toBeUndefined()
   })
 
+  it("refuses an offer it cannot play with 488 before it rings (RFC 3264 §6)", () => {
+    const ua = phone()
+    const outputs = ua.handle(receive(invite({ body: sdp({ formats: [18] }) })), 0)
+    expect(events(outputs)).toMatchObject([{ type: "answered", status: 488 }])
+    expect(responses(outputs)).toMatchObject([{ status: 488, reason: "Not Acceptable Here" }])
+    expect(ua.nextDeadline()).toBeUndefined()
+  })
+
   it("refuses a second INVITE with a Call-ID it already knows as a loop (§8.2.2.2)", () => {
     const { ua } = ringing()
     const outputs = ua.handle(receive(invite({ branch: "z9hG4bKother", fromTag: "b9" })), 10)
@@ -625,7 +646,7 @@ describe("admitting INVITEs (RFC 3261 §8.2)", () => {
     const ua = phone()
     const [own] = requests(
       ua.handle(
-        command({ type: "call", call: "own", uri: "sip:alice@example.com", to: bob, sdp: local }),
+        command({ type: "call", call: "own", uri: "sip:alice@example.com", to: bob, media: local }),
         0,
       ),
     )
@@ -682,7 +703,7 @@ describe("admitting INVITEs (RFC 3261 §8.2)", () => {
       call: "own",
       uri: "sip:alice@example.com",
       to: bob,
-      sdp: local,
+      media: local,
     })
     const [own] = requests(ua.handle(dial, 0))
     if (!own) throw new Error("No INVITE")
@@ -699,7 +720,7 @@ describe("admitting INVITEs (RFC 3261 §8.2)", () => {
       call: "own",
       uri: "sip:alice@example.com",
       to: bob,
-      sdp: local,
+      media: local,
     })
     const [own] = requests(ua.handle(dial, 0))
     if (!own) throw new Error("No INVITE")
@@ -725,7 +746,7 @@ describe("admitting INVITEs (RFC 3261 §8.2)", () => {
   it("counts outgoing calls towards maxCalls", () => {
     const ua = phone(1)
     ua.handle(
-      command({ type: "call", call: "out", uri: "sip:bob@example.com", to: bob, sdp: local }),
+      command({ type: "call", call: "out", uri: "sip:bob@example.com", to: bob, media: local }),
       0,
     )
     expect(events(ua.handle(receive(invite()), 10))).toMatchObject([
@@ -765,16 +786,29 @@ describe("in-dialog requests on a live call", () => {
     const outputs = ua.handle(receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2" })), 5000)
     const [ok] = responses(outputs)
     expect(ok).toMatchObject({ status: 200, cseq: { seq: 2, method: "INVITE" } })
-    expect(ok?.body).toStrictEqual(local)
+    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 101\r\n")
     expect(ok?.contact).toHaveLength(1)
     expect(ok && getHeaders(ok, "Record-Route")).toStrictEqual([])
     expect(calls(outputs)).toStrictEqual([])
   })
 
-  it("refuses a new offer with 488 until the app can answer it (RFC 3264 §8)", () => {
+  it("answers hold with recvonly and reports it (RFC 3264 §8.4)", () => {
     const { ua, ourTag } = acked()
     const outputs = ua.handle(
       receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: hold })),
+      5000,
+    )
+    expect(text(responses(outputs)[0]?.body)).toContain("a=recvonly\r\n")
+    expect(calls(outputs)).toStrictEqual([
+      { type: "call", call: "in1", state: "live", media: { ...negotiated, direction: "recvonly" } },
+    ])
+  })
+
+  it("keeps the session when a re-offer has nothing it can play", () => {
+    const { ua, ourTag } = acked()
+    const g729 = sdp({ formats: [18], version: 2 })
+    const outputs = ua.handle(
+      receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: g729 })),
       5000,
     )
     expect(responses(outputs)).toMatchObject([{ status: 488, reason: "Not Acceptable Here" }])
@@ -782,6 +816,8 @@ describe("in-dialog requests on a live call", () => {
     const ack = request("ACK", { toTag: ourTag, seq: 2, branch: "z9hG4bKr2" })
     ua.handle(receive(ack), 5100)
     expect(run(ua, 5100, 50_000)).toStrictEqual([])
+    const refresh = invite({ toTag: ourTag, seq: 3, branch: "z9hG4bKr3" })
+    expect(statuses(ua.handle(receive(refresh), 60_000))).toStrictEqual(["200 INVITE"])
   })
 
   it("sends its BYE to the Contact of a re-INVITE it accepted (§12.2.2)", () => {
@@ -830,10 +866,10 @@ describe("in-dialog requests on a live call", () => {
       receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: null })),
       5000,
     )
-    expect(responses(outputs)[0]?.body).toStrictEqual(local)
+    expect(text(responses(outputs)[0]?.body)).toContain("m=audio 40000 RTP/AVP 0 8 101\r\n")
     const ack = ua.handle(receive(request("ACK", { toTag: ourTag, seq: 2, body: hold })), 5100)
     expect(calls(ack)).toStrictEqual([
-      { type: "call", call: "in1", state: "live", sdp: bytes(hold) },
+      { type: "call", call: "in1", state: "live", media: { ...negotiated, direction: "recvonly" } },
     ])
   })
 
@@ -860,21 +896,38 @@ describe("in-dialog requests on a live call", () => {
     ).toStrictEqual(["500 BYE"])
   })
 
-  it("keeps the remote SDP when the ACK to an offerless re-INVITE is empty or repeats it", () => {
+  it("reports nothing when the ACK repeats the media it already had", () => {
+    const { ua, ourTag } = acked()
+    ua.handle(receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: null })), 5000)
+    const repeat = request("ACK", { toTag: ourTag, seq: 2, body: remote, branch: "z9hG4bKa2" })
+    expect(ua.handle(receive(repeat), 5100)).toStrictEqual([])
+  })
+
+  it("keeps its media when the ACK to a re-INVITE carries no usable answer", () => {
     const { ua, ourTag } = acked()
     ua.handle(receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: null })), 5000)
     expect(ua.handle(receive(request("ACK", { toTag: ourTag, seq: 2 })), 5100)).toStrictEqual([])
-    ua.handle(receive(invite({ toTag: ourTag, seq: 3, branch: "z9hG4bKr3", body: null })), 6000)
-    const repeat = request("ACK", { toTag: ourTag, seq: 3, body: remote, branch: "z9hG4bKa3" })
-    expect(ua.handle(receive(repeat), 6100)).toStrictEqual([])
+    expect(run(ua, 5100, 50_000)).toStrictEqual([])
   })
 
-  it("treats the SDP from a late ACK as the one a refresh must repeat", () => {
+  it("hangs up a late-offer call whose ACK brings nothing it can play", () => {
     const { ua, ourTag } = ringing(invite({ body: null }))
     ua.handle(accept(), 1000)
-    ua.handle(receive(request("ACK", { toTag: ourTag, body: hold })), 1100)
-    const refresh = invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: hold })
-    expect(statuses(ua.handle(receive(refresh), 5000))).toStrictEqual(["200 INVITE"])
+    const ack = request("ACK", { toTag: ourTag, body: sdp({ formats: [18] }) })
+    const [bye] = requests(ua.handle(receive(ack), 1100))
+    expect(bye?.method).toBe("BYE")
+    expect(bye && getHeader(bye, "Reason")).toBe('SIP;cause=488;text="Incompatible media"')
+    if (!bye) throw new Error("No BYE")
+    expect(calls(ua.handle(reply(bye, 200), 1200))).toStrictEqual([
+      { type: "call", call: "in1", state: "ended", ended: { by: "local", reason: "incompatible" } },
+    ])
+  })
+
+  it("hangs up a late-offer call whose ACK brings no answer at all", () => {
+    const { ua, ourTag } = ringing(invite({ body: null }))
+    ua.handle(accept(), 1000)
+    const [bye] = requests(ua.handle(receive(request("ACK", { toTag: ourTag })), 1100))
+    expect(bye?.method).toBe("BYE")
   })
 
   it("refuses a re-INVITE that requires an extension", () => {
@@ -920,13 +973,13 @@ describe("in-dialog requests on a live call", () => {
 
 describe("validating the answer and end commands", () => {
   it.each([
-    [{ type: "accept", call: "a b", sdp: local }, TypeError],
-    [{ type: "accept", call: "in1", sdp: "v=0" as never }, TypeError],
-    [{ type: "accept", call: "in1", sdp: new Uint8Array(32 * 1024 + 1) }, RangeError],
+    [{ type: "accept", call: "a b", media: local }, TypeError],
+    [{ type: "accept", call: "in1", media: "v=0" as never }, TypeError],
+    [{ type: "accept", call: "in1", media: { host: "0.0.0.0", port: 4000 } }, TypeError],
     [{ type: "end", call: "in1", status: 399 }, RangeError],
     [{ type: "end", call: "in1", status: 700 }, RangeError],
     [{ type: "end", call: "in1", status: 486.5 }, RangeError],
-    [{ type: "accept", call: "in1", sdp: new Uint8Array() }, RangeError],
+    [{ type: "accept", call: "in1", media: { host: "192.0.2.10", port: 0 } }, RangeError],
   ] as const)("rejects %o", (value, error) => {
     const { ua } = ringing()
     expect(() => ua.handle(command(value as Command), 10)).toThrow(error)
@@ -941,7 +994,7 @@ describe("validating the answer and end commands", () => {
   it("ignores answering an outgoing call", () => {
     const ua = phone()
     ua.handle(
-      command({ type: "call", call: "out", uri: "sip:bob@example.com", to: bob, sdp: local }),
+      command({ type: "call", call: "out", uri: "sip:bob@example.com", to: bob, media: local }),
       0,
     )
     expect(ua.handle(accept("out"), 10)).toStrictEqual([])

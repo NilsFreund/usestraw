@@ -13,10 +13,18 @@ import { type LinkConditions, latency, loss } from "../../src/simulation/network
 import { createSimulation } from "../../src/simulation/simulation"
 import { formatTrace } from "../../src/simulation/trace"
 import { type Callee, type CalleeOptions, callee } from "../callee"
-import { alice, bob } from "../helpers"
+import { alice, aliceMedia, bob } from "../helpers"
 
 const account = { username: "alice", password: "secret" }
-const offer = new TextEncoder().encode("v=0\r\no=alice 1 1 IN IP4 192.0.2.10\r\n")
+const media = aliceMedia
+const negotiated = {
+  remote: { host: "192.0.2.20", port: 4000 },
+  codec: "PCMU",
+  payloadType: 0,
+  dtmf: 101,
+  ptime: 20,
+  direction: "sendrecv",
+} as const
 const phone =
   (password = "secret") =>
   (random: Random) =>
@@ -42,7 +50,7 @@ function setup(
   })
   if (!far) throw new Error("No callee")
   const dial = (call = "c1") =>
-    simulation.command(ua, { type: "call", call, uri: "sip:bob@example.com", to: bob, sdp: offer })
+    simulation.command(ua, { type: "call", call, uri: "sip:bob@example.com", to: bob, media })
   const end = (at: number, call = "c1") =>
     simulation.at(at, () => simulation.command(ua, { type: "end", call }))
   return { simulation, ua, callee: far, dial, end }
@@ -80,7 +88,7 @@ describe("outgoing calls", () => {
     const events = ua.events.filter((event) => event.type === "call")
     expect(events).toStrictEqual([
       { type: "call", call: "c1", state: "ringing", status: 180 },
-      { type: "call", call: "c1", state: "live", sdp: new TextEncoder().encode("v=0\r\n") },
+      { type: "call", call: "c1", state: "live", media: negotiated },
       { type: "call", call: "c1", state: "ended", ended: { by: "local", reason: "hangup" } },
     ])
   })
@@ -98,8 +106,26 @@ describe("outgoing calls", () => {
       to: { uri: "sip:bob@example.com" },
       cseq: { seq: 1, method: "INVITE" },
       contact: [{ uri: "sip:alice@192.0.2.10:5060" }],
-      body: offer,
     })
+    expect(new TextDecoder().decode(invite?.body)).toMatch(
+      new RegExp(
+        [
+          "^v=0",
+          "o=- \\d+ 1 IN IP4 192\\.0\\.2\\.10",
+          "s=-",
+          "c=IN IP4 192\\.0\\.2\\.10",
+          "t=0 0",
+          "m=audio 40000 RTP/AVP 0 8 101",
+          "a=rtpmap:0 PCMU/8000",
+          "a=rtpmap:8 PCMA/8000",
+          "a=rtpmap:101 telephone-event/8000",
+          "a=fmtp:101 0-16",
+          "a=ptime:20",
+          "a=sendrecv",
+          "$",
+        ].join("\r\n"),
+      ),
+    )
     expect(invite?.from.params.get("tag")).toMatch(/^[a-z0-9]{10}$/)
     expect(invite && getHeader(invite, "Content-Type")).toBe("application/sdp")
     expect(invite && getHeader(invite, "Allow")).toBe("ACK, BYE, CANCEL, INVITE, OPTIONS")
@@ -315,7 +341,7 @@ describe("outgoing calls", () => {
       call: "c1",
       uri: "sip:bob@example.com",
       to: bob,
-      sdp: offer,
+      media,
     })
     simulation.run(60_000)
     expect(states(ua.events).filter((state) => state !== "ringing")).toStrictEqual([
@@ -371,6 +397,40 @@ describe("outgoing calls", () => {
       simulation.run(80_000)
       const trace = `seed ${seed}\n${formatTrace(simulation.trace)}`
       expect(ended(ua.events), trace).toStrictEqual({ by: "remote", reason: "hangup" })
+    }
+  })
+})
+
+describe("hold from the far end (RFC 3264 §8.4)", () => {
+  const directions = (events: readonly CoreEvent[]) =>
+    events.flatMap((event) =>
+      event.type === "call" && event.state === "live" ? [event.media?.direction] : [],
+    )
+
+  it("follows hold and resume and answers both with the right direction", () => {
+    const { simulation, ua, callee: far, dial, end } = setup({ holdAfter: 2000, resumeAfter: 4000 })
+    dial()
+    end(6000)
+    simulation.run(10_000)
+    expect(directions(ua.events)).toStrictEqual(["sendrecv", "recvonly", "sendrecv"])
+    const sent = far.sent.flatMap((message) => ("method" in message ? [message.method] : []))
+    expect(sent).toStrictEqual(["INVITE", "ACK", "INVITE", "ACK"])
+    expect(methods(far)).toStrictEqual(["INVITE", "ACK", "BYE"])
+    expect(ended(ua.events)).toStrictEqual({ by: "local", reason: "hangup" })
+  })
+
+  it("follows hold and resume through 30 % loss and duplicates in every seed", () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const lossy = { latency: latency.uniform(10, 80), loss: loss.random(0.3), duplicate: 0.1 }
+      const options = { holdAfter: 3000, resumeAfter: 15_000 }
+      const { simulation, ua, dial, end } = setup(options, lossy, seed)
+      dial()
+      end(30_000)
+      simulation.run(120_000)
+      const trace = `seed ${seed}\n${formatTrace(simulation.trace)}`
+      expect(directions(ua.events), trace).toStrictEqual(["sendrecv", "recvonly", "sendrecv"])
+      expect(ended(ua.events), trace).toStrictEqual({ by: "local", reason: "hangup" })
+      expect(ua.core.nextDeadline(), trace).toBeUndefined()
     }
   })
 })

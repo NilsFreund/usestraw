@@ -8,6 +8,7 @@ export function reasonFor(status: number): CallReason {
   if (NOT_FOUND.has(status)) return "not-found"
   if (status === 408 || status === 480) return "no-answer"
   if (status === 487) return "cancelled"
+  if (status === 488 || status === 606) return "incompatible"
   if (status >= 500 && status < 600) return "unavailable"
   return "rejected"
 }

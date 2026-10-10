@@ -1,5 +1,6 @@
 import type { NameAddr } from "../../message/fields/name-addr"
 import type { SipRequest, SipResponse } from "../../message/types"
+import type { MediaAddress } from "../../sdp/types"
 import type { TimerSettings } from "../../transaction/timers"
 import type { Address } from "../../transport/address"
 import type { Identity } from "../requests"
@@ -22,7 +23,7 @@ export interface Call {
   readonly ended: boolean
   readonly deadline: number | undefined
   start(): CallOutput[]
-  accept(sdp: Uint8Array, now: number): CallOutput[]
+  accept(media: MediaAddress, now: number): CallOutput[]
   end(now: number, status?: number): CallOutput[]
   response(response: SipResponse, now: number): CallOutput[]
   timeout(request: SipRequest): CallOutput[]

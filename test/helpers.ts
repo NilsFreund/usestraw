@@ -71,3 +71,39 @@ export function userAgent(user: string, address: Address): (random: Random) => C
 export function options(to: Address, uri = "sip:bob@example.com"): Command {
   return { type: "options", uri, to }
 }
+
+export interface SdpOptions {
+  readonly host?: string
+  readonly port?: number
+  readonly formats?: readonly number[]
+  readonly direction?: string
+  readonly version?: number
+  readonly extra?: readonly string[]
+}
+
+const NAMES: Readonly<Record<number, string>> = {
+  0: "PCMU/8000",
+  8: "PCMA/8000",
+  18: "G729/8000",
+  101: "telephone-event/8000",
+}
+
+export function sdp(options: SdpOptions = {}): string {
+  const { host = "192.0.2.20", port = 4000, formats = [0, 8, 101], version = 1 } = options
+  const { direction, extra = [] } = options
+  return [
+    "v=0",
+    `o=bob 1 ${version} IN IP4 ${host}`,
+    "s=-",
+    `c=IN IP4 ${host}`,
+    "t=0 0",
+    `m=audio ${port} RTP/AVP ${formats.join(" ")}`,
+    ...formats.map((format) => `a=rtpmap:${format} ${NAMES[format] ?? "X/8000"}`),
+    ...(formats.includes(101) ? ["a=fmtp:101 0-16"] : []),
+    ...(direction === undefined ? [] : [`a=${direction}`]),
+    ...extra,
+    "",
+  ].join("\r\n")
+}
+
+export const aliceMedia = { host: "192.0.2.10", port: 40_000 } as const

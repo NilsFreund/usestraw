@@ -1,13 +1,14 @@
 import type { SipMessage, SipRequest, SipResponse } from "../../message/types"
-import { sameBytes } from "../../support/bytes"
+import type { CallMedia } from "../../sdp/types"
 import { topVia } from "../../transaction/keys"
 import type { Address } from "../../transport/address"
 import type { Authenticator } from "../authenticator"
 import type { CallEnd } from "../types"
 import { checkInvite } from "../uas"
+import { type Media, sameMedia } from "./media"
 import { emit, respond, send } from "./outputs"
 import { type Repeat, repeatAnswer } from "./repeat"
-import { createReply, createRetryLater } from "./replies"
+import { createReply, createRetryLater, INCOMPATIBLE_MEDIA } from "./replies"
 import { type Dialog, inDialog, inDialogOf, targetOf } from "./requests"
 import type { CallContext, CallOutput } from "./types"
 
@@ -17,9 +18,8 @@ export interface SessionSetup {
   readonly to: Address
   readonly seq: number
   readonly remoteSeq?: number
-  readonly sdp: Uint8Array
-  readonly remoteSdp: Uint8Array
-  readonly pending?: Repeat
+  readonly media: Media
+  readonly pending?: { readonly repeat: Repeat; readonly offered: boolean }
 }
 
 export interface SessionContext extends Omit<CallContext, "credentials"> {
@@ -45,18 +45,17 @@ interface Pending {
 }
 
 const HANGUP: CallEnd = { by: "local", reason: "hangup" }
+const INCOMPATIBLE: CallEnd = { by: "local", reason: "incompatible" }
+// RFC 3326: the BYE says why, so a carrier's trace shows a media mismatch and not a hang-up
+const INCOMPATIBLE_REASON = { name: "Reason", value: 'SIP;cause=488;text="Incompatible media"' }
 const REMOTE_HANGUP: CallEnd = { by: "remote", reason: "hangup" }
 
 // The confirmed dialog of a call in either direction: hangups, re-INVITEs and the ACK for our 2xx
 export function createSession(setup: SessionSetup, context: SessionContext): Session {
-  const { call, to, sdp } = setup
+  const { call, to, media } = setup
   const { identity, contact, authenticator, timers } = context
-  let { dialog, seq, remoteSeq, remoteSdp } = setup
-  let pending: Pending | undefined = setup.pending && {
-    repeat: setup.pending,
-    offered: remoteSdp.length === 0,
-    initial: true,
-  }
+  let { dialog, seq, remoteSeq } = setup
+  let pending: Pending | undefined = setup.pending && { ...setup.pending, initial: true }
   let state: "live" | "ending" | "ended" = "live"
   let closing = HANGUP
   let bye: string | null | undefined
@@ -69,7 +68,8 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
 
   function hangUp(): CallOutput[] {
     seq += 1
-    const request = inDialog("BYE", dialog, seq, identity)
+    const reason = closing === INCOMPATIBLE ? [INCOMPATIBLE_REASON] : []
+    const request = inDialog("BYE", dialog, seq, identity, reason)
     bye = branchOf(request)
     const headers = [...request.headers, ...authenticator.authorize(request)]
     return [send({ ...request, headers }, to)]
@@ -113,7 +113,7 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
     return reinvite(incoming, transaction, now)
   }
 
-  // RFC 3264 §8: until the app can answer a new offer, only refreshes get a 200 and others keep the old session
+  // RFC 3264 §8: we answer a new offer or make one, and an offer we cannot play keeps the old session
   function reinvite(invite: SipRequest, transaction: string, now: number): CallOutput[] {
     const refusal = checkInvite(invite)
     if (refusal) {
@@ -122,27 +122,38 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
     }
     if (pending) return [respond(transaction, createRetryLater(invite, identity.random))]
     const offered = invite.body.length === 0
-    if (!offered && !sameBytes(invite.body, remoteSdp)) {
-      return [respond(transaction, createReply(invite, 488))]
-    }
+    const before = media.current
+    const sdp = offered ? media.offer() : media.answer(invite.body)
+    if (!sdp)
+      return [respond(transaction, createReply(invite, 488, { headers: [INCOMPATIBLE_MEDIA] }))]
     const ok = createReply(invite, 200, { contact, sdp })
     pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered, initial: false }
     // RFC 3261 §12.2.2: a 2xx to a target refresh moves the remote target to the new Contact
     dialog = { ...dialog, target: targetOf(invite) ?? dialog.target }
-    return [respond(transaction, ok)]
+    return [respond(transaction, ok), ...changed(before)]
   }
 
-  // RFC 3264 §4: when our 2xx carried the offer, the ACK carries the answer
+  function changed(before: CallMedia | undefined): CallOutput[] {
+    const after = media.current
+    if (!after || (before && sameMedia(before, after))) return []
+    return [emit({ type: "call", call, state: "live", media: after })]
+  }
+
+  // RFC 3264 §4: when our 2xx carried the offer, the ACK carries the answer; a call that never got one
+  // hangs up, a live one keeps its media
   function acknowledge(ack: SipRequest): CallOutput[] {
     if (!pending || ack.cseq.seq !== pending.repeat.seq || !inDialogOf(dialog, ack.to, ack.from)) {
       return []
     }
-    const { offered } = pending
+    const { offered, initial } = pending
     pending = undefined
     if (state === "ending") return hangUp()
-    if (!offered || ack.body.length === 0 || sameBytes(ack.body, remoteSdp)) return []
-    remoteSdp = ack.body
-    return [emit({ type: "call", call, state: "live", sdp: ack.body })]
+    if (!offered) return []
+    const before = media.current
+    if (media.read(ack.body) || !initial) return changed(before)
+    state = "ending"
+    closing = INCOMPATIBLE
+    return hangUp()
   }
 
   // RFC 3261 §13.3.1.4 and §14.2: a 2xx that is never acknowledged ends the session with a BYE

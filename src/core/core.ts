@@ -3,12 +3,14 @@ import { withReceived } from "../message/fields/via"
 import { parseMessage } from "../message/parse"
 import { show } from "../message/syntax"
 import { isRequest, type SipRequest } from "../message/types"
+import { isPlayable } from "../sdp/negotiate"
 import { checkTime, earliest } from "../support/time"
 import { defaultTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
 import type { TransactionEvent, TransactionOutput } from "../transaction/types"
 import type { Address } from "../transport/address"
 import { createCalls } from "./calls/calls"
+import { INCOMPATIBLE_MEDIA } from "./calls/replies"
 import type { CallOutput } from "./calls/types"
 import {
   checkAddress,
@@ -17,10 +19,10 @@ import {
   checkCredentials,
   checkExpires,
   checkMaxCalls,
+  checkMedia,
   checkRegistrar,
   checkRejection,
   checkRequestUri,
-  checkSdp,
   checkSource,
 } from "./checks"
 import { event, send } from "./outputs"
@@ -34,6 +36,7 @@ import { type Answer, answerWith, checkInvite } from "./uas"
 
 const LOOP: Answer = answerWith(482, "Loop Detected")
 const BUSY: Answer = answerWith(486, "Busy Here")
+const INCOMPATIBLE: Answer = answerWith(488, "Not Acceptable Here", [INCOMPATIBLE_MEDIA])
 const FULL: Answer = answerWith(503, "Service Unavailable", [{ name: "Retry-After", value: "5" }])
 
 export interface CoreOptions {
@@ -106,6 +109,7 @@ export function createCore(options: CoreOptions): Core {
     if (invite.to.params.has("tag") || transactions.hasInvite(invite)) return undefined
     const refusal = checkInvite(invite)
     if (refusal) return refusal
+    if (invite.body.length > 0 && !isPlayable(invite.body)) return INCOMPATIBLE
     if (calls.collides(invite)) return LOOP
     if (calls.active() >= maxCalls) return BUSY
     return calls.tracked() >= capacity ? FULL : undefined
@@ -148,19 +152,18 @@ export function createCore(options: CoreOptions): Core {
       case "unregister":
         return translateRegistration(registration.unregister(), now)
       case "call": {
-        const { call, uri, to, sdp } = command
+        const { call, uri, to } = command
         checkCallId(call)
         checkRequestUri(uri)
         checkAddress(to)
-        checkSdp(sdp)
+        const media = checkMedia(command.media, address.host)
         if (calls.owns(call)) throw new Error(`Call ${show(call)} already exists`)
-        return translateCalls(calls.start({ call, uri, to, sdp: new Uint8Array(sdp) }, now), now)
+        return translateCalls(calls.start({ call, uri, to, media }, now), now)
       }
       case "accept": {
-        const { call, sdp } = command
-        checkCall(call)
-        checkSdp(sdp)
-        return translateCalls(calls.accept(call, new Uint8Array(sdp), now), now)
+        checkCall(command.call)
+        const media = checkMedia(command.media, address.host)
+        return translateCalls(calls.accept(command.call, media, now), now)
       }
       case "end": {
         const { call, status } = command

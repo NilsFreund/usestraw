@@ -2,9 +2,11 @@ import { isCallId } from "../message/fields/call-id"
 import { isIp } from "../message/fields/host"
 import { isRequestUri, splitSipUri } from "../message/fields/uri"
 import { hasLineBreak, isText, show } from "../message/syntax"
+import { familyOf, isUnspecified } from "../sdp/address"
+import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
 import { type Address, isAddress } from "../transport/address"
-import type { Credentials } from "./types"
+import type { Credentials, LocalMedia } from "./types"
 
 export function checkAddress(address: Address): void {
   if (!isAddress(address)) throw new TypeError(`Invalid address ${show(address)}`)
@@ -51,14 +53,22 @@ export function checkCall(call: string): void {
   if (!isCallId(call)) throw new TypeError(`Invalid call ${show(call)}`)
 }
 
-const MAX_SDP = 32 * 1024
-
-export function checkSdp(sdp: Uint8Array): void {
-  if (!(sdp instanceof Uint8Array)) throw new TypeError("The SDP must be a Uint8Array")
-  if (sdp.length === 0) throw new RangeError("The SDP is empty")
-  if (sdp.length > MAX_SDP) {
-    throw new RangeError(`The SDP has ${sdp.length} bytes, at most ${MAX_SDP} fit`)
+// RFC 3550 §11: RTP takes an even port, and the far end must be able to send to our host
+export function checkMedia(media: LocalMedia, fallback: string): MediaAddress {
+  if (typeof media !== "object" || media === null)
+    throw new TypeError(`Invalid media ${show(media)}`)
+  const raw = media.host ?? fallback
+  const host = typeof raw === "string" ? raw.replace(/^\[(.*)\]$/, "$1") : ""
+  if (!familyOf(host) || isUnspecified(host)) {
+    throw new TypeError(
+      `The media host must be an IP address the far end can reach, got ${show(raw)}`,
+    )
   }
+  const { port } = media
+  if (!isIntegerIn(port, 2, 65534) || port % 2 !== 0) {
+    throw new RangeError(`The media port must be an even number from 2 to 65534, got ${show(port)}`)
+  }
+  return { host, port }
 }
 
 export function checkRejection(status: number): void {
