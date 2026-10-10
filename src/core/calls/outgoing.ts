@@ -1,67 +1,40 @@
-import type { NameAddr } from "../../message/fields/name-addr"
-import { createResponse } from "../../message/response"
 import type { SipRequest, SipResponse } from "../../message/types"
+import { sameBytes } from "../../support/bytes"
+import { transactionTimeout } from "../../transaction/timers"
 import type { Address } from "../../transport/address"
 import { createAuthenticator } from "../authenticator"
 import { createTag } from "../ids"
-import type { Identity } from "../requests"
-import type { CallEnd, CallEvent, Credentials } from "../types"
+import type { CallEnd } from "../types"
+import { emit, respond, send } from "./outputs"
 import { reasonFor } from "./reasons"
-import {
-  createAck,
-  createCancel,
-  createDialog,
-  createInvite,
-  type Dialog,
-  inDialog,
-} from "./requests"
+import { createReply } from "./replies"
+import { createAck, createCancel, createDialog, createInvite, inDialog } from "./requests"
+import { createSession, type Session } from "./session"
+import type { Call, CallContext, CallOutput } from "./types"
 
-export type CallOutput =
-  | { readonly type: "send"; readonly request: SipRequest; readonly to: Address }
-  | { readonly type: "respond"; readonly transaction: string; readonly response: SipResponse }
-  | { readonly type: "abandon"; readonly request: SipRequest }
-  | { readonly type: "event"; readonly event: CallEvent }
-
-export interface CallSetup {
+export interface OutgoingSetup {
   readonly call: string
   readonly uri: string
   readonly to: Address
   readonly sdp: Uint8Array
 }
 
-export interface Outgoing {
-  readonly ended: boolean
-  readonly deadline: number | undefined
-  start(): CallOutput[]
-  end(now: number): CallOutput[]
-  response(response: SipResponse, now: number): CallOutput[]
-  timeout(request: SipRequest): CallOutput[]
-  matches(request: SipRequest): boolean
-  request(request: SipRequest, transaction: string): CallOutput[]
-  expire(now: number): CallOutput[]
+interface Confirmed {
+  readonly session: Session
+  readonly ack: SipRequest
+  readonly tag: string
 }
 
 const MAX_FORKS = 16
+const CANCELLED: CallEnd = { by: "local", reason: "cancelled" }
 
-type State = "calling" | "ringing" | "live" | "ending" | "ended"
-
-interface Confirmed {
-  readonly dialog: Dialog
-  readonly ack: SipRequest
-}
-
-export function createOutgoing(
-  setup: CallSetup,
-  identity: Identity,
-  contact: NameAddr,
-  credentials: Credentials | undefined,
-  wait: number,
-): Outgoing {
+export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call {
   const { call, uri, to, sdp } = setup
+  const { identity, contact, credentials, timers } = context
   const authenticator = createAuthenticator(credentials, identity.random)
   const from = { uri: identity.aor, params: new Map([["tag", createTag(identity.random)]]) }
   const forks = new Map<string, SipRequest>()
-  let state: State = "calling"
+  let state: "calling" | "ringing" | "confirmed" | "ended" = "calling"
   let seq = 1
   let invite = build()
   let provisional = false
@@ -76,45 +49,15 @@ export function createOutgoing(
     return { ...request, headers: [...request.headers, ...authenticator.authorize(request)] }
   }
 
-  function send(request: SipRequest): CallOutput {
-    return { type: "send", request, to }
-  }
-
-  function emit(event: CallEvent): CallOutput {
-    return { type: "event", event }
-  }
-
   function finish(ended: CallEnd): CallOutput[] {
     state = "ended"
     deadline = undefined
     return [emit({ type: "call", call, state: "ended", ended })]
   }
 
-  function bye(target: Dialog): SipRequest {
-    seq += 1
-    const request = inDialog("BYE", target, seq, identity)
-    return { ...request, headers: [...request.headers, ...authenticator.authorize(request)] }
-  }
-
-  function hungUp(): CallEnd {
-    return { by: "local", reason: cancelWanted ? "cancelled" : "hangup" }
-  }
-
-  function isMain(tag: string | null | undefined): boolean {
-    const remote = confirmed?.dialog.remote.params.get("tag") ?? ""
-    return confirmed !== undefined && (tag ?? "") === remote
-  }
-
-  function start(): CallOutput[] {
-    return [send(invite)]
-  }
-
   // RFC 3261 §9.1: a CANCEL may only follow a provisional response, so an early end waits for one
   function end(now: number): CallOutput[] {
-    if (state === "live" && confirmed) {
-      state = "ending"
-      return [send(bye(confirmed.dialog))]
-    }
+    if (confirmed) return confirmed.session.end()
     if (state !== "calling" && state !== "ringing") return []
     cancelWanted = true
     return cancel(now)
@@ -124,145 +67,128 @@ export function createOutgoing(
   function cancel(now: number): CallOutput[] {
     if (!cancelWanted || cancelSent || !provisional) return []
     cancelSent = true
-    deadline = now + wait
-    return [send(createCancel(invite))]
+    deadline = now + transactionTimeout(timers)
+    return [send(createCancel(invite), to)]
   }
 
   function expire(now: number): CallOutput[] {
+    if (confirmed) return confirmed.session.expire(now)
     if (deadline === undefined || deadline > now) return []
-    return [{ type: "abandon", request: invite }, ...finish({ by: "local", reason: "cancelled" })]
+    return [{ type: "abandon", request: invite }, ...finish(CANCELLED)]
   }
 
-  function response(answer: SipResponse, now: number): CallOutput[] {
-    if (answer.from.params.get("tag") !== from.params.get("tag")) return []
-    const { method, seq: number } = answer.cseq
-    if (method === "INVITE") return number === invite.cseq.seq ? inviteResponse(answer, now) : []
-    const final = answer.status >= 200
-    const ours = isMain(answer.to.params.get("tag"))
-    if (method !== "BYE" || !final || state !== "ending" || !ours) return []
-    const challenged = answer.status === 401 || answer.status === 407
-    // RFC 3261 §22.2: a challenged BYE is sent again with credentials, or the far end keeps the call up
-    if (!challenged || authenticator.challenge(answer)) return finish(hungUp())
-    return [send(bye((confirmed as Confirmed).dialog))]
+  function response(reply: SipResponse, now: number): CallOutput[] {
+    if (reply.from.params.get("tag") !== from.params.get("tag")) return []
+    const { method, seq: number } = reply.cseq
+    if (method === "INVITE") return number === invite.cseq.seq ? inviteResponse(reply, now) : []
+    return confirmed ? confirmed.session.response(reply) : []
   }
 
-  function inviteResponse(answer: SipResponse, now: number): CallOutput[] {
-    if (answer.status < 200) return provisionalResponse(answer, now)
-    if (answer.status < 300) return success(answer)
-    return failure(answer)
+  function inviteResponse(reply: SipResponse, now: number): CallOutput[] {
+    if (reply.status < 200) return provisionalResponse(reply, now)
+    if (reply.status < 300) return success(reply)
+    return failure(reply)
   }
 
-  function provisionalResponse(answer: SipResponse, now: number): CallOutput[] {
+  function provisionalResponse(reply: SipResponse, now: number): CallOutput[] {
     provisional = true
     const outputs = cancel(now)
-    if (answer.status === 100 || cancelWanted || (state !== "calling" && state !== "ringing")) {
+    if (reply.status === 100 || cancelWanted || (state !== "calling" && state !== "ringing")) {
       return outputs
     }
     state = "ringing"
-    if (ringing && sameRinging(ringing, answer)) return outputs
-    ringing = answer
-    const media = answer.body.length > 0 ? { sdp: answer.body } : {}
+    if (ringing && sameRinging(ringing, reply)) return outputs
+    ringing = reply
+    const media = reply.body.length > 0 ? { sdp: reply.body } : {}
     return [
       ...outputs,
-      emit({ type: "call", call, state: "ringing", status: answer.status, ...media }),
+      emit({ type: "call", call, state: "ringing", status: reply.status, ...media }),
     ]
   }
 
   // RFC 3261 §13.2.2.4: the first 2xx makes the dialog; every 2xx is acknowledged; other forks get a BYE
-  function success(answer: SipResponse): CallOutput[] {
-    const tag = answer.to.params.get("tag") ?? ""
-    if (confirmed && isMain(tag)) return [send(confirmed.ack)]
-    if (confirmed || state === "ended") return fork(answer, tag)
-    const dialog = createDialog(invite, answer)
-    confirmed = { dialog, ack: createAck(dialog, invite, identity) }
-    if (cancelWanted) {
-      state = "ending"
-      return [send(confirmed.ack), send(bye(dialog))]
-    }
-    state = "live"
-    const media = answer.body.length > 0 ? { sdp: answer.body } : {}
-    return [send(confirmed.ack), emit({ type: "call", call, state: "live", ...media })]
+  function success(reply: SipResponse): CallOutput[] {
+    const tag = reply.to.params.get("tag") ?? ""
+    if (confirmed?.tag === tag) return [send(confirmed.ack, to)]
+    if (confirmed || state === "ended") return fork(reply, tag)
+    const dialog = createDialog(invite, reply)
+    const ack = createAck(dialog, invite, identity)
+    const media = reply.body.length > 0 ? { sdp: reply.body } : {}
+    const session = createSession(
+      { call, dialog, to, seq, sdp, remoteSdp: reply.body },
+      { identity, contact, authenticator, timers },
+    )
+    confirmed = { session, ack, tag }
+    state = "confirmed"
+    if (cancelWanted) return [send(ack, to), ...session.end(CANCELLED)]
+    return [send(ack, to), emit({ type: "call", call, state: "live", ...media })]
   }
 
-  function fork(answer: SipResponse, tag: string): CallOutput[] {
+  function fork(reply: SipResponse, tag: string): CallOutput[] {
     const known = forks.get(tag)
-    if (known) return [send(known)]
+    if (known) return [send(known, to)]
     if (forks.size >= MAX_FORKS) return []
-    const other = createDialog(invite, answer)
+    const other = createDialog(invite, reply)
     const acknowledgement = createAck(other, invite, identity)
     forks.set(tag, acknowledgement)
-    return [send(acknowledgement), send(inDialog("BYE", other, invite.cseq.seq + 1, identity))]
+    return [
+      send(acknowledgement, to),
+      send(inDialog("BYE", other, invite.cseq.seq + 1, identity), to),
+    ]
   }
 
-  function failure(answer: SipResponse): CallOutput[] {
-    const { status } = answer
+  function failure(reply: SipResponse): CallOutput[] {
+    const { status } = reply
     if ((status === 401 || status === 407) && !cancelWanted) {
-      if (authenticator.challenge(answer)) {
+      if (authenticator.challenge(reply)) {
         return finish({ by: "remote", reason: "unauthorized", status })
       }
       seq += 1
       invite = build()
       provisional = false
-      return [send(invite)]
+      return [send(invite, to)]
     }
-    if (cancelWanted) return finish({ by: "local", reason: "cancelled" })
+    if (cancelWanted) return finish(CANCELLED)
     return finish({ by: "remote", reason: reasonFor(status), status })
   }
 
   function timeout(request: SipRequest): CallOutput[] {
-    if (request.method === "INVITE" && request.cseq.seq === invite.cseq.seq) {
-      return finish(
-        cancelWanted ? { by: "local", reason: "cancelled" } : { by: "remote", reason: "timeout" },
-      )
-    }
-    if (request.method === "BYE" && state === "ending" && isMain(request.to.params.get("tag"))) {
-      return finish(hungUp())
-    }
-    return []
+    if (confirmed) return confirmed.session.timeout(request)
+    if (request.method !== "INVITE" || request.cseq.seq !== invite.cseq.seq) return []
+    return finish(cancelWanted ? CANCELLED : { by: "remote", reason: "timeout" })
   }
 
-  function matches(request: SipRequest): boolean {
-    return (
-      request.to.params.get("tag") === from.params.get("tag") &&
-      isMain(request.from.params.get("tag"))
-    )
-  }
-
-  // RFC 3261 §15.1.2: a BYE ends the dialog; once it is over, further requests get 481
-  function request(incoming: SipRequest, transaction: string): CallOutput[] {
-    const respond = (status: number, reason: string): CallOutput => ({
-      type: "respond",
-      transaction,
-      response: createResponse(incoming, status, reason),
-    })
-    if (state === "ended") return [respond(481, "Call/Transaction Does Not Exist")]
-    const ended = state === "ending" ? hungUp() : ({ by: "remote", reason: "hangup" } as const)
-    return [respond(200, "OK"), ...finish(ended)]
+  function request(incoming: SipRequest, transaction: string, now: number): CallOutput[] {
+    if (confirmed) return confirmed.session.request(incoming, transaction, now)
+    return [respond(transaction, createReply(incoming, 481))]
   }
 
   return {
     get ended() {
-      return state === "ended"
+      return confirmed ? confirmed.session.ended : state === "ended"
     },
     get deadline() {
-      return deadline
+      return confirmed ? confirmed.session.deadline : deadline
     },
-    start,
+    start: () => [send(invite, to)],
+    accept: () => [],
     end,
     response,
     timeout,
-    matches,
+    matches: (request) => confirmed?.session.matches(request) ?? false,
+    merges: (request) =>
+      request.from.params.get("tag") === from.params.get("tag") &&
+      request.cseq.seq === invite.cseq.seq,
     request,
+    acknowledge: (ack) => confirmed?.session.acknowledge(ack) ?? [],
     expire,
   }
 }
 
 function sameRinging(last: SipResponse, next: SipResponse): boolean {
-  const [a, b] = [last.body, next.body]
   return (
     last.status === next.status &&
     last.to.params.get("tag") === next.to.params.get("tag") &&
-    a.length === b.length &&
-    a.every((byte, index) => byte === b[index])
+    sameBytes(last.body, next.body)
   )
 }

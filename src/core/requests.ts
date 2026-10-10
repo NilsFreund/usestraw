@@ -7,6 +7,8 @@ import type { Address } from "../transport/address"
 import { createBranch, createCallId, createTag } from "./ids"
 import type { Random } from "./types"
 
+export const ALLOW: Header = { name: "Allow", value: "ACK, BYE, CANCEL, INVITE, OPTIONS" }
+
 export interface Identity {
   readonly address: Address
   readonly aor: string

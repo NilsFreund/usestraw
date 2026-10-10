@@ -62,6 +62,34 @@ describe("formatStep", () => {
     ])
   })
 
+  it("shows how calls go", () => {
+    const call = (event: Record<string, unknown>) =>
+      ({ type: "event", event: { type: "call", call: "c1", ...event } }) as Output
+    const lines = formatStep(
+      step({
+        outputs: [
+          call({
+            state: "incoming",
+            from: { uri: "sip:bob@example.com", name: "Bob" },
+            to: { uri: "sip:alice@example.com" },
+            source: bob,
+          }),
+          call({ state: "ringing", status: 183 }),
+          call({ state: "live", sdp: bytes("v=0") }),
+          call({ state: "ended", ended: { by: "remote", reason: "busy", status: 486 } }),
+          call({ state: "ended", ended: { by: "local", reason: "hangup" } }),
+        ],
+      }),
+    )
+    expect(lines).toStrictEqual([
+      "    1.234  ● call incoming from sip:bob@example.com",
+      "    1.234  ● call ringing 183",
+      "    1.234  ● call live",
+      "    1.234  ● call ended by remote: busy 486",
+      "    1.234  ● call ended by local: hangup",
+    ])
+  })
+
   it("draws nothing for a quiet timer and shows a step that threw", () => {
     expect(formatStep(step({}))).toStrictEqual([])
     const { outputs: _, ...thrown } = step({ thrown: 'TypeError: Invalid Request-URI "x"' })

@@ -2,21 +2,25 @@ import { isUri } from "../message/fields/uri"
 import { withReceived } from "../message/fields/via"
 import { parseMessage } from "../message/parse"
 import { show } from "../message/syntax"
-import { isRequest } from "../message/types"
+import { isRequest, type SipRequest } from "../message/types"
 import { checkTime, earliest } from "../support/time"
-import { defaultTimers, type TimerSettings, transactionTimeout } from "../transaction/timers"
+import { defaultTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
 import type { TransactionEvent, TransactionOutput } from "../transaction/types"
 import type { Address } from "../transport/address"
 import { createCalls } from "./calls/calls"
-import type { CallOutput } from "./calls/outgoing"
+import type { CallOutput } from "./calls/types"
 import {
   checkAddress,
+  checkCall,
   checkCallId,
   checkCredentials,
   checkExpires,
+  checkMaxCalls,
   checkRegistrar,
+  checkRejection,
   checkRequestUri,
+  checkSdp,
   checkSource,
 } from "./checks"
 import { event, send } from "./outputs"
@@ -26,8 +30,11 @@ import type { RegistrationInput, RegistrationOutput } from "./registration/types
 import { createOptionsRequest } from "./requests"
 import { createResponder } from "./responder"
 import type { Command, Credentials, Input, Output, Random } from "./types"
+import { type Answer, answerWith, checkInvite } from "./uas"
 
-const MAX_SDP = 32 * 1024
+const LOOP: Answer = answerWith(482, "Loop Detected")
+const BUSY: Answer = answerWith(486, "Busy Here")
+const FULL: Answer = answerWith(503, "Service Unavailable", [{ name: "Retry-After", value: "5" }])
 
 export interface CoreOptions {
   readonly address: Address
@@ -35,6 +42,7 @@ export interface CoreOptions {
   readonly random: Random
   readonly credentials?: Credentials
   readonly timers?: TimerSettings
+  readonly maxCalls?: number
 }
 
 export interface Core {
@@ -43,18 +51,21 @@ export interface Core {
 }
 
 export function createCore(options: CoreOptions): Core {
-  const { address, aor, random } = options
+  const { address, aor, random, maxCalls = 100 } = options
   checkAddress(address)
   if (!isUri(aor)) throw new TypeError(`Invalid address of record ${show(aor)}`)
   const credentials = options.credentials && Object.freeze({ ...options.credentials })
   if (credentials) checkCredentials(credentials)
+  checkMaxCalls(maxCalls)
+  // Ended calls linger for 64·T1, so a flood of short calls is capped before it costs memory
+  const capacity = Math.max(64, 4 * maxCalls)
   const timers = options.timers ?? defaultTimers
   const transactions = createTransactions({ local: address, timers })
   const identity = { address, aor, random }
   const responder = createResponder(random)
   const registration = createRegistration(identity, credentials)
   const contact = createContact(address, aor)
-  const calls = createCalls(identity, contact, credentials, transactionTimeout(timers))
+  const calls = createCalls({ identity, contact, credentials, timers })
 
   function handle(input: Input, now: number): Output[] {
     checkTime(now)
@@ -63,8 +74,8 @@ export function createCore(options: CoreOptions): Core {
         return receive(input.data, input.from, now)
       case "timeout":
         return [
-          ...translateCalls(calls.expire(now), now),
           ...translate(transactions.expire(now), now),
+          ...translateCalls(calls.expire(now), now),
           ...translateRegistration(registration.expire(now), now),
         ]
       case "command":
@@ -84,10 +95,35 @@ export function createCore(options: CoreOptions): Core {
       index === 0 ? withReceived(entry, from.host, from.port) : entry,
     )
     const request = { ...message, via }
-    if (request.method === "BYE" && calls.matches(request)) {
-      return translate(transactions.receive(request, from, now), now)
+    const refusal = request.method === "INVITE" ? admit(request) : undefined
+    if (refusal) return responder.respond(request, from, refusal)
+    if (!isForCalls(request)) return responder.respond(request, from)
+    return translate(transactions.receive(request, from, now), now)
+  }
+
+  // RFC 3261 §8.2.2.2: a Call-ID stays taken while its call lives, and its own INVITE coming back is merged
+  function admit(invite: SipRequest): Answer | undefined {
+    if (invite.to.params.has("tag") || transactions.hasInvite(invite)) return undefined
+    const refusal = checkInvite(invite)
+    if (refusal) return refusal
+    if (calls.collides(invite)) return LOOP
+    if (calls.active() >= maxCalls) return BUSY
+    return calls.tracked() >= capacity ? FULL : undefined
+  }
+
+  function isForCalls(request: SipRequest): boolean {
+    switch (request.method) {
+      case "INVITE":
+        return !request.to.params.has("tag") || calls.matches(request)
+      case "ACK":
+        return calls.owns(request.callId)
+      case "CANCEL":
+        return transactions.hasInvite(request)
+      case "BYE":
+        return calls.matches(request)
+      default:
+        return false
     }
-    return responder.respond(request, from)
   }
 
   function execute(command: Command, now: number): Output[] {
@@ -116,17 +152,22 @@ export function createCore(options: CoreOptions): Core {
         checkCallId(call)
         checkRequestUri(uri)
         checkAddress(to)
-        // RFC 3261 §13.2.2.4: without an offer in the INVITE we could never answer one in the ACK
-        if (!(sdp instanceof Uint8Array)) throw new TypeError("The SDP offer must be a Uint8Array")
-        if (sdp.length > MAX_SDP) {
-          throw new RangeError(`The SDP has ${sdp.length} bytes, at most ${MAX_SDP} fit`)
-        }
+        checkSdp(sdp)
         if (calls.owns(call)) throw new Error(`Call ${show(call)} already exists`)
         return translateCalls(calls.start({ call, uri, to, sdp: new Uint8Array(sdp) }, now), now)
       }
-      case "end":
-        checkCallId(command.call)
-        return translateCalls(calls.end(command.call, now), now)
+      case "accept": {
+        const { call, sdp } = command
+        checkCall(call)
+        checkSdp(sdp)
+        return translateCalls(calls.accept(call, new Uint8Array(sdp), now), now)
+      }
+      case "end": {
+        const { call, status } = command
+        checkCall(call)
+        if (status !== undefined) checkRejection(status)
+        return translateCalls(calls.end(call, now, status), now)
+      }
       default:
         throw new TypeError(`Unknown command ${show(command)}`)
     }
@@ -153,8 +194,13 @@ export function createCore(options: CoreOptions): Core {
       const { request } = happened
       return calls.owns(request.callId) ? calls.timeout(request, now) : undefined
     }
-    if (happened.type !== "request" || !happened.transaction) return undefined
-    return calls.request(happened.request, happened.transaction, now)
+    if (happened.type !== "request") return undefined
+    const { request, transaction, from } = happened
+    if (!transaction) return calls.acknowledge(request, now)
+    if (request.method === "INVITE" && !request.to.params.has("tag")) {
+      return calls.receive({ invite: request, transaction, from }, now)
+    }
+    return calls.request(request, transaction, now)
   }
 
   function translateCalls(outputs: CallOutput[], now: number): Output[] {

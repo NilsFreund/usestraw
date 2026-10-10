@@ -1,4 +1,4 @@
-import type { Output } from "../core/types"
+import type { CallEvent, Output } from "../core/types"
 import { formatHost } from "../message/fields/host"
 import type { Address } from "../transport/address"
 import { decode } from "./codec"
@@ -45,12 +45,21 @@ function drawLine(line: string): string[] {
 function describe(output: Output): string | undefined {
   if (output.type === "send") return `phone → ${place(output.to)}  ${summary(output.data)}`
   const { event } = output
+  if (event.type === "call") return `● call ${call(event)}`
   if (event.type !== "registration") return undefined
   if (event.state === "registered") return `● online for ${event.expires} s`
   if (event.state === "unregistered") return "● unregistered"
   const retry =
     event.retryIn === undefined ? "" : `, retry in ${Math.round(event.retryIn / 1000)} s`
   return `● failed: ${event.failure.reason}${retry}`
+}
+
+function call(event: CallEvent): string {
+  if (event.state === "incoming") return `incoming from ${event.from.uri}`
+  if (event.state === "ringing") return `ringing ${event.status}`
+  if (event.state === "live") return "live"
+  const { by, reason, status } = event.ended
+  return `ended by ${by}: ${reason}${status === undefined ? "" : ` ${status}`}`
 }
 
 function place(address: Address): string {

@@ -1,3 +1,4 @@
+import { isCallId } from "../message/fields/call-id"
 import { isIp } from "../message/fields/host"
 import { isRequestUri, splitSipUri } from "../message/fields/uri"
 import { hasLineBreak, isText, show } from "../message/syntax"
@@ -44,4 +45,30 @@ export function checkCredentials(credentials: Credentials): void {
   const { username, password, realm = "" } = credentials
   const valid = [username, password, realm].every((value) => isText(value) && !hasLineBreak(value))
   if (!valid) throw new TypeError("Credentials must be strings without line breaks")
+}
+
+export function checkCall(call: string): void {
+  if (!isCallId(call)) throw new TypeError(`Invalid call ${show(call)}`)
+}
+
+const MAX_SDP = 32 * 1024
+
+export function checkSdp(sdp: Uint8Array): void {
+  if (!(sdp instanceof Uint8Array)) throw new TypeError("The SDP must be a Uint8Array")
+  if (sdp.length === 0) throw new RangeError("The SDP is empty")
+  if (sdp.length > MAX_SDP) {
+    throw new RangeError(`The SDP has ${sdp.length} bytes, at most ${MAX_SDP} fit`)
+  }
+}
+
+export function checkRejection(status: number): void {
+  if (!isIntegerIn(status, 400, 699)) {
+    throw new RangeError(`A call can be rejected with 400 to 699, got ${show(status)}`)
+  }
+}
+
+export function checkMaxCalls(maxCalls: number): void {
+  if (!isIntegerIn(maxCalls, 0, 0xffff)) {
+    throw new RangeError(`maxCalls must be an integer from 0 to 65535, got ${show(maxCalls)}`)
+  }
 }

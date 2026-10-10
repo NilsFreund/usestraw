@@ -18,6 +18,15 @@ function core(seed = 1): Core {
   return createCore({ address: alice, aor: "sip:alice@example.com", random: createRandom(seed) })
 }
 
+function busy(): Core {
+  return createCore({
+    address: alice,
+    aor: "sip:alice@example.com",
+    random: createRandom(1),
+    maxCalls: 0,
+  })
+}
+
 function sent(outputs: Output[]) {
   return outputs.flatMap((output) => (output.type === "send" ? [output] : []))
 }
@@ -359,7 +368,10 @@ describe("createCore", () => {
         reason: "OK",
         callId: "ping-1",
         cseq: { seq: 7, method: "OPTIONS" },
-        headers: [{ name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }],
+        headers: [
+          { name: "Allow", value: "ACK, BYE, CANCEL, INVITE, OPTIONS" },
+          { name: "Accept", value: "application/sdp" },
+        ],
       })
       expect(response.to.params.get("tag")).toMatch(/^[a-z0-9]+$/)
     })
@@ -377,7 +389,7 @@ describe("createCore", () => {
       expect(response).toMatchObject({
         status: 405,
         reason: "Method Not Allowed",
-        headers: [{ name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }],
+        headers: [{ name: "Allow", value: "ACK, BYE, CANCEL, INVITE, OPTIONS" }],
       })
     })
 
@@ -391,14 +403,14 @@ describe("createCore", () => {
       expect(response).toMatchObject({ status: 501, reason: "Not Implemented", headers: [] })
     })
 
-    it("rejects INVITE statelessly without retransmissions (RFC 3261 §8.2.7)", () => {
-      const ua = core()
+    it("rejects INVITE statelessly without retransmissions when busy (RFC 3261 §8.2.7)", () => {
+      const ua = busy()
       const outputs = ua.handle(receive(incoming("INVITE")), 0)
       expect(outputs.map((output) => output.type)).toEqual(["event", "send"])
       expect(events(outputs)).toMatchObject([
-        { type: "answered", request: { method: "INVITE" }, from: bob, status: 405 },
+        { type: "answered", request: { method: "INVITE" }, from: bob, status: 486 },
       ])
-      expect(statuses(outputs)).toEqual([405])
+      expect(statuses(outputs)).toEqual([486])
       expect(ua.nextDeadline()).toBeUndefined()
     })
 
@@ -413,12 +425,12 @@ describe("createCore", () => {
     it("sends a stateless rejection to the sent-by port without rport", () => {
       const via = "Via: SIP/2.0/UDP 192.0.2.20:5070;branch=z9hG4bK1"
       const source = { ...bob, port: 40123 }
-      const [reply] = sent(core().handle(receive(incoming("INVITE", via), source), 0))
+      const [reply] = sent(busy().handle(receive(incoming("INVITE", via), source), 0))
       expect(reply?.to).toEqual({ ...bob, port: 5070 })
     })
 
     it("regenerates the same rejection with the same To tag for a retransmission", () => {
-      const ua = core()
+      const ua = busy()
       const [first] = sent(ua.handle(receive(incoming("INVITE")), 0))
       const [again] = sent(ua.handle(receive(incoming("INVITE")), 500))
       expect(again).toEqual(first)
@@ -426,7 +438,7 @@ describe("createCore", () => {
     })
 
     it("gives different requests different stateless tags", () => {
-      const ua = core()
+      const ua = busy()
       const via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK2"
       const tag = (data: Uint8Array) =>
         message(sent(ua.handle(receive(data), 0))[0]).to.params.get("tag")
@@ -434,20 +446,20 @@ describe("createCore", () => {
     })
 
     it("swallows the ACK for a stateless rejection", () => {
-      const ua = core()
+      const ua = busy()
       const rejection = message(sent(ua.handle(receive(incoming("INVITE")), 0))[0])
       expect(ua.handle(receive(ackFor(rejection)), 100)).toEqual([])
     })
 
     it("swallows the ACK for a stateless rejection of an RFC 2543 INVITE", () => {
-      const ua = core()
+      const ua = busy()
       const via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=legacy"
       const rejection = message(sent(ua.handle(receive(incoming("INVITE", via)), 0))[0])
       expect(ua.handle(receive(ackFor(rejection, via)), 100)).toEqual([])
     })
 
     it("passes an ACK with a foreign To tag to the application", () => {
-      const ua = core()
+      const ua = busy()
       ua.handle(receive(incoming("INVITE")), 0)
       const ack = incoming("ACK", undefined, "To: <sip:alice@example.com>;tag=dialog")
       expect(events(ua.handle(receive(ack), 100))).toMatchObject([{ type: "request" }])
@@ -464,7 +476,7 @@ describe("createCore", () => {
     })
 
     it("schedules nothing for a flood of distinct requests", () => {
-      const ua = core()
+      const ua = busy()
       for (let index = 0; index < 1000; index++) {
         const via = `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK${index}`
         ua.handle(receive(incoming(index % 2 === 0 ? "OPTIONS" : "INVITE", via)), 0)
@@ -473,7 +485,7 @@ describe("createCore", () => {
     })
 
     it("keeps the To tag when a retransmission comes from another port", () => {
-      const ua = core()
+      const ua = busy()
       const via = "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK1;rport"
       const tag = (port: number) =>
         message(
@@ -553,13 +565,14 @@ describe("createCore", () => {
       expect(response).toMatchObject({ status: 416, reason: "Unsupported URI Scheme" })
     })
 
-    it("answers CANCEL without a transaction with 481", () => {
-      const response = message(sent(core().handle(receive(incoming("CANCEL")), 0))[0])
-      expect(response).toMatchObject({ status: 481 })
+    it("answers CANCEL without a transaction with 481 statelessly", () => {
+      const outputs = core().handle(receive(incoming("CANCEL")), 0)
+      expect(events(outputs)).toMatchObject([{ type: "answered", status: 481 }])
+      expect(message(sent(outputs)[0])).toMatchObject({ status: 481 })
     })
 
     it("answers CANCEL for a statelessly rejected INVITE with 481", () => {
-      const ua = core()
+      const ua = busy()
       ua.handle(receive(incoming("INVITE")), 0)
       expect(statuses(ua.handle(receive(incoming("CANCEL")), 100))).toEqual([481])
     })

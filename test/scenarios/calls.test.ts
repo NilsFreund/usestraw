@@ -102,7 +102,7 @@ describe("outgoing calls", () => {
     })
     expect(invite?.from.params.get("tag")).toMatch(/^[a-z0-9]{10}$/)
     expect(invite && getHeader(invite, "Content-Type")).toBe("application/sdp")
-    expect(invite && getHeader(invite, "Allow")).toBe("ACK, BYE, CANCEL, OPTIONS")
+    expect(invite && getHeader(invite, "Allow")).toBe("ACK, BYE, CANCEL, INVITE, OPTIONS")
   })
 
   it.each([

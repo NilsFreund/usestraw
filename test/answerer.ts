@@ -1,0 +1,57 @@
+import type { Command, Core, Output } from "../src"
+import { earliest } from "../src/support/time"
+
+export interface AnswererOptions {
+  readonly answerAfter?: number
+  readonly reject?: number
+  readonly hangupAfter?: number
+  readonly sdp?: Uint8Array
+}
+
+interface Pending {
+  readonly at: number
+  readonly command: Command
+}
+
+// Wraps a phone so it picks up, rejects or hangs up its incoming calls on a script
+export function answerer(core: Core, options: AnswererOptions = {}): Core {
+  const { answerAfter, reject, hangupAfter } = options
+  const sdp = options.sdp ?? new TextEncoder().encode("v=0\r\no=alice 1 1 IN IP4 192.0.2.10\r\n")
+  const live = new Set<string>()
+  let pending: Pending[] = []
+
+  function react(outputs: Output[], now: number): Output[] {
+    for (const output of outputs) {
+      if (output.type !== "event" || output.event.type !== "call") continue
+      const { call, state } = output.event
+      if (state === "incoming" && (answerAfter !== undefined || reject !== undefined)) {
+        const command: Command =
+          reject === undefined
+            ? { type: "accept", call, sdp }
+            : { type: "end", call, status: reject }
+        pending.push({ at: now + (answerAfter ?? 0), command })
+      }
+      if (state === "live" && hangupAfter !== undefined && !live.has(call)) {
+        live.add(call)
+        pending.push({ at: now + hangupAfter, command: { type: "end", call } })
+      }
+    }
+    return outputs
+  }
+
+  function handle(input: Parameters<Core["handle"]>[0], now: number): Output[] {
+    const outputs = react(core.handle(input, now), now)
+    if (input.type !== "timeout") return outputs
+    const due = pending.filter((entry) => entry.at <= now)
+    pending = pending.filter((entry) => entry.at > now)
+    const commands = due.flatMap(({ command }) =>
+      react(core.handle({ type: "command", command }, now), now),
+    )
+    return [...outputs, ...commands]
+  }
+
+  return {
+    handle,
+    nextDeadline: () => earliest([core.nextDeadline(), ...pending.map((entry) => entry.at)]),
+  }
+}

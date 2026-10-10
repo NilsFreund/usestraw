@@ -3,6 +3,7 @@ export type {
   AuthFailure,
   CallEnd,
   CallEvent,
+  CallParty,
   CallReason,
   Command,
   CoreEvent,

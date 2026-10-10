@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { isRequest, type SipRequest } from "../../src"
-import { answer } from "../../src/core/uas"
+import { answer, checkInvite } from "../../src/core/uas"
 import { parsed } from "../helpers"
 
 function request(method: string, uri = "sip:alice@example.com", extra: string[] = []): SipRequest {
@@ -21,11 +21,12 @@ function request(method: string, uri = "sip:alice@example.com", extra: string[] 
   return message
 }
 
-const allow = { name: "Allow", value: "ACK, BYE, CANCEL, OPTIONS" }
+const allow = { name: "Allow", value: "ACK, BYE, CANCEL, INVITE, OPTIONS" }
+const sdp = { name: "Accept", value: "application/sdp" }
 
 describe("answer (RFC 3261 §8.2)", () => {
   it("accepts OPTIONS with 200 and Allow", () => {
-    expect(answer(request("OPTIONS"))).toEqual({ status: 200, reason: "OK", headers: [allow] })
+    expect(answer(request("OPTIONS"))).toEqual({ status: 200, reason: "OK", headers: [allow, sdp] })
   })
 
   it("accepts sips URIs", () => {
@@ -33,7 +34,6 @@ describe("answer (RFC 3261 §8.2)", () => {
   })
 
   it.each([
-    "INVITE",
     "INFO",
     "MESSAGE",
     "NOTIFY",
@@ -67,13 +67,16 @@ describe("answer (RFC 3261 §8.2)", () => {
     })
   })
 
-  it("rejects CANCEL with 481 because no INVITE keeps state yet", () => {
-    expect(answer(request("CANCEL"))).toEqual({
-      status: 481,
-      reason: "Call/Transaction Does Not Exist",
-      headers: [],
-    })
-  })
+  it.each(["CANCEL", "INVITE"])(
+    "rejects %s with 481 because it matches no call (§9.2, §12.2.2)",
+    (method) => {
+      expect(answer(request(method))).toEqual({
+        status: 481,
+        reason: "Call/Transaction Does Not Exist",
+        headers: [],
+      })
+    },
+  )
 
   it("rejects unsupported URI schemes with 416", () => {
     expect(answer(request("OPTIONS", "tel:+4930123456"))).toEqual({
@@ -116,6 +119,40 @@ describe("answer (RFC 3261 §8.2)", () => {
   })
 
   it("checks the method before the URI scheme", () => {
-    expect(answer(request("INVITE", "tel:+4930123456")).status).toBe(405)
+    expect(answer(request("MESSAGE", "tel:+4930123456")).status).toBe(405)
+  })
+})
+
+describe("checkInvite (RFC 3261 §8.2.2–8.2.3)", () => {
+  const offer = (type?: string) => ({
+    ...request("INVITE", undefined, type === undefined ? [] : [`Content-Type: ${type}`]),
+    body: new TextEncoder().encode("v=0\r\n"),
+  })
+
+  it("accepts an INVITE without a body or with SDP", () => {
+    expect(checkInvite(request("INVITE"))).toBeUndefined()
+    expect(checkInvite(offer("application/sdp"))).toBeUndefined()
+    expect(checkInvite(offer(" Application/SDP ; charset=utf-8"))).toBeUndefined()
+  })
+
+  it.each(["application/sdpx", "multipart/mixed;boundary=x", "text/plain", undefined])(
+    "rejects the body type %s with 415 and Accept: application/sdp",
+    (type) => {
+      expect(checkInvite(offer(type))).toEqual({
+        status: 415,
+        reason: "Unsupported Media Type",
+        headers: [sdp],
+      })
+    },
+  )
+
+  it("rejects unsupported schemes and required extensions first", () => {
+    expect(checkInvite({ ...offer("text/plain"), uri: "tel:+4930123456" })?.status).toBe(416)
+    expect(checkInvite(request("INVITE", undefined, ["Require: 100rel"]))).toEqual({
+      status: 420,
+      reason: "Bad Extension",
+      headers: [{ name: "Unsupported", value: "100rel" }],
+    })
+    expect(checkInvite(request("INVITE", undefined, ['Require: "x"']))?.status).toBe(400)
   })
 })

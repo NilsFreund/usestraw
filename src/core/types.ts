@@ -32,7 +32,8 @@ export type Command =
       readonly to: Address
       readonly sdp: Uint8Array
     }
-  | { readonly type: "end"; readonly call: string }
+  | { readonly type: "accept"; readonly call: string; readonly sdp: Uint8Array }
+  | { readonly type: "end"; readonly call: string; readonly status?: number }
 
 export interface OfferedChallenge {
   readonly scheme: string
@@ -79,7 +80,21 @@ export interface CallEnd {
   readonly status?: number
 }
 
+export interface CallParty {
+  readonly uri: string
+  readonly name?: string
+}
+
 export type CallEvent =
+  | {
+      readonly type: "call"
+      readonly call: string
+      readonly state: "incoming"
+      readonly from: CallParty
+      readonly to: CallParty
+      readonly source: Address
+      readonly sdp?: Uint8Array
+    }
   | {
       readonly type: "call"
       readonly call: string

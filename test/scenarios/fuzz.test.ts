@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { type Address, createCore, isRequest, type Output, parseMessage } from "../../src"
+import {
+  type Address,
+  type Command,
+  createCore,
+  isRequest,
+  type Output,
+  parseMessage,
+} from "../../src"
 import { between, createRandom } from "../../src/simulation/random"
 import { alice, bob, fixture } from "../helpers"
 
@@ -62,6 +69,47 @@ function mutateBytes(text: string, random: () => number): Uint8Array {
   return bytes
 }
 
+function invite(round: number): string {
+  return [
+    "INVITE sip:alice@192.0.2.10 SIP/2.0",
+    `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bKfuzz${round};rport`,
+    "Max-Forwards: 70",
+    'From: "Bob" <sip:bob@example.com>;tag=fuzz',
+    "To: <sip:alice@example.com>",
+    `Call-ID: fuzz-${round}@example.com`,
+    "CSeq: 1 INVITE",
+    "Contact: <sip:bob@192.0.2.20:5060>",
+    "Record-Route: <sip:proxy.example.com;lr>",
+    "Content-Type: application/sdp",
+    "Content-Length: 5",
+    "",
+    "v=0\r\n",
+  ].join("\r\n")
+}
+
+const METHODS = ["BYE", "ACK", "INVITE", "CANCEL", "OPTIONS", "INFO"]
+
+function inDialog(callId: string, tag: string, random: () => number): string {
+  const method = METHODS[between(random, 0, METHODS.length - 1)] ?? "BYE"
+  const seq = between(random, 0, 3)
+  const branch = random() < 0.3 ? "z9hG4bKfuzz0" : `z9hG4bKd${between(random, 0, 99)}`
+  const body = random() < 0.5 ? "v=0\r\na=sendonly\r\n" : ""
+  return [
+    `${method} sip:alice@192.0.2.10:5060 SIP/2.0`,
+    `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=${branch};rport`,
+    "Max-Forwards: 70",
+    'From: "Bob" <sip:bob@example.com>;tag=fuzz',
+    `To: <sip:alice@example.com>${method === "CANCEL" && random() < 0.5 ? "" : `;tag=${tag}`}`,
+    `Call-ID: ${callId}`,
+    `CSeq: ${seq} ${random() < 0.9 ? method : "INVITE"}`,
+    "Contact: <sip:bob@192.0.2.20:5070>",
+    ...(body === "" ? [] : ["Content-Type: application/sdp"]),
+    `Content-Length: ${body.length}`,
+    "",
+    body,
+  ].join("\r\n")
+}
+
 function sends(outputs: Output[]): Uint8Array[] {
   return outputs.flatMap((output) => (output.type === "send" ? [output.data] : []))
 }
@@ -69,7 +117,7 @@ function sends(outputs: Output[]): Uint8Array[] {
 describe("fuzzing the core with mutated torture messages", () => {
   it("never throws, answers each request once and identically for every copy", () => {
     const random = createRandom(4475)
-    const core = createCore({ address: alice, aor: "sip:alice@example.com", random })
+    const core = createCore({ address: alice, aor: "sip:alice@example.com", random, maxCalls: 0 })
     const texts = BASES.map((name) => decoder.decode(fixture(name)))
     let answered = 0
     for (let round = 0; round < 4000; round++) {
@@ -86,5 +134,64 @@ describe("fuzzing the core with mutated torture messages", () => {
       for (const reply of sends(first)) expect(parseMessage(reply)).toMatchObject({ ok: true })
     }
     expect(answered).toBeGreaterThan(500)
+  })
+
+  it("never throws when mutated INVITEs become calls that get in-dialog requests and time out", () => {
+    const random = createRandom(3261)
+    const core = createCore({ address: alice, aor: "sip:alice@example.com", random })
+    const texts = BASES.map((name) => decoder.decode(fixture(name)))
+    const sdp = encoder.encode("v=0\r\n")
+    const dialogs: { readonly call: string; readonly tag: string }[] = []
+    const seen = new Set<string>()
+    let calls = 0
+    for (let round = 0; round < 6000; round++) {
+      const dialog = dialogs[between(random, 0, dialogs.length - 1)]
+      const kind = round % 3
+      const base =
+        kind === 0
+          ? invite(round)
+          : kind === 1 && dialog
+            ? inDialog(dialog.call, dialog.tag, random)
+            : (texts[round % texts.length] ?? "")
+      const pristine = kind === 1 && random() < 0.5
+      const data = pristine
+        ? encoder.encode(base)
+        : random() < 0.7
+          ? mutateText(base, random)
+          : mutateBytes(base, random)
+      const from = SOURCES[round % SOURCES.length] ?? bob
+      const outputs = core.handle({ type: "receive", data, from }, round * 100)
+      for (const output of outputs) {
+        if (output.type === "send") {
+          const result = parseMessage(output.data)
+          expect(result).toMatchObject({ ok: true })
+          if (result.ok && "status" in result.message) {
+            seen.add(`${result.message.status} ${result.message.cseq.method}`)
+          }
+          if (result.ok && "status" in result.message && result.message.status === 180) {
+            const tag = result.message.to.params.get("tag") ?? ""
+            dialogs.push({ call: result.message.callId, tag })
+          }
+        }
+        if (output.type !== "event" || output.event.type !== "call") continue
+        if (output.event.state !== "incoming") continue
+        calls++
+        const command = random() < 0.8 ? { type: "accept", sdp } : { type: "end", status: 603 }
+        const call = { ...command, call: output.event.call } as Command
+        core.handle({ type: "command", command: call }, round * 100)
+      }
+      if (random() < 0.1 && dialog) {
+        core.handle({ type: "command", command: { type: "end", call: dialog.call } }, round * 100)
+      }
+      core.handle({ type: "timeout" }, round * 100 + 50)
+    }
+    expect(calls).toBeGreaterThan(200)
+    for (const reached of ["200 BYE", "200 CANCEL", "500 INVITE", "481 BYE", "603 INVITE"]) {
+      expect(seen).toContain(reached)
+    }
+    for (let at = 600_000; core.nextDeadline() !== undefined && at < 2_000_000; at += 1000) {
+      core.handle({ type: "timeout" }, at)
+    }
+    expect(core.nextDeadline()).toBeUndefined()
   })
 })

@@ -1,33 +1,37 @@
-import type { NameAddr } from "../../message/fields/name-addr"
 import type { SipRequest, SipResponse } from "../../message/types"
-import type { Identity } from "../requests"
-import type { Credentials } from "../types"
-import { type CallOutput, type CallSetup, createOutgoing, type Outgoing } from "./outgoing"
+import { transactionTimeout } from "../../transaction/timers"
+import { createIncoming, type IncomingSetup } from "./incoming"
+import { createOutgoing, type OutgoingSetup } from "./outgoing"
+import { respond } from "./outputs"
+import { createReply } from "./replies"
+import type { Call, CallContext, CallOutput } from "./types"
 
 export interface Calls {
   owns(call: string): boolean
-  start(setup: CallSetup, now: number): CallOutput[]
-  end(call: string, now: number): CallOutput[]
+  collides(invite: SipRequest): boolean
+  active(): number
+  tracked(): number
+  start(setup: OutgoingSetup, now: number): CallOutput[]
+  receive(setup: IncomingSetup, now: number): CallOutput[]
+  accept(call: string, sdp: Uint8Array, now: number): CallOutput[]
+  end(call: string, now: number, status?: number): CallOutput[]
   response(response: SipResponse, now: number): CallOutput[]
   timeout(request: SipRequest, now: number): CallOutput[]
   matches(request: SipRequest): boolean
   request(request: SipRequest, transaction: string, now: number): CallOutput[]
+  acknowledge(ack: SipRequest, now: number): CallOutput[]
   expire(now: number): CallOutput[]
   nextDeadline(): number | undefined
 }
 
 interface Entry {
-  readonly call: Outgoing
+  readonly call: Call
   removeAt?: number
 }
 
-// Ended calls linger for 64·T1 so late 2xx retransmissions still get their ACK
-export function createCalls(
-  identity: Identity,
-  contact: NameAddr,
-  credentials: Credentials | undefined,
-  linger: number,
-): Calls {
+// Ended calls linger for 64·T1 so late retransmissions still find their call
+export function createCalls(context: CallContext): Calls {
+  const linger = transactionTimeout(context.timers)
   const calls = new Map<string, Entry>()
 
   function track(id: string, outputs: CallOutput[], now: number): CallOutput[] {
@@ -36,29 +40,41 @@ export function createCalls(
     return outputs
   }
 
-  function on(id: string, now: number, act: (call: Outgoing) => CallOutput[]): CallOutput[] {
+  function on(id: string, now: number, act: (call: Call) => CallOutput[]): CallOutput[] {
     const entry = calls.get(id)
     return entry ? track(id, act(entry.call), now) : []
   }
 
-  function find(request: SipRequest): string | undefined {
-    const entry = calls.get(request.callId)
-    return entry?.call.matches(request) ? request.callId : undefined
+  function add(id: string, call: Call, now: number): CallOutput[] {
+    calls.set(id, { call })
+    return track(id, call.start(), now)
+  }
+
+  function request(incoming: SipRequest, transaction: string, now: number): CallOutput[] {
+    if (calls.has(incoming.callId)) {
+      return on(incoming.callId, now, (call) => call.request(incoming, transaction, now))
+    }
+    return [respond(transaction, createReply(incoming, 481))]
   }
 
   return {
     owns: (id) => calls.has(id),
-    start: (setup, now) => {
-      const call = createOutgoing(setup, identity, contact, credentials, linger)
-      calls.set(setup.call, { call })
-      return track(setup.call, call.start(), now)
+
+    collides: (invite) => {
+      const entry = calls.get(invite.callId)
+      return entry !== undefined && (!entry.call.ended || entry.call.merges(invite))
     },
-    end: (id, now) => on(id, now, (call) => call.end(now)),
+    active: () => [...calls.values()].filter((entry) => !entry.call.ended).length,
+    tracked: () => calls.size,
+    start: (setup, now) => add(setup.call, createOutgoing(setup, context), now),
+    receive: (setup, now) => add(setup.invite.callId, createIncoming(setup, context, now), now),
+    accept: (id, sdp, now) => on(id, now, (call) => call.accept(sdp, now)),
+    end: (id, now, status) => on(id, now, (call) => call.end(now, status)),
     response: (response, now) => on(response.callId, now, (call) => call.response(response, now)),
     timeout: (request, now) => on(request.callId, now, (call) => call.timeout(request)),
-    matches: (request) => find(request) !== undefined,
-    request: (request, transaction, now) =>
-      on(request.callId, now, (call) => call.request(request, transaction)),
+    matches: (request) => calls.get(request.callId)?.call.matches(request) ?? false,
+    request,
+    acknowledge: (ack, now) => on(ack.callId, now, (call) => call.acknowledge(ack)),
     expire: (now) => {
       const outputs: CallOutput[] = []
       for (const [id, entry] of calls) {

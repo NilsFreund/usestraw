@@ -7,20 +7,19 @@ import { replyAddress } from "../transport/routing"
 import { event } from "./outputs"
 import { createStateless } from "./stateless"
 import type { Output, Random } from "./types"
-import { answer } from "./uas"
+import { type Answer, answer } from "./uas"
 
 export interface Responder {
-  respond(request: SipRequest, from: Address): Output[]
+  respond(request: SipRequest, from: Address, reply?: Answer): Output[]
 }
 
 export function createResponder(random: Random): Responder {
   const stateless = createStateless(random)
 
-  function respond(request: SipRequest, from: Address): Output[] {
+  function respond(request: SipRequest, from: Address, reply = answer(request)): Output[] {
     if (request.method === "ACK") {
       return stateless.acknowledges(request) ? [] : [event({ type: "request", request, from })]
     }
-    const reply = answer(request)
     const answered = event({ type: "answered", request, from, status: reply.status })
     const data = serializeMessage(stateless.reply(request, reply))
     if (data.length > MAX_MESSAGE_SIZE) return [answered]
