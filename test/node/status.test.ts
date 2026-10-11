@@ -100,6 +100,74 @@ describe("phone status", () => {
     await closeNow(phone)
   })
 
+  it("goes offline instead of taking the process down when a packet breaks it", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network)
+    network.broken = true
+    network.inject(
+      new TextEncoder().encode(
+        [
+          "OPTIONS sip:alice@192.0.2.10 SIP/2.0",
+          "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bKbreak",
+          "From: <sip:probe@example.com>;tag=p1",
+          "To: <sip:alice@example.com>",
+          "Call-ID: break-1",
+          "CSeq: 1 OPTIONS",
+          "Content-Length: 0",
+          "",
+          "",
+        ].join("\r\n"),
+      ),
+    )
+    expect(phone.status).toBe("offline")
+    expect(phone.error).toMatchObject({ reason: "network", cause: new Error("The link broke") })
+  })
+
+  it("gives up on a silent server after connectTimeout and leaves no timer behind", async () => {
+    const network = memoryNetwork()
+    network.online = false
+    const connecting = options(network, {}, { connectTimeout: 1000 })
+    const failed = expect(connecting).rejects.toMatchObject({ reason: "no-answer" })
+    await vi.advanceTimersByTimeAsync(1000)
+    await failed
+    expect(vi.getTimerCount()).toBe(0)
+    const refused = memoryNetwork({ users: { alice: "other" } })
+    await expect(options(refused)).rejects.toMatchObject({ reason: "wrong-password" })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("ends ringing calls as timed out before it closes for a refused refresh", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network)
+    const sdp =
+      "v=0\r\no=- 1 1 IN IP4 192.0.2.20\r\ns=-\r\nc=IN IP4 192.0.2.20\r\nt=0 0\r\nm=audio 4000 RTP/AVP 0\r\n"
+    network.inject(
+      new TextEncoder().encode(
+        [
+          "INVITE sip:alice@192.0.2.10 SIP/2.0",
+          "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bKring",
+          "Max-Forwards: 70",
+          "From: <sip:bob@example.com>;tag=b1",
+          "To: <sip:alice@example.com>",
+          "Call-ID: ring-1",
+          "CSeq: 1 INVITE",
+          "Contact: <sip:bob@192.0.2.20>",
+          "Content-Type: application/sdp",
+          `Content-Length: ${sdp.length}`,
+          "",
+          sdp,
+        ].join("\r\n"),
+      ),
+    )
+    const [call] = phone.calls
+    const seen = watch(phone)
+    network.replace({ users: { alice: "changed" } })
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(await call?.ended).toStrictEqual({ by: "us", reason: "timeout" })
+    expect(seen[0]).toStrictEqual({ status: "online", reason: "wrong-password" })
+    expect(seen.at(-1)).toStrictEqual({ status: "offline", reason: "wrong-password" })
+  })
+
   it("closes for good when a refresh is refused", async () => {
     const network = memoryNetwork()
     const phone = await options(network)

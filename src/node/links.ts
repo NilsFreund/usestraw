@@ -1,4 +1,5 @@
 import { createSocket, type SocketType } from "node:dgram"
+import type { LookupAddress } from "node:dns"
 import { lookup } from "node:dns/promises"
 import { once } from "node:events"
 import { type AddressInfo, isIP } from "node:net"
@@ -15,6 +16,7 @@ export interface LinkHandlers {
 export interface Link {
   readonly local: TransportAddress
   readonly remote: TransportAddress
+  readonly peers: readonly string[]
   start(handlers: LinkHandlers): void
   send(data: Uint8Array, to: TransportAddress): void
   close(): void
@@ -29,6 +31,7 @@ export interface Peer {
   readonly address: string
   readonly family: number
   readonly port: number
+  readonly others?: readonly string[]
 }
 
 const KEEPALIVE = 30_000
@@ -41,9 +44,11 @@ export async function openLink(
   signal?: AbortSignal,
 ): Promise<Link> {
   if (server.transport === "TLS") return openTls(server, tls, signal)
-  const { address, family } = await lookup(server.host, { order: "ipv4first" })
+  const found = await lookup(server.host, { all: true, order: "ipv4first" })
   signal?.throwIfAborted()
-  return openUdp({ address, family, port: server.port })
+  const { address, family } = found[0] as LookupAddress
+  const others = found.filter((entry) => entry.family === family).map((entry) => entry.address)
+  return openUdp({ address, family, port: server.port, others })
 }
 
 export async function openUdp(peer: Peer): Promise<Link> {
@@ -65,11 +70,14 @@ export async function openUdp(peer: Peer): Promise<Link> {
   return {
     local: { transport: "UDP", host, port: socket.address().port },
     remote: { transport: "UDP", host: peer.address, port: peer.port },
+    peers: [...new Set([peer.address, ...(peer.others ?? [])])],
     start: (next) => {
       handlers = next
     },
     send: (data, to) => {
-      socket.send(data, to.port, to.host)
+      try {
+        socket.send(data, to.port, to.host)
+      } catch {}
     },
     close: () => {
       if (open) socket.close()
@@ -119,6 +127,7 @@ export async function openTls(
   return {
     local: { transport: "TLS", host: local.address, port: local.port },
     remote,
+    peers: [remote.host],
     start: (next) => {
       handlers = next
       socket.on("data", (chunk: Buffer) => {

@@ -101,7 +101,7 @@ export async function startCarrier(answer: Answer = "echo"): Promise<Carrier> {
   }
 
   async function echo(call: string): Promise<CallAudio> {
-    const audio = await openAudio(host)
+    const audio = await openAudio(host, () => undefined)
     audios.set(call, audio)
     void audio.readable.pipeTo(audio.writable).catch(() => undefined)
     return audio

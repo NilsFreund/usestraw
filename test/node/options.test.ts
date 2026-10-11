@@ -52,6 +52,7 @@ describe("resolveOptions", () => {
       closeTimeout: 5000,
       connectTimeout: 10_000,
       trace: true,
+      acceptFrom: "server",
       credentials: { username: "alice", password: "secret" },
       signal,
       tls: { ca: "pem" },
@@ -77,6 +78,7 @@ describe("resolveOptions", () => {
       closeTimeout: 5000,
       connectTimeout: 10_000,
       trace: true,
+      acceptFrom: "server",
     })
   })
 
@@ -185,6 +187,7 @@ describe("resolveOptions", () => {
       closeTimeout: 5000,
       connectTimeout: 10_000,
       trace: true,
+      acceptFrom: "server",
       credentials: { username: "agent", password: "secret" },
       signal,
     })
@@ -238,5 +241,14 @@ describe("resolveOptions", () => {
   it("turns the trace off when asked", () => {
     expect(resolveOptions({ uri: "sip:alice@example.com", trace: false }).trace).toBe(false)
     expect(resolveOptions("udp://dev@127.0.0.1", { trace: false }).trace).toBe(false)
+  })
+
+  it("lets anyone call only when asked, and refuses other values", () => {
+    expect(resolveOptions("udp://dev@127.0.0.1", { acceptFrom: "anyone" }).acceptFrom).toBe(
+      "anyone",
+    )
+    expect(() =>
+      resolveOptions("udp://dev@127.0.0.1", { acceptFrom: "everyone" as "anyone" }),
+    ).toThrow(new TypeError('acceptFrom must be "server" or "anyone", got "everyone"'))
   })
 })

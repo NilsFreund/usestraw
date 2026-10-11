@@ -339,3 +339,44 @@ describe("media engine: who it listens to (symmetric RTP without RTP Bleed)", ()
     expect(destination(engine, 5000)).toStrictEqual(nat)
   })
 })
+
+describe("media engine: silence", () => {
+  const silent = (outputs: MediaOutput[]) => outputs.filter((output) => output.type === "silent")
+
+  it("reports once when the far end sent nothing for a minute", () => {
+    const engine = live()
+    expect(silent(engine.handle({ type: "timeout" }, 59_999))).toHaveLength(0)
+    expect(silent(engine.handle({ type: "timeout" }, 60_000))).toHaveLength(1)
+    expect(silent(engine.handle({ type: "timeout" }, 120_000))).toHaveLength(0)
+  })
+
+  it("counts tones, comfort noise and a learnt source as signs of life, but not strangers", () => {
+    const early = live()
+    hear(early, stranger, [1], 1500)
+    expect(silent(early.handle({ type: "timeout" }, 60_000))).toHaveLength(1)
+    const engine = live()
+    hear(engine, remote, [1], 30_000, { payloadType: 13 })
+    hear(engine, stranger, [2, 3, 4, 5], 50_000)
+    expect(silent(engine.handle({ type: "timeout" }, 89_999))).toHaveLength(0)
+    expect(silent(engine.handle({ type: "timeout" }, 90_000))).toHaveLength(1)
+    const natted = live({ remote: { host: "10.0.0.5", port: 4000 } })
+    hear(natted, nat, [1, 2, 3], 1000)
+    hear(natted, nat, [4], 40_000)
+    expect(silent(natted.handle({ type: "timeout" }, 99_999))).toHaveLength(0)
+    expect(silent(natted.handle({ type: "timeout" }, 100_000))).toHaveLength(1)
+  })
+
+  it.each(["recvonly", "inactive"] as const)("waits nobody out who holds us (%s)", (direction) => {
+    const held = live({ direction })
+    expect(silent(held.handle({ type: "timeout" }, 600_000))).toHaveLength(0)
+  })
+
+  it("waits nobody out on hold, and starts over when the media changes", () => {
+    const held = live({ direction: "sendonly" })
+    hear(held, remote, [1], 1000)
+    expect(silent(held.handle({ type: "timeout" }, 600_000))).toHaveLength(0)
+    held.handle({ type: "media", media }, 600_000)
+    expect(silent(held.handle({ type: "timeout" }, 659_999))).toHaveLength(0)
+    expect(silent(held.handle({ type: "timeout" }, 660_000))).toHaveLength(1)
+  })
+})

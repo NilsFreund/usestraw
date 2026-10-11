@@ -16,6 +16,7 @@ export type MediaInput =
 export type MediaOutput =
   | { readonly type: "send"; readonly data: Uint8Array; readonly to: MediaAddress }
   | { readonly type: "frame"; readonly pcm: Int16Array<ArrayBuffer> }
+  | { readonly type: "silent" }
 
 export interface MediaEngine {
   readonly queued: number
@@ -29,6 +30,7 @@ const MAX_LAG = 5
 const LEARN = 2000
 const PROBATION = 3
 const MAX_PAYLOAD = 120 * SAMPLES_PER_MS
+const SILENCE_LIMIT = 60_000
 
 interface Candidate {
   readonly from: MediaAddress
@@ -55,6 +57,7 @@ export function createMediaEngine(random: Random): MediaEngine {
   let queue: Int16Array[] = []
   let queued = 0
   let played = 0
+  let heardAt: number | undefined
 
   function handle(input: MediaInput, now: number): MediaOutput[] {
     switch (input.type) {
@@ -73,7 +76,7 @@ export function createMediaEngine(random: Random): MediaEngine {
         update(input.media, now)
         return []
       case "timeout":
-        return [...play(now), ...send(now)]
+        return [...play(now), ...send(now), ...silence(now)]
     }
   }
 
@@ -84,6 +87,7 @@ export function createMediaEngine(random: Random): MediaEngine {
       learnUntil = now + LEARN
     }
     media = next
+    heardAt = next.direction === "sendrecv" ? now : undefined
     const sending = next.direction === "sendrecv" || next.direction === "sendonly"
     if (!sending) sendAt = undefined
     else sendAt ??= now
@@ -98,6 +102,7 @@ export function createMediaEngine(random: Random): MediaEngine {
     const known = latched !== undefined && same(from, latched)
     if (!signalled && !known && now > learnUntil) return
     const packet = readRtp(data)
+    if (packet && (signalled || known) && heardAt !== undefined) heardAt = now
     const codec = packet && codecOf(packet.payloadType)
     if (!packet || !codec || packet.payload.length === 0 || packet.payload.length > MAX_PAYLOAD)
       return
@@ -119,6 +124,12 @@ export function createMediaEngine(random: Random): MediaEngine {
     latched = { host: from.host, port: from.port }
     learnUntil = Number.NEGATIVE_INFINITY
     return true
+  }
+
+  function silence(now: number): MediaOutput[] {
+    if (heardAt === undefined || now - heardAt < SILENCE_LIMIT) return []
+    heardAt = undefined
+    return [{ type: "silent" }]
   }
 
   function codecOf(payloadType: number): Codec | undefined {

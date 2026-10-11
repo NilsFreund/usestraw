@@ -27,14 +27,18 @@ const AHEAD_SAMPLES = 30_000 * SAMPLES_PER_MS
 
 // One UDP socket per call on an even port (RFC 3550 §11), PCM in and out as Web Streams; a slow
 // reader loses the oldest frames, a writer may run 30 s ahead, and clear() drops all of that at once
-export async function openAudio(host: string, random: Random = secureRandom): Promise<CallAudio> {
+export async function openAudio(
+  host: string,
+  silent: () => void,
+  random: Random = secureRandom,
+): Promise<CallAudio> {
   const socket = await bindEven(host, random)
   const engine = createMediaEngine(random)
   const clock = createClock()
   const waiting: Int16Array<ArrayBuffer>[] = []
   let open = true
   let drained: (() => void) | undefined
-  let flushed: (() => void) | undefined
+  let flushed: PromiseWithResolvers<void> | undefined
   let pulling: ReadableStreamDefaultController<Int16Array<ArrayBuffer>> | undefined
   let frames: ReadableStreamDefaultController<Int16Array<ArrayBuffer>> | undefined
   let writes: WritableStreamDefaultController | undefined
@@ -44,7 +48,8 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
     try {
       for (const output of engine.handle(input, clock.now())) {
         if (output.type === "send") socket.send(output.data, output.to.port, output.to.host)
-        else hear(output.pcm)
+        else if (output.type === "frame") hear(output.pcm)
+        else silent()
       }
     } catch (error) {
       close(error)
@@ -71,7 +76,7 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
   }
 
   function settle(): void {
-    flushed?.()
+    flushed?.resolve()
     flushed = undefined
   }
 
@@ -82,9 +87,11 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
     socket.close()
     if (error === undefined) frames?.close()
     else frames?.error(error)
-    writes?.error(error ?? new DOMException("The call ended", "AbortError"))
+    const reason = error ?? new DOMException("The call ended", "AbortError")
+    writes?.error(reason)
     release()
-    settle()
+    flushed?.reject(reason)
+    flushed = undefined
   }
 
   socket.on("message", (data, info) => {
@@ -125,9 +132,8 @@ export async function openAudio(host: string, random: Random = secureRandom): Pr
     },
     close: () => {
       if (engine.queued === 0) return undefined
-      return new Promise<void>((resolve) => {
-        flushed = resolve
-      })
+      flushed = Promise.withResolvers<void>()
+      return flushed.promise
     },
     abort: () => run({ type: "clear" }),
   })

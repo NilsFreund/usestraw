@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { CoreCommand } from "../../src"
 import { type Agent, type CallSetup, createCall } from "../../src/node/calls"
 
@@ -131,6 +131,83 @@ describe("a call's own state", () => {
       ended: { by: "remote", reason: "busy", status: 486 },
     })
     expect(await call.call.ended).toStrictEqual({ by: "us", reason: "no-answer" })
+  })
+
+  it("tells an agent whose call was never answered that it is over", async () => {
+    const agent = new TransformStream<Int16Array, Int16Array<ArrayBuffer>>()
+    const call = handle("outgoing", "127.0.0.1", agent)
+    call.place(placing)
+    call.receive({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "remote", reason: "busy", status: 486 },
+    })
+    await expect(agent.writable.getWriter().closed).rejects.toThrow(
+      "The call ended before it was answered",
+    )
+    expect(agent.readable.locked).toBe(false)
+    const busy = new TransformStream<Int16Array, Int16Array<ArrayBuffer>>()
+    const other = handle("outgoing", "127.0.0.1", busy)
+    const writer = busy.writable.getWriter()
+    busy.readable.getReader()
+    other.place(placing)
+    other.receive(ended())
+    await Promise.resolve()
+    expect(await Promise.race([writer.closed.then(() => "closed"), "open"])).toBe("open")
+  })
+
+  it("releases an agent handed to a call that already ended", async () => {
+    const call = handle()
+    call.receive(ended())
+    const agent = new TransformStream<Int16Array, Int16Array<ArrayBuffer>>()
+    const accepting = (call.call as unknown as { accept(agent: Agent): Promise<unknown> }).accept(
+      agent,
+    )
+    expect(await accepting).toMatchObject({ ok: false })
+    await expect(agent.writable.getWriter().closed).rejects.toThrow(
+      "The call ended before it was answered",
+    )
+  })
+
+  it("keeps its own hang-up as the reason when the line goes silent meanwhile", async () => {
+    vi.useFakeTimers()
+    try {
+      const call = handle("outgoing")
+      await call.open()
+      call.place(placing)
+      call.receive({ type: "call", call: "c1", state: "live", media })
+      void call.call.end()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(call.commands).toStrictEqual([placing, { type: "end", call: "c1" }])
+      call.receive({
+        type: "call",
+        call: "c1",
+        state: "ended",
+        ended: { by: "local", reason: "hangup" },
+      })
+      expect(await call.call.ended).toStrictEqual({ by: "us", reason: "hangup" })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("hangs up a live call whose far end sent nothing for a minute", async () => {
+    vi.useFakeTimers()
+    try {
+      const call = handle("outgoing")
+      await call.open()
+      call.place(placing)
+      call.receive({ type: "call", call: "c1", state: "live", media })
+      await vi.advanceTimersByTimeAsync(59_000)
+      expect(call.commands).toStrictEqual([placing])
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(call.commands).toStrictEqual([placing, { type: "end", call: "c1" }])
+      call.receive(ended("hangup"))
+      expect(await call.call.ended).toStrictEqual({ by: "us", reason: "timeout" })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("only gives up on a call that is still calling", async () => {

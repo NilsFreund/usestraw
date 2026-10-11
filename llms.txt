@@ -30,7 +30,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Call fields: `id`, `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `toJSON()`.
 - Call reasons: hangup, cancelled, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, timeout.
 - `connect()` rejects with `ConnectError`; switch on `error.reason`: wrong-password, password-missing, unsupported-auth, refused, unavailable, no-answer, network.
-- Options of `connect`: `password`, `authUser`, `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100).
+- Options of `connect`: `password`, `authUser`, `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100), `acceptFrom` ("server" by default, or "anyone" for direct IP calls over UDP).
 
 ## Pitfalls
 
@@ -39,6 +39,8 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - `phone.call()` resolves for busy, declined and unanswered calls too. Check `call.ok` before using `call.audio`.
 - Audio is 8000 Hz mono `Int16Array`, not Float32 or μ-law bytes. Resample for models that want 16 or 24 kHz.
 - Writes resolve at once until 30 s are queued. Interrupt with `clear()`, not a new writer.
+- Writes and a pending `writer.close()` reject once the call ends: add `.catch()` to writes you don't await.
+- A call whose far end sends no audio for 60 s is hung up with `reason: "timeout"`.
 - Readers that fall behind lose the oldest frames. Keep reading or cancel the stream.
 - `await using` needs Node 24 or TypeScript. On Node 22, call `phone.close()` yourself.
 

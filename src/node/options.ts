@@ -35,6 +35,13 @@ export interface ConnectUrlOptions {
    * @default 100
    */
   readonly maxCalls?: number | undefined
+  /**
+   * Who may call this phone over UDP: only your SIP server, or `"anyone"` who finds its port, for
+   * direct IP calls. Over TLS only the server can reach it anyway.
+   *
+   * @default "server"
+   */
+  readonly acceptFrom?: "server" | "anyone" | undefined
 }
 
 /** {@link connect} options without a URL. */
@@ -68,6 +75,7 @@ export interface PhoneSettings {
   readonly tls?: TlsSettings
   readonly trace: boolean
   readonly maxCalls?: number
+  readonly acceptFrom: "server" | "anyone"
 }
 
 const SERVER = /^(udp|tls):\/\/(\[[^\]]*\]|[^:/[\]]+)(?::(\d{1,5}))?$/i
@@ -81,8 +89,11 @@ export function resolveOptions(
   if (!options) {
     throw new TypeError("Missing connection URL: pass tls://user:password@host[:port]")
   }
-  const { uri, password, signal, tls, trace = true, maxCalls } = options
+  const { uri, password, signal, tls, trace = true, maxCalls, acceptFrom = "server" } = options
   if (maxCalls !== undefined) checkMaxCalls(maxCalls)
+  if (acceptFrom !== "server" && acceptFrom !== "anyone") {
+    throw new TypeError(`acceptFrom must be "server" or "anyone", got ${show(acceptFrom)}`)
+  }
   const invalidUri = new TypeError(`Invalid uri ${show(redact(uri))}: use sip:user@domain`)
   const parts = isUri(uri) ? splitSipUri(uri) : undefined
   if (!parts?.user) throw invalidUri
@@ -108,6 +119,7 @@ export function resolveOptions(
     closeTimeout: 5000,
     connectTimeout: 10_000,
     trace,
+    acceptFrom,
     ...(credentials ? { credentials } : {}),
     ...(signal ? { signal } : {}),
     ...(maxCalls === undefined ? {} : { maxCalls }),

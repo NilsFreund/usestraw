@@ -48,6 +48,7 @@ function describe(output: CoreOutput): string | undefined {
   if (output.type === "send") return `phone → ${place(output.to)}  ${summary(output.data)}`
   const { event } = output
   if (event.type === "call") return `● call ${call(event)}`
+  if (event.type === "invalid") return `● ignored: ${event.error}`
   if (event.type !== "registration") return undefined
   if (event.state === "registered") return `● online for ${event.expires} s`
   if (event.state === "unregistered") return "● unregistered"

@@ -3,6 +3,7 @@ import type { SipRequest, SipResponse } from "../../message/types"
 import type { MediaAddress } from "../../sdp/types"
 import type { TimerSettings } from "../../transaction/timers"
 import type { TransportAddress } from "../../transport/address"
+import type { Trust } from "../authenticator"
 import type { Identity } from "../requests"
 import type { CallEvent, Credentials } from "../types"
 
@@ -16,6 +17,7 @@ export interface CallContext {
   readonly identity: Identity
   readonly contact: NameAddr
   readonly credentials: Credentials | undefined
+  readonly trust: Trust
   readonly timers: TimerSettings
 }
 

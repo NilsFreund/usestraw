@@ -3,6 +3,7 @@ import { connect, type LiveCall, type Phone } from "../../src/node"
 import { targetUri, userOf } from "../../src/node/calls"
 import { resolveOptions } from "../../src/node/options"
 import { connectPhone, startPhone } from "../../src/node/phone"
+import { sdp } from "../helpers"
 import { type Answer, type Carrier, startCarrier } from "./carrier"
 import { memoryNetwork } from "./memory"
 
@@ -414,6 +415,51 @@ describe("phone.close", () => {
     expect(call.status).toBe("live")
     await closing
     expect(await call.ended).toStrictEqual({ by: "them", reason: "hangup" })
+  })
+})
+
+describe("who may call", () => {
+  const stranger = { transport: "UDP", host: "203.0.113.9", port: 5060 } as const
+  const body = sdp({ host: "203.0.113.9" })
+  const invite = new TextEncoder().encode(
+    [
+      "INVITE sip:alice@192.0.2.10 SIP/2.0",
+      "Via: SIP/2.0/UDP 203.0.113.9:5060;branch=z9hG4bKstranger",
+      "Max-Forwards: 70",
+      "From: <sip:spam@203.0.113.9>;tag=s1",
+      "To: <sip:alice@example.com>",
+      "Call-ID: stranger-1",
+      "CSeq: 1 INVITE",
+      "Contact: <sip:spam@203.0.113.9>",
+      "Content-Type: application/sdp",
+      `Content-Length: ${body.length}`,
+      "",
+      body,
+    ].join("\r\n"),
+  )
+
+  async function ringsFor(acceptFrom: "server" | "anyone") {
+    const network = memoryNetwork()
+    const phone = await startPhone(network.link, {
+      ...resolveOptions({ uri: "sip:alice@example.com", password: "secret", acceptFrom }),
+      trace: false,
+    })
+    cleanups.push(() => phone.close())
+    const sent = network.sent
+    network.inject(invite, stranger)
+    await pause(10)
+    return { phone, answered: network.sent > sent }
+  }
+
+  it("ignores a stranger's call by default, without a word", async () => {
+    const { phone, answered } = await ringsFor("server")
+    expect(phone.calls).toStrictEqual([])
+    expect(answered).toBe(false)
+  })
+
+  it("rings for anyone when asked to", async () => {
+    const { phone } = await ringsFor("anyone")
+    expect(phone.calls).toMatchObject([{ from: "spam", status: "ringing" }])
   })
 })
 

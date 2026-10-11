@@ -94,6 +94,12 @@ export function checkRejection(status: number): void {
   }
 }
 
+export function checkAcceptFrom(hosts: readonly string[]): void {
+  if (!Array.isArray(hosts) || !hosts.every(isIp)) {
+    throw new TypeError(`acceptFrom must list IP addresses, got ${show(hosts)}`)
+  }
+}
+
 export function checkMaxCalls(maxCalls: number): void {
   if (!isIntegerIn(maxCalls, 0, 0xffff)) {
     throw new RangeError(`maxCalls must be an integer from 0 to 65535, got ${show(maxCalls)}`)

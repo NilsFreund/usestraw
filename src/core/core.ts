@@ -1,19 +1,23 @@
+import { formatHost } from "../message/fields/host"
 import { withReceived } from "../message/fields/via"
 import { MAX_MESSAGE_SIZE } from "../message/limits"
 import { parseMessage } from "../message/parse"
 import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
 import { isRequest, type SipRequest } from "../message/types"
+import { sameHost as sameAddress } from "../sdp/address"
 import { isPlayable } from "../sdp/negotiate"
 import { checkTime, earliest } from "../support/time"
 import { resolveTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
 import type { TransactionEvent, TransactionOutput } from "../transaction/types"
 import type { TransportAddress } from "../transport/address"
+import { createTrust } from "./authenticator"
 import { createCalls } from "./calls/calls"
 import { INCOMPATIBLE_MEDIA } from "./calls/replies"
 import type { CallOutput } from "./calls/types"
 import {
+  checkAcceptFrom,
   checkAddress,
   checkAor,
   checkCall,
@@ -41,9 +45,10 @@ const BUSY: Answer = answerWith(486, "Busy Here")
 const INCOMPATIBLE: Answer = answerWith(488, "Not Acceptable Here", [INCOMPATIBLE_MEDIA])
 const FULL: Answer = answerWith(503, "Service Unavailable", [{ name: "Retry-After", value: "5" }])
 
-// A far end can make us build a message too big for any parser; it is dropped like a lost packet
+// A far end can make us build a message too big for any parser, or aim a reply at port 0; such
+// messages are dropped like lost packets
 const fits = (output: CoreOutput) =>
-  output.type !== "send" || output.data.length <= MAX_MESSAGE_SIZE
+  output.type !== "send" || (output.data.length <= MAX_MESSAGE_SIZE && output.to.port > 0)
 
 /** Options for {@link createCore}. */
 export interface CoreOptions {
@@ -61,6 +66,11 @@ export interface CoreOptions {
   readonly timers?: Partial<Record<keyof TimerSettings, number | undefined>> | undefined
   /** Turns incoming calls away as busy (486) while this many calls run. Defaults to 100. */
   readonly maxCalls?: number | undefined
+  /**
+   * IP addresses that may start calls and other requests, such as the server's; anyone when
+   * unset. Requests inside a call only need to match the call.
+   */
+  readonly acceptFrom?: readonly string[] | undefined
 }
 
 /**
@@ -93,25 +103,27 @@ export interface Core {
  * }
  * run({ type: "command", command: { type: "register", to: server } })
  * ```
- * @throws {TypeError} for an invalid address, address of record or credentials
+ * @throws {TypeError} for an invalid address, address of record, credentials or `acceptFrom`
  * @throws {RangeError} for timers, `maxCalls` or lengths out of range
  */
 export function createCore(options: CoreOptions): Core {
-  const { address, aor, random, maxCalls = 100 } = options
+  const { address, aor, random, maxCalls = 100, acceptFrom } = options
   checkAddress(address)
   checkAor(aor)
   const credentials = options.credentials && Object.freeze({ ...options.credentials })
   if (credentials) checkCredentials(credentials)
   checkMaxCalls(maxCalls)
+  if (acceptFrom !== undefined) checkAcceptFrom(acceptFrom)
   // Ended calls linger for 64·T1, so a flood of short calls is capped before it costs memory
   const capacity = Math.max(64, 4 * maxCalls)
   const timers = resolveTimers(options.timers)
   const transactions = createTransactions({ local: address, timers })
   const identity = { address, aor, random }
   const responder = createResponder(random)
-  const registration = createRegistration(identity, credentials)
+  const trust = createTrust()
+  const registration = createRegistration(identity, trust, credentials)
   const contact = createContact(address, aor)
-  const calls = createCalls({ identity, contact, credentials, timers })
+  const calls = createCalls({ identity, contact, credentials, trust, timers })
 
   function handle(input: CoreInput, now: number): CoreOutput[] {
     checkTime(now)
@@ -135,12 +147,24 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
+  // Strangers only get through inside a call, whose unguessable ids they have to match
+  function accepts(request: SipRequest, from: TransportAddress): boolean {
+    if (acceptFrom === undefined || acceptFrom.some((host) => sameAddress(host, from.host))) {
+      return true
+    }
+    return request.to.params.has("tag") && isForCalls(request)
+  }
+
   function receive(data: Uint8Array, from: TransportAddress, now: number): CoreOutput[] {
     checkSource(from)
     const result = parseMessage(data)
     if (!result.ok) return [event({ type: "invalid", error: result.error, from })]
     const { message } = result
     if (!isRequest(message)) return translate(transactions.receive(message, from, now), now)
+    if (!accepts(message, from)) {
+      const error = `${message.method} from ${formatHost(from.host)}, not an accepted host`
+      return [event({ type: "invalid", error, from })]
+    }
     const via = message.via.map((entry, index) =>
       index === 0 ? withReceived(entry, from.host, from.port) : entry,
     )

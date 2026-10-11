@@ -13,8 +13,9 @@ export interface MemoryNetwork {
   readonly destinations: readonly TransportAddress[]
   readonly closed: boolean
   online: boolean
+  broken: boolean
   replace(options: RegistrarOptions): void
-  inject(data: Uint8Array): void
+  inject(data: Uint8Array, from?: TransportAddress): void
 }
 
 export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
@@ -23,9 +24,11 @@ export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
   let sent = 0
   const destinations: TransportAddress[] = []
   let closed = false
-  const inject = (data: Uint8Array) => handlers?.receive(data, remote)
+  const inject = (data: Uint8Array, from: TransportAddress = remote) =>
+    handlers?.receive(data, from)
   const network = {
     online: true,
+    broken: false,
     get registrar() {
       return server
     },
@@ -43,10 +46,12 @@ export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
     link: {
       local,
       remote,
+      peers: [remote.host],
       start: (next: LinkHandlers) => {
         handlers = next
       },
       send: (data: Uint8Array, to: TransportAddress) => {
+        if (network.broken) throw new Error("The link broke")
         sent++
         destinations.push(to)
         if (!network.online) return

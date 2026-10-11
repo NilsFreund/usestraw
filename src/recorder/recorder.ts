@@ -112,7 +112,7 @@ export function createRecordedCore(
 }
 
 function describe(options: CoreOptions): object {
-  const { address, aor, credentials, timers, maxCalls = 100 } = options
+  const { address, aor, credentials, timers, maxCalls = 100, acceptFrom } = options
   const login = credentials && {
     username: credentials.username,
     ...(credentials.realm === undefined ? {} : { realm: credentials.realm }),
@@ -123,6 +123,7 @@ function describe(options: CoreOptions): object {
     ...(login ? { credentials: login } : {}),
     timers: resolveTimers(timers),
     maxCalls,
+    ...(acceptFrom === undefined ? {} : { acceptFrom }),
   }
 }
 

@@ -5,6 +5,7 @@ import { isRequestUri } from "../message/fields/uri"
 import { show } from "../message/syntax"
 import { createRecordedCore } from "../recorder/recorder"
 import { isIntegerIn } from "../support/integer"
+import type { TransportAddress } from "../transport/address"
 import {
   type Agent,
   type Call,
@@ -176,6 +177,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     random: secureRandom,
     ...(credentials ? { credentials } : {}),
     ...(maxCalls === undefined ? {} : { maxCalls }),
+    ...(settings.acceptFrom === "server" ? { acceptFrom: link.peers } : {}),
   }
   const debug = debugOutput()
   const recorder = trace || debug ? createRecordedCore(coreOptions, { onStep: debug }) : undefined
@@ -201,11 +203,19 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
       if (output.type === "send") link.send(output.data, output.to)
       else notice(output.event)
     }
-    clock.schedule(core.nextDeadline(), () => run({ type: "timeout" }))
+    if (status !== "offline") clock.schedule(core.nextDeadline(), () => run({ type: "timeout" }))
   }
 
   function run(input: CoreInput): void {
     if (status !== "offline") deliver(core.handle(input, clock.now()))
+  }
+
+  function receive(data: Uint8Array, from: TransportAddress): void {
+    try {
+      run({ type: "receive", data, from })
+    } catch (thrown) {
+      stop(connectError({ reason: "network" }, context, thrown as Error))
+    }
   }
 
   function notice(event: CoreEvent): void {
@@ -216,7 +226,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     else if (event.state === "registered") update("online")
     else {
       const failure = connectError(event.failure, context)
-      if (event.retryIn === undefined) stop(failure)
+      if (event.retryIn === undefined) fatal(failure)
       else update("reconnecting", failure, Date.now() + event.retryIn)
     }
   }
@@ -317,6 +327,20 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     stop(leaving ? undefined : connectError({ reason: "network" }, context, cause))
   }
 
+  function fatal(failure: ConnectError): void {
+    const running = [...handles.values()]
+    if (running.length === 0) {
+      stop(failure)
+      return
+    }
+    draining = true
+    error = failure
+    listeners.notify()
+    for (const handle of running) handle.drop("timeout")
+    const ended = Promise.all(running.map((handle) => handle.call.ended))
+    void until(ended, AbortSignal.timeout(closeTimeout)).then(() => stop(failure))
+  }
+
   function stop(failure?: ConnectError): void {
     if (status === "offline") return
     status = "offline"
@@ -391,8 +415,12 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
   }
 
   signal?.addEventListener("abort", abort, { once: true })
+  const giveUp = setTimeout(
+    () => stop(connectError({ reason: "timeout" }, context)),
+    settings.connectTimeout,
+  )
   try {
-    link.start({ receive: (data, from) => run({ type: "receive", data, from }), close: lost })
+    link.start({ receive, close: lost })
     const registration = {
       to: link.remote,
       registrar,
@@ -403,6 +431,8 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
   } catch (thrown) {
     stop()
     throw thrown
+  } finally {
+    clearTimeout(giveUp)
   }
   started = true
   return {

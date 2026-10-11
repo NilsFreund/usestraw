@@ -46,6 +46,7 @@ describe("openUdp", () => {
     link.start(handlers)
     link.send(new Uint8Array(70_000), to)
     link.send(new Uint8Array(1), { ...to, host: "registrar.example" })
+    link.send(new Uint8Array(2), { ...to, port: 0 })
     link.send(new Uint8Array(3), to)
     await vi.waitFor(() => expect(received).toStrictEqual([3]))
     expect(log).toStrictEqual([])
@@ -53,6 +54,17 @@ describe("openUdp", () => {
     link.close()
     sink.close()
     vi.restoreAllMocks()
+  })
+
+  it("knows every address of the server, once each", async () => {
+    const link = await openUdp({
+      address: "127.0.0.1",
+      family: 4,
+      port: 5060,
+      others: ["127.0.0.1", "127.0.0.2"],
+    })
+    expect(link.peers).toStrictEqual(["127.0.0.1", "127.0.0.2"])
+    link.close()
   })
 
   it("reports the outbound address and where each datagram came from", async () => {
@@ -96,6 +108,7 @@ describe("openLink", () => {
   it("resolves the host preferring IPv4 and opens UDP", async () => {
     const link = await openLink({ transport: "UDP", host: "localhost", port: 5060 })
     expect(link.remote).toStrictEqual({ transport: "UDP", host: "127.0.0.1", port: 5060 })
+    expect(link.peers).toStrictEqual(["127.0.0.1"])
     link.close()
   })
 
@@ -118,6 +131,7 @@ describe("openLink", () => {
       port: server.sockets[0]?.remotePort,
     })
     expect(link.remote).toStrictEqual({ transport: "TLS", host: address, port: server.port })
+    expect(link.peers).toStrictEqual([address])
     link.close()
     await server.close()
   })

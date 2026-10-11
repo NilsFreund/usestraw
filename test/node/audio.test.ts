@@ -12,7 +12,7 @@ const host = "127.0.0.1"
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function open(): Promise<CallAudio> {
-  const audio = await openAudio(host)
+  const audio = await openAudio(host, () => undefined)
   opened.push(audio)
   return audio
 }
@@ -104,6 +104,17 @@ describe("openAudio", () => {
     await writer.close()
     expect(performance.now() - started).toBeGreaterThan(150)
     expect(left.played).toBe(200)
+  })
+
+  it("rejects a writer's close when the call ends before the last sample went out", async () => {
+    const [left, right] = await Promise.all([open(), open()])
+    left.update(towards(right))
+    const writer = left.writable.getWriter()
+    await writer.write(tone(8000))
+    const closing = writer.close()
+    await pause(50)
+    left.close()
+    await expect(closing).rejects.toThrow("The call ended")
   })
 
   it("closes a writer at once when nothing waits to be played", async () => {
@@ -241,13 +252,21 @@ describe("openAudio", () => {
     const blocker = createSocket("udp4")
     blocker.bind(16_384, host)
     await once(blocker, "listening")
-    await expect(openAudio(host, () => 0)).rejects.toThrow("No free even port for RTP on 127.0.0.1")
+    await expect(
+      openAudio(
+        host,
+        () => undefined,
+        () => 0,
+      ),
+    ).rejects.toThrow("No free even port for RTP on 127.0.0.1")
     blocker.close()
-    await expect(openAudio("192.0.2.1")).rejects.toMatchObject({ code: "EADDRNOTAVAIL" })
+    await expect(openAudio("192.0.2.1", () => undefined)).rejects.toMatchObject({
+      code: "EADDRNOTAVAIL",
+    })
   })
 
   it("binds IPv6 hosts too", async () => {
-    const audio = await openAudio("::1")
+    const audio = await openAudio("::1", () => undefined)
     expect(audio.local).toMatchObject({ host: "::1" })
     audio.close()
   })

@@ -74,8 +74,12 @@ if (!call.ok) {
   console.log(call.reason) // "busy", "no-answer", "declined", …
 } else {
   const writer = call.audio.writable.getWriter()
-  await writer.write(greeting) // 8 kHz Int16Array, any length
-  await writer.close() // resolves once the last sample is out
+  try {
+    await writer.write(greeting) // 8 kHz Int16Array, any length
+    await writer.close() // resolves once the last sample is out
+  } catch {
+    // they hung up first
+  }
   await call.end()
 }
 ```
@@ -102,7 +106,7 @@ for await (const frame of call.audio.readable) {
   if (loud === 4) call.audio.clear() // they talk, we stop
   if (speaking || turn.length > 0) turn.push(frame)
   if (quiet === 35) {
-    void writer.write(reply(turn)) // 700 ms of silence ends their turn
+    writer.write(reply(turn)).catch(() => {}) // 700 ms of silence ends their turn
     turn = []
   }
 }
@@ -136,7 +140,7 @@ process.once("SIGTERM", () => {
 })
 ```
 
-With `drain`, new callers get busy and running calls finish before the phone unregisters. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run. On Node 24 or in TypeScript, `await using` closes a phone or hangs up a call at the end of the scope.
+With `drain`, new callers get busy and running calls finish before the phone unregisters. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run, and a call that sends no audio for a minute is hung up with `reason: "timeout"` (not while on hold). On Node 24 or in TypeScript, `await using` closes a phone or hangs up a call at the end of the scope.
 
 ## Errors
 
@@ -227,7 +231,10 @@ Standards: RFC 3261 and 6026 (SIP), 7616 and 8760 (digest auth), 3264 and 8866 (
 ## Security
 
 - `tls://` verifies certificates. Use `tls.ca` for a private CA.
-- Straw only takes audio from the signalled address, or from one source it learned in the first 2 s (RTP Bleed protection).
+- Over UDP only your SIP server may start calls; strangers who find the port get no answer at all. `acceptFrom: "anyone"` allows direct IP calls.
+- Straw answers authentication only for the realms your server used when registering, never with a weaker hash, and never inside a call, where the far end could be asking. Digest still lets a callee behind a provider that merely forwards challenges ask for a hash, so use a long random SIP password.
+- An incoming call starts sending audio only once the caller confirmed it, so a forged call cannot aim your audio at someone else.
+- Audio comes from the signalled address. When that is a private address behind NAT, Straw learns the real one from the first packets in the first 2 s, like most SIP stacks (RTP Bleed protection).
 - The parser has hard size limits and is fuzzed.
 - Passwords never show up in errors, logs or traces.
 

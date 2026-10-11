@@ -86,7 +86,8 @@ export type RegistrationEvent =
  * - `"rejected"`: any other 4xx.
  * - `"unauthorized"`: the server refused our credentials for this call.
  * - `"incompatible"`: no codec in common (488, 606).
- * - `"timeout"`: the other side stopped responding, or the phone went offline.
+ * - `"timeout"`: the other side stopped responding or sent no audio for a minute, or the phone went
+ *   offline.
  */
 export type CallReason =
   | "hangup"

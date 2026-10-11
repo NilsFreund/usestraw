@@ -22,7 +22,7 @@ export interface SessionSetup {
   readonly pending?: { readonly repeat: Repeat; readonly offered: boolean }
 }
 
-export interface SessionContext extends Omit<CallContext, "credentials"> {
+export interface SessionContext extends Omit<CallContext, "credentials" | "trust"> {
   readonly authenticator: Authenticator
 }
 
@@ -88,10 +88,8 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
   // Only the branch tells the answer to our BYE apart from one to a BYE for another fork
   function response(reply: SipResponse): CallOutput[] {
     if (branchOf(reply) !== bye || reply.status < 200 || state !== "ending") return []
-    const challenged = reply.status === 401 || reply.status === 407
-    // RFC 3261 §22.2: a challenged BYE is sent again with credentials, or the far end keeps the call up
-    if (!challenged || authenticator.challenge(reply)) return finish(closing)
-    return hangUp()
+    // A challenge inside a call may come from the far end, which must never get our password hash
+    return finish(closing)
   }
 
   function timeout(request: SipRequest): CallOutput[] {
@@ -148,9 +146,8 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
     const { offered, initial } = pending
     pending = undefined
     if (state === "ending") return hangUp()
-    if (!offered) return []
-    const before = media.current
-    if (media.read(ack.body) || !initial) return changed(before)
+    const before = initial ? undefined : media.current
+    if (!offered || media.read(ack.body) || !initial) return changed(before)
     state = "ending"
     closing = INCOMPATIBLE
     return hangUp()

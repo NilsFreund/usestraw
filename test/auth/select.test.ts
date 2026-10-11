@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { selectOffer } from "../../src/auth/select"
 
-const nonce = (values: string[], realm?: string) => selectOffer(values, realm)?.challenge.nonce
+const nonce = (values: string[], realm?: string) =>
+  selectOffer(values, realm === undefined ? undefined : new Map([[realm, 0]]))?.challenge.nonce
 
 describe("selectOffer (RFC 8760 §2.4)", () => {
   it("takes the strongest offer of a realm wherever it is listed", () => {

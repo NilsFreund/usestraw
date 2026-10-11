@@ -82,13 +82,14 @@ describe("replay", () => {
     expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 5 })
   })
 
-  it("replays a phone that turns calls away with its own maxCalls", () => {
+  it("replays a phone that turns calls away with its own maxCalls and acceptFrom", () => {
     const core = createRecordedCore({
       address: alice,
       aor: "sip:alice@example.com",
       random: createRandom(5),
       maxCalls: 0,
       timers: { t1: 100 },
+      acceptFrom: ["192.0.2.20"],
     })
     const body = sdp()
     const invite = [
@@ -109,7 +110,9 @@ describe("replay", () => {
     expect(outputs).toContainEqual(
       expect.objectContaining({ event: expect.objectContaining({ status: 486 }) }),
     )
-    expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 1 })
+    const probe = bytes(invite.replace("branch=z9hG4bK1", "branch=z9hG4bK2"))
+    core.handle({ type: "receive", data: probe, from: { ...bob, host: "203.0.113.9" } }, 1)
+    expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 2 })
   })
 
   it("points at the first step that does not match", () => {

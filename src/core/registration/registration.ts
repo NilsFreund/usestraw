@@ -2,7 +2,7 @@ import { parseDeltaSeconds } from "../../message/fields/delta-seconds"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
 import { clientKey } from "../../transaction/keys"
-import { createAuthenticator } from "../authenticator"
+import { createAuthenticator, type Trust } from "../authenticator"
 import type { Identity } from "../requests"
 import type { Credentials, RegistrationEvent, RegistrationFailure } from "../types"
 import { grantedExpiry, refreshDelay } from "./binding"
@@ -14,7 +14,11 @@ interface Attempt extends RegisterIntent {
   readonly raised?: boolean
 }
 
-export function createRegistration(identity: Identity, credentials?: Credentials): Registration {
+export function createRegistration(
+  identity: Identity,
+  trust: Trust,
+  credentials?: Credentials,
+): Registration {
   const { random } = identity
   const authenticator = createAuthenticator(credentials, random)
   const registrant = createRegistrant(identity)
@@ -92,6 +96,8 @@ export function createRegistration(identity: Identity, credentials?: Credentials
     }
     const granted = grantedExpiry(response, registrant.contact, attempt.expires)
     if (granted === 0) return fail(attempt, { reason: "not-bound" }, now)
+    const answered = authenticator.answered()
+    if (answered.length > 0) trust.learn(answered)
     bound = { to: attempt.to, registrar: attempt.registrar, expires: attempt.expires }
     scheduled = { at: now + refreshDelay(granted, random), attempt: bound }
     return [notify({ type: "registration", state: "registered", expires: granted })]

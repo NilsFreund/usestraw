@@ -33,8 +33,8 @@ const INCOMPATIBLE: CallEnd = { by: "local", reason: "incompatible" }
 
 export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call {
   const { call, uri, to } = setup
-  const { identity, contact, credentials, timers } = context
-  const authenticator = createAuthenticator(credentials, identity.random)
+  const { identity, contact, credentials, trust, timers } = context
+  const authenticator = createAuthenticator(credentials, identity.random, trust)
   const from = { uri: identity.aor, params: new Map([["tag", createTag(identity.random)]]) }
   const media = createMedia(setup.media, identity.random)
   const sdp = media.offer()

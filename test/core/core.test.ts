@@ -512,6 +512,55 @@ describe("createCore", () => {
       })
     })
 
+    it("only lets the accepted hosts start requests, but lets calls finish with anyone", () => {
+      const guarded = createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        acceptFrom: ["192.0.2.20"],
+      })
+      const stranger = { ...bob, host: "203.0.113.9" }
+      expect(guarded.handle(receive(incoming("OPTIONS"), stranger), 0)).toStrictEqual([
+        {
+          type: "event",
+          event: {
+            type: "invalid",
+            error: "OPTIONS from 203.0.113.9, not an accepted host",
+            from: stranger,
+          },
+        },
+      ])
+      expect(statuses(guarded.handle(receive(incoming("OPTIONS")), 0))).toStrictEqual([200])
+      const forged = incoming("BYE", undefined, "To: <sip:alice@example.com>;tag=gone")
+      expect(statuses(guarded.handle(receive(forged, stranger), 0))).toStrictEqual([])
+      expect(statuses(guarded.handle(receive(forged), 0))).toStrictEqual([481])
+    })
+
+    it("compares IPv6 sources by value", () => {
+      const guarded = createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        acceptFrom: ["2001:db8::20"],
+      })
+      const source = { ...bob, host: "2001:DB8:0:0:0:0:0:20" }
+      expect(statuses(guarded.handle(receive(incoming("OPTIONS"), source), 0))).toStrictEqual([200])
+    })
+
+    it.each([[["example.com"]], ["192.0.2.20" as unknown as string[]]])(
+      "refuses acceptFrom %j",
+      (acceptFrom) => {
+        expect(() =>
+          createCore({
+            address: alice,
+            aor: "sip:alice@example.com",
+            random: Math.random,
+            acceptFrom,
+          }),
+        ).toThrow(/^acceptFrom must list IP addresses, got /)
+      },
+    )
+
     it("sends a reply of up to 65535 bytes and only reports a bigger one", () => {
       const named = (length: number) =>
         bytes(
@@ -523,6 +572,13 @@ describe("createCore", () => {
       const length = 65_535 - (replies(0)[0]?.data.length ?? 0)
       expect(replies(length)[0]?.data).toHaveLength(65_535)
       const outputs = core().handle(receive(named(length + 1)), 0)
+      expect(events(outputs)).toMatchObject([{ type: "answered", status: 200 }])
+      expect(sent(outputs)).toHaveLength(0)
+    })
+
+    it("answers but sends nothing to a Via that names port 0", () => {
+      const data = incoming("OPTIONS", "Via: SIP/2.0/UDP 203.0.113.9:0;branch=z9hG4bKzero")
+      const outputs = core().handle(receive(data), 0)
       expect(events(outputs)).toMatchObject([{ type: "answered", status: 200 }])
       expect(sent(outputs)).toHaveLength(0)
     })

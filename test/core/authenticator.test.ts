@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { createResponse } from "../../src"
 import { parseAuthParams } from "../../src/auth/params"
-import { createAuthenticator } from "../../src/core/authenticator"
+import { createAuthenticator, createTrust } from "../../src/core/authenticator"
 import { createRandom } from "../../src/simulation/random"
 import { parsedRequest, register } from "../helpers"
 
@@ -80,6 +80,58 @@ describe("createAuthenticator (RFC 3261 §22)", () => {
       reason: "unsupported-challenge",
       offered: [{ scheme: "Digest", realm: "example.com", algorithm: "MD5" }],
     })
+  })
+
+  it("answers only the realms a registration answered, never weaker than the server offered", () => {
+    const registering = createAuthenticator(alice, createRandom(1))
+    const trust = createTrust()
+    registering.challenge(challenged(401, challenge("r1", ", algorithm=SHA-256")))
+    expect(registering.answered()).toStrictEqual([])
+    registering.authorize(request)
+    trust.learn(registering.answered())
+    expect([...trust.floors]).toStrictEqual([["example.com", 5]])
+    const calling = () => createAuthenticator(alice, createRandom(2), trust)
+    expect(calling().challenge(challenged(401, challenge("c1")))).toMatchObject({
+      reason: "unsupported-challenge",
+    })
+    expect(
+      calling().challenge(
+        challenged(401, 'Digest realm="evil.example", nonce="e1", algorithm=SHA-256'),
+      ),
+    ).toMatchObject({ reason: "unsupported-challenge" })
+    const answering = calling()
+    expect(
+      answering.challenge(challenged(401, challenge("c2"), challenge("c3", ", algorithm=SHA-256"))),
+    ).toBeUndefined()
+    expect(params(answering.authorize(request)).get("nonce")).toBe("c3")
+    const mixed = createTrust()
+    mixed.learn([
+      { realm: "registrar", weakest: 2 },
+      { realm: "proxy", weakest: 5 },
+    ])
+    const proxied = createAuthenticator(alice, createRandom(3), mixed)
+    expect(
+      proxied.challenge(challenged(407, 'Digest realm="proxy", nonce="p1", algorithm=SHA-256')),
+    ).toBeUndefined()
+    expect(
+      createAuthenticator(alice, createRandom(4), mixed).challenge(
+        challenged(401, 'Digest realm="registrar", nonce="m1"'),
+      ),
+    ).toBeUndefined()
+    expect(
+      createAuthenticator(alice, createRandom(5), mixed).challenge(
+        challenged(407, 'Digest realm="proxy", nonce="p2"'),
+      ),
+    ).toMatchObject({ reason: "unsupported-challenge" })
+  })
+
+  it("learns the weakest hash the server offered, not the one it took", () => {
+    const registering = createAuthenticator(alice, createRandom(1))
+    registering.challenge(
+      challenged(401, challenge("strong", ", algorithm=SHA-256"), challenge("weak")),
+    )
+    registering.authorize(request)
+    expect(registering.answered()).toStrictEqual([{ realm: "example.com", weakest: 3 }])
   })
 
   it("stops when sent credentials are challenged again (RFC 3261 §22.1)", () => {

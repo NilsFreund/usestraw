@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { type CoreOutput, createRecordedCore, ladder, type RecordedStep } from "../../src"
+import {
+  type CoreOutput,
+  createRecordedCore,
+  ladder,
+  type RecordedStep,
+  type SipRequest,
+} from "../../src"
 import { formatStep } from "../../src/recorder/ladder"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes } from "../helpers"
@@ -42,7 +48,7 @@ describe("formatStep", () => {
     ])
   })
 
-  it("shows how the registration went", () => {
+  it("shows how the registration went and what it ignored", () => {
     const lines = formatStep(
       step({
         outputs: [
@@ -51,6 +57,7 @@ describe("formatStep", () => {
           registration({ state: "failed", failure: { reason: "unauthorized", status: 401 } }),
           registration({ state: "unregistered" }),
           { type: "event", event: { type: "invalid", error: "x", from: bob } },
+          { type: "event", event: { type: "timeout", request: {} as SipRequest } },
         ],
       }),
     )
@@ -59,6 +66,7 @@ describe("formatStep", () => {
       "    1.234  ● failed: timeout, retry in 42 s",
       "    1.234  ● failed: unauthorized",
       "    1.234  ● unregistered",
+      "    1.234  ● ignored: x",
     ])
   })
 

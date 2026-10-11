@@ -6,6 +6,7 @@ import {
   type SipHeader,
   type SipRequest,
 } from "../../../src"
+import { createTrust } from "../../../src/core/authenticator"
 import { createRegistration } from "../../../src/core/registration/registration"
 import type { RegistrationOutput } from "../../../src/core/registration/types"
 import { createRandom } from "../../../src/simulation/random"
@@ -14,9 +15,9 @@ import { alice, bob } from "../../helpers"
 const account: Credentials = { username: "alice", password: "secret" }
 const intent = { to: bob, registrar: "sip:example.com", expires: 3600 }
 
-function setup(credentials?: Credentials, seed = 1) {
+function setup(credentials?: Credentials, seed = 1, trust = createTrust()) {
   const identity = { address: alice, aor: "sip:alice@example.com", random: createRandom(seed) }
-  return createRegistration(identity, credentials)
+  return createRegistration(identity, trust, credentials)
 }
 
 function sent(outputs: RegistrationOutput[]): SipRequest {
@@ -97,6 +98,21 @@ describe("createRegistration", () => {
     expect(
       getHeader(sent(registration.expire(Number.MAX_SAFE_INTEGER)), "Authorization"),
     ).toBeUndefined()
+  })
+
+  it("trusts the realm and algorithm it registered with, and nothing when no one asked", () => {
+    const trust = createTrust()
+    const registration = setup(account, 1, trust)
+    const retry = sent(
+      registration.receive(reply(sent(registration.register(intent)), 401, [challenge()]), 0),
+    )
+    expect(trust.floors.size).toBe(0)
+    registration.receive(reply(retry, 200), 0)
+    expect([...trust.floors]).toStrictEqual([["example.com", 3]])
+    const open = createTrust()
+    const plain = setup(account, 1, open)
+    plain.receive(reply(sent(plain.register(intent)), 200), 0)
+    expect(open.floors.size).toBe(0)
   })
 
   it("does not carry spent credentials into a retry after a server error", () => {

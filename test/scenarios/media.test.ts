@@ -51,6 +51,7 @@ function talk(seed: number, loss: number, seconds: number) {
           if (engine === b) heard.push(output.pcm)
           continue
         }
+        if (output.type !== "send") continue
         if (engine === a) sent++
         if (chance(random, loss)) continue
         flights.push({ at: now + between(random, 20, 60), data: output.data, from, to })

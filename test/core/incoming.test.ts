@@ -245,7 +245,7 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(responses(steps[0]?.[1] ?? [])).toStrictEqual(responses(outputs))
   })
 
-  it("answers with 200, our SDP, our tag, Contact and the Record-Route", () => {
+  it("answers with 200, our SDP, our tag, Contact and the Record-Route, live only on the ACK", () => {
     const { answer: outputs, ourTag } = answered()
     const [ok] = responses(outputs)
     expect(ok).toMatchObject({ status: 200, reason: "OK" })
@@ -259,9 +259,7 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(ok && getHeaders(ok, "Record-Route")).toStrictEqual([
       "<sip:p2.example.com;lr>, <sip:p1.example.com;lr>",
     ])
-    expect(calls(outputs)).toStrictEqual([
-      { type: "call", call: "in1", state: "live", media: negotiated },
-    ])
+    expect(calls(outputs)).toStrictEqual([])
   })
 
   it("answers only once and ignores answers for unknown calls", () => {
@@ -307,7 +305,9 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
 
   it("stops resending the 200 once the ACK arrives", () => {
     const { ua, ack } = acked()
-    expect(ack).toStrictEqual([])
+    expect(calls(ack)).toStrictEqual([
+      { type: "call", call: "in1", state: "live", media: negotiated },
+    ])
     expect(ua.nextDeadline()).toBe(33_000)
     expect(run(ua, 1100, 40_000)).toStrictEqual([])
     expect(ua.nextDeadline()).toBeUndefined()
@@ -337,11 +337,11 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     ])
   })
 
-  it("does not report the offer again when the ACK repeats it", () => {
+  it("goes live with its own answer when the ACK repeats the offer", () => {
     const { ua, ourTag } = answered()
-    expect(ua.handle(receive(request("ACK", { toTag: ourTag, body: remote })), 1100)).toStrictEqual(
-      [],
-    )
+    expect(
+      calls(ua.handle(receive(request("ACK", { toTag: ourTag, body: remote })), 1100)),
+    ).toStrictEqual([{ type: "call", call: "in1", state: "live", media: negotiated }])
   })
 
   it("hangs up with a BYE to the caller's Contact along the recorded route", () => {
@@ -387,14 +387,34 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(requests(ua.handle(end(603), 2000)).map((r) => r.method)).toStrictEqual(["BYE"])
   })
 
-  it("answers a challenge to its BYE with credentials", () => {
+  it("lets a caller outside acceptFrom finish a call the server put through", () => {
+    const ua = createCore({
+      address: alice,
+      aor: "sip:alice@example.com",
+      random: createRandom(1),
+      acceptFrom: ["192.0.2.20"],
+    })
+    const { ourTag } = ringing(invite(), ua)
+    ua.handle(accept(), 1000)
+    const direct = { ...bob, host: "198.51.100.7" }
+    const ack = request("ACK", { toTag: ourTag })
+    expect(
+      calls(ua.handle({ type: "receive", data: bytes(ack), from: direct }, 1100)),
+    ).toMatchObject([{ state: "live" }])
+    const bye = request("BYE", { toTag: ourTag, seq: 2 })
+    const outputs = ua.handle({ type: "receive", data: bytes(bye), from: direct }, 2000)
+    expect(statuses(outputs)).toStrictEqual(["200 BYE"])
+    expect(calls(outputs)).toMatchObject([{ state: "ended", ended: { reason: "hangup" } }])
+  })
+
+  it("never answers a challenge to its BYE, which may come from the caller", () => {
     const { ua } = acked()
     const [bye] = requests(ua.handle(end(), 2000))
     if (!bye) throw new Error("No BYE")
     const challenge = { name: "WWW-Authenticate", value: 'Digest realm="example.com", nonce="n1"' }
-    const [again] = requests(ua.handle(reply(bye, 401, [challenge]), 2100))
-    expect(again?.cseq).toStrictEqual({ seq: 2, method: "BYE" })
-    expect(again && getHeader(again, "Authorization")).toMatch(/^Digest username="alice"/)
+    const outputs = ua.handle(reply(bye, 401, [challenge]), 2100)
+    expect(requests(outputs)).toStrictEqual([])
+    expect(calls(outputs)).toMatchObject([{ state: "ended", ended: { reason: "hangup" } }])
   })
 
   it("waits for the ACK before it sends the BYE (§15)", () => {
@@ -835,7 +855,9 @@ describe("in-dialog requests on a live call", () => {
   it("ignores an SDP in the ACK when its 200 carried no offer", () => {
     const { ua, ourTag } = answered()
     const ack = request("ACK", { toTag: ourTag, body: hold })
-    expect(ua.handle(receive(ack), 1100)).toStrictEqual([])
+    expect(calls(ua.handle(receive(ack), 1100))).toStrictEqual([
+      { type: "call", call: "in1", state: "live", media: negotiated },
+    ])
   })
 
   it("resends the 200 for a re-INVITE until its ACK and asks overlapping ones to retry", () => {

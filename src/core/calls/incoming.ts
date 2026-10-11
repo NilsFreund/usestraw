@@ -29,7 +29,7 @@ const RING_LIMIT = 180_000
 
 export function createIncoming(setup: IncomingSetup, context: CallContext, now: number): Call {
   const { invite, transaction, from: to } = setup
-  const { identity, contact, credentials, timers } = context
+  const { identity, contact, credentials, trust, timers } = context
   const call = invite.callId
   const tag = createTag(identity.random)
   const dialog = createServerDialog(invite, tag)
@@ -70,13 +70,12 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
       return reject(488, { by: "local", reason: "incompatible", status: 488 }, [INCOMPATIBLE_MEDIA])
     const ok = createReply(invite, 200, { tag, contact, sdp, recordRoute: true })
     const pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered }
-    const authenticator = createAuthenticator(credentials, identity.random)
+    const authenticator = createAuthenticator(credentials, identity.random, trust)
     session = createSession(
       { call, dialog, to, seq: 0, remoteSeq: invite.cseq.seq, media, pending },
       { identity, contact, authenticator, timers },
     )
-    const negotiated = media.current ? { media: media.current } : {}
-    return [respond(transaction, ok), emit({ type: "call", call, state: "live", ...negotiated })]
+    return [respond(transaction, ok)]
   }
 
   function end(_now: number, status = 486): CallOutput[] {

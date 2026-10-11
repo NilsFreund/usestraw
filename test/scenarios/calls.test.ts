@@ -351,29 +351,12 @@ describe("outgoing calls", () => {
     expect(replay(recorded?.recording() ?? "")).toMatchObject({ ok: true })
   })
 
-  it("sends a challenged BYE again with credentials", () => {
+  it("ends the call instead of answering a challenged BYE", () => {
     const { simulation, ua, callee: far, dial, end } = setup({ challengeBye: 407 })
     dial()
     end(1000)
     simulation.run(5000)
-    const byes = far.received.filter((request) => request.method === "BYE")
-    expect(byes.map((bye) => bye.cseq.seq)).toStrictEqual([2, 3])
-    expect(byes[1] && getHeader(byes[1], "Proxy-Authorization")).toMatch(/^Digest username="alice"/)
-    expect(ended(ua.events)).toStrictEqual({ by: "local", reason: "hangup" })
-  })
-
-  it("stops resending a BYE whose credentials are refused", () => {
-    const {
-      simulation,
-      ua,
-      callee: far,
-      dial,
-      end,
-    } = setup({ challengeBye: 407 }, undefined, 1, "wrong")
-    dial()
-    end(1000)
-    simulation.run(5000)
-    expect(far.received.filter((request) => request.method === "BYE")).toHaveLength(2)
+    expect(far.received.filter((request) => request.method === "BYE")).toHaveLength(1)
     expect(ended(ua.events)).toStrictEqual({ by: "local", reason: "hangup" })
   })
 

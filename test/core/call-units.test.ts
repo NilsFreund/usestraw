@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { createTrust } from "../../src/core/authenticator"
 import { createCalls } from "../../src/core/calls/calls"
 import { createIncoming } from "../../src/core/calls/incoming"
 import { createOutgoing } from "../../src/core/calls/outgoing"
@@ -13,6 +14,7 @@ const context: CallContext = {
   identity: { address: alice, aor: "sip:alice@example.com", random: createRandom(1) },
   contact: { uri: "sip:alice@192.0.2.10", params: new Map() },
   credentials: undefined,
+  trust: createTrust(),
   timers: defaultTimers,
 }
 

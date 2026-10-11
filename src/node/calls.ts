@@ -29,8 +29,8 @@ export interface CallAudioStreams {
   readonly readable: ReadableStream<Int16Array<ArrayBuffer>>
   /**
    * What the other side hears, in chunks of any size. Writes resolve at once until 30 s are queued.
-   * `close()` resolves when the last sample is out, without hanging up. After the call ends, writes
-   * reject with an `AbortError`.
+   * `close()` resolves when the last sample is out, without hanging up. Once the call ends, writes
+   * and a pending `close()` reject with an `AbortError`.
    */
   readonly writable: WritableStream<Int16Array>
   /** Always 8000. */
@@ -44,7 +44,7 @@ export interface CallAudioStreams {
 /**
  * Turns what the caller says into what they hear, usually a `TransformStream`. It gets 20 ms frames
  * of 8 kHz PCM and may write chunks of any size. When it closes its output or fails, the call hangs
- * up. Use a new agent for every call.
+ * up; when the call is never answered, its writable is aborted. Use a new agent for every call.
  *
  * @example
  * ```ts
@@ -165,6 +165,7 @@ export interface CallHandle {
   open(): Promise<CallAudio>
   place(command: CoreCommand): void
   giveUp(reason: CallReason): void
+  drop(reason: CallReason): void
 }
 
 const STATUSES: Readonly<Record<NonNullable<EndOptions["reason"]>, number>> = {
@@ -190,6 +191,7 @@ export function createCall(setup: CallSetup): CallHandle {
   let ok = false
   let reason: CallReason | undefined
   let override: CallReason | undefined
+  let ending = false
   let audio: CallAudio | undefined
   let opening: Promise<CallAudio> | undefined
   let accepting: Promise<LiveCall | UnansweredCall> | undefined
@@ -202,7 +204,7 @@ export function createCall(setup: CallSetup): CallHandle {
   }
 
   function open(): Promise<CallAudio> {
-    opening ??= openAudio(host).then((opened) => {
+    opening ??= openAudio(host, () => drop("timeout")).then((opened) => {
       audio = opened
       if (status === "ended") opened.close()
       return opened
@@ -230,6 +232,12 @@ export function createCall(setup: CallSetup): CallHandle {
     answer.resolve(call as LiveCall)
   }
 
+  function release(talker: Agent): void {
+    const unanswered = new DOMException("The call ended before it was answered", "AbortError")
+    talker.writable.abort(unanswered).catch(() => undefined)
+    talker.readable.cancel(unanswered).catch(() => undefined)
+  }
+
   function attach(sound: CallAudio, talker: Agent): void {
     const hangUp = () => end()
     try {
@@ -243,6 +251,7 @@ export function createCall(setup: CallSetup): CallHandle {
     if (status === "ended") return
     reason = override ?? ended.reason
     audio?.close()
+    if (agent && !ok) release(agent)
     set("ended")
     const by = override !== undefined || ended.by === "local" ? "us" : "them"
     settled.resolve({ by, reason })
@@ -263,7 +272,10 @@ export function createCall(setup: CallSetup): CallHandle {
 
   // Never rejects, so `call.accept(agent)` without await cannot bring the process down
   async function answering(next?: Agent): Promise<LiveCall | UnansweredCall> {
-    if (status !== "ringing") return answer.promise
+    if (status !== "ringing") {
+      if (next) release(next)
+      return answer.promise
+    }
     agent = next
     const opened = await open().catch(() => undefined)
     if (status !== "ringing") return answer.promise
@@ -278,15 +290,20 @@ export function createCall(setup: CallSetup): CallHandle {
       finish({ by: "local", reason: "cancelled" })
       return settled.promise
     }
+    ending = true
     const rejection = options.reason === undefined ? {} : { status: STATUSES[options.reason] }
     run({ type: "end", call: id, ...rejection })
     return settled.promise
   }
 
-  function giveUp(why: CallReason): void {
-    if (status !== "calling") return
+  function drop(why: CallReason): void {
+    if (ending) return
     override = why
     void end()
+  }
+
+  function giveUp(why: CallReason): void {
+    if (status === "calling") drop(why)
   }
 
   function snapshot(): CallSnapshot {
@@ -331,7 +348,7 @@ export function createCall(setup: CallSetup): CallHandle {
     },
   } as unknown as Call
 
-  return { call, answered: answer.promise, receive, open, place, giveUp }
+  return { call, answered: answer.promise, receive, open, place, giveUp, drop }
 }
 
 // RFC 3966 style dialling: people write numbers with spaces, dashes and brackets
