@@ -14,6 +14,7 @@ import {
 import { computeAuthorization } from "../src/auth/digest"
 import { resolveOffer } from "../src/auth/offer"
 import { parseAuthParams } from "../src/auth/params"
+import { withReceived } from "../src/message/fields/via"
 import { topVia } from "../src/transaction/keys"
 import { replyAddress } from "../src/transport/routing"
 
@@ -92,8 +93,9 @@ export function registrar(options: RegistrarOptions = {}): (random: Random) => R
       const contacts = request.contact === "*" ? [] : request.contact
       for (const contact of contacts) {
         const uri = rewrite ?? contact.uri
-        if (granted === 0) bindings.delete(uri)
-        else bindings.set(uri, now + granted * 1000)
+        const expires = Number(contact.params.get("expires") ?? granted)
+        if (expires === 0) bindings.delete(uri)
+        else bindings.set(uri, now + Math.min(expires, granted) * 1000)
       }
       return [...bindings].map(([uri, until]) => ({
         uri,
@@ -151,7 +153,13 @@ export function registrar(options: RegistrarOptions = {}): (random: Random) => R
         if (input.type !== "receive") return []
         const result = parseMessage(input.data)
         if (!result.ok || !isRequest(result.message)) return []
-        const request = result.message
+        const { from } = input
+        const request = {
+          ...result.message,
+          via: result.message.via.map((via, index) =>
+            index === 0 ? withReceived(via, from.host, from.port) : via,
+          ),
+        }
         const to = replyAddress(topVia(request), input.from)
         if (request.method === "OPTIONS") {
           return [{ type: "send", data: serializeMessage(createResponse(request, 200, "OK")), to }]

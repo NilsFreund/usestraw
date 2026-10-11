@@ -43,6 +43,91 @@ const challenge = (nonce = "n1", name = "WWW-Authenticate") => ({
   value: `Digest realm="example.com", nonce="${nonce}", qop="auth"`,
 })
 
+function requestIn(outputs: RegistrationOutput[]): SipRequest {
+  const output = outputs.find((entry) => entry.type === "send")
+  if (output?.type !== "send") throw new Error("Expected a request")
+  return output.request
+}
+
+function natted(request: SipRequest, status = 200, port = "33172") {
+  const answer = reply(request, status, status === 200 ? [] : [challenge("nat")])
+  const [via, ...rest] = answer.response.via
+  if (!via) throw new Error("No Via")
+  const seen = new Map([...via.params, ["received", "203.0.113.1"], ["rport", port]])
+  return { ...answer, response: { ...answer.response, via: [{ ...via, params: seen }, ...rest] } }
+}
+
+describe("createRegistration behind a NAT (RFC 3581)", () => {
+  it("registers again where the registrar saw it and drops the private binding at once", () => {
+    const registration = setup(account)
+    const first = sent(registration.register(intent))
+    const outputs = registration.receive(natted(first), 0)
+    expect(events(outputs)).toStrictEqual([
+      { type: "registration", state: "registered", expires: 3600 },
+    ])
+    const moved = requestIn(outputs)
+    expect(moved.contact).toStrictEqual([
+      { uri: "sip:alice@203.0.113.1:33172", params: new Map() },
+      { uri: "sip:alice@192.0.2.10:5060", params: new Map([["expires", "0"]]) },
+    ])
+    expect(registration.contact.uri).toBe("sip:alice@203.0.113.1:33172")
+    const challenged = sent(registration.receive(natted(moved, 401), 10))
+    expect(challenged.contact).toStrictEqual(moved.contact)
+    expect(getHeader(challenged, "Authorization")).toMatch(/^Digest /)
+    const settled = registration.receive(natted(challenged), 20)
+    expect(events(settled)).toMatchObject([{ state: "registered" }])
+    expect(settled.filter((output) => output.type === "send")).toStrictEqual([])
+    const refresh = sent(registration.expire(Number.MAX_SAFE_INTEGER))
+    expect(refresh.contact).toStrictEqual([
+      { uri: "sip:alice@203.0.113.1:33172", params: new Map() },
+    ])
+  })
+
+  it("registers plainly once more when the registrar lost the new binding, as a SIP ALG causes", () => {
+    const registration = setup(account)
+    const moved = requestIn(registration.receive(natted(sent(registration.register(intent))), 0))
+    const answer = natted(moved)
+    const others = [{ uri: "sip:alice@192.0.2.10:5060", params: new Map([["expires", "60"]]) }]
+    const plain = requestIn(
+      registration.receive({ ...answer, response: { ...answer.response, contact: others } }, 10),
+    )
+    expect(plain.contact).toStrictEqual([{ uri: "sip:alice@203.0.113.1:33172", params: new Map() }])
+  })
+
+  it("goes back to its own Contact for good when the registrar refuses the public one", () => {
+    const registration = setup(account)
+    const moved = requestIn(registration.receive(natted(sent(registration.register(intent))), 0))
+    const back = sent(registration.receive(natted(moved, 403), 10))
+    expect(back.contact).toStrictEqual([{ uri: "sip:alice@192.0.2.10:5060", params: new Map() }])
+    const settled = registration.receive(natted(back), 20)
+    expect(settled.filter((output) => output.type === "send")).toStrictEqual([])
+    expect(registration.contact.uri).toBe("sip:alice@192.0.2.10:5060")
+  })
+
+  it("keeps dropping the private binding when it retries, and moves at most once in a row", () => {
+    const registration = setup(account)
+    const moved = requestIn(registration.receive(natted(sent(registration.register(intent))), 0))
+    registration.receive(natted(moved, 503), 10)
+    const retry = sent(registration.expire(Number.MAX_SAFE_INTEGER))
+    expect(retry.contact).toStrictEqual(moved.contact)
+    const settled = registration.receive(natted(retry, 200, "40000"), 20)
+    expect(settled.filter((output) => output.type === "send")).toStrictEqual([])
+  })
+
+  it("follows the NAT when it hands out a new port", () => {
+    const registration = setup(account)
+    const first = sent(registration.register(intent))
+    const moved = requestIn(registration.receive(natted(first), 0))
+    registration.receive(natted(moved), 10)
+    const refresh = sent(registration.expire(Number.MAX_SAFE_INTEGER))
+    const again = requestIn(registration.receive(natted(refresh, 200, "40000"), 20))
+    expect(again.contact).toMatchObject([
+      { uri: "sip:alice@203.0.113.1:40000" },
+      { uri: "sip:alice@203.0.113.1:33172" },
+    ])
+  })
+})
+
 describe("createRegistration", () => {
   it("sends the REGISTER it was asked for", () => {
     const request = sent(setup(account).register(intent))

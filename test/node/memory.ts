@@ -3,9 +3,6 @@ import type { Link, LinkHandlers } from "../../src/node/links"
 import { createRandom } from "../../src/simulation/random"
 import { type Registrar, type RegistrarOptions, registrar } from "../registrar"
 
-const local = { transport: "UDP", host: "192.0.2.10", port: 5060 } as const
-const remote = { transport: "UDP", host: "192.0.2.20", port: 5060 } as const
-
 export interface MemoryNetwork {
   readonly link: Link
   readonly registrar: Registrar
@@ -16,9 +13,16 @@ export interface MemoryNetwork {
   broken: boolean
   replace(options: RegistrarOptions): void
   inject(data: Uint8Array, from?: TransportAddress): void
+  drop(error?: Error): void
 }
 
-export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
+export function memoryNetwork(
+  options: RegistrarOptions = {},
+  { stream = false }: { readonly stream?: boolean } = {},
+): MemoryNetwork {
+  const transport = stream ? "TLS" : "UDP"
+  const local: TransportAddress = { transport, host: "192.0.2.10", port: 5060 }
+  const remote: TransportAddress = { transport, host: "192.0.2.20", port: 5060 }
   let server = registrar(options)(createRandom(3))
   let handlers: LinkHandlers | undefined
   let sent = 0
@@ -43,6 +47,7 @@ export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
       server = registrar(next)(createRandom(4))
     },
     inject,
+    drop: (error?: Error) => handlers?.close(error),
     link: {
       local,
       remote,
@@ -62,6 +67,7 @@ export function memoryNetwork(options: RegistrarOptions = {}): MemoryNetwork {
       },
       close: () => {
         closed = true
+        if (stream) queueMicrotask(() => handlers?.close())
       },
     },
   }

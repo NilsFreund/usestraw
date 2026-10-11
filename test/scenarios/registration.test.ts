@@ -163,15 +163,18 @@ describe("registration against a digest registrar", () => {
         nat: "home",
       },
     )
-    simulation.addNode("registrar", bob, registrar())
+    let server: Registrar | undefined
+    simulation.addNode("registrar", bob, (random) => {
+      server = registrar()(random)
+      return server
+    })
     simulation.command(ua, { type: "register", to: bob, expires: 120 })
     simulation.at(100_000, () => simulation.network.resetNat("home"))
     simulation.run(200_000)
-    expect(registrations(ua.events).map((event) => event.state)).toStrictEqual([
-      "registered",
-      "registered",
-      "registered",
-      "registered",
+    const states = new Set(registrations(ua.events).map((event) => event.state))
+    expect(states).toStrictEqual(new Set(["registered"]))
+    expect([...(server?.bindings.keys() ?? [])]).toStrictEqual([
+      expect.stringMatching(/^sip:alice@203\.0\.113\.1:\d+$/),
     ])
   })
 

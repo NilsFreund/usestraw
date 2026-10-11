@@ -219,6 +219,29 @@ describe("createCore", () => {
       command: { type: "register", to: bob, expires: 120 },
     } as const
 
+    it("places calls from the public Contact it learnt while registering behind a NAT", () => {
+      const ua = registering()
+      const request = sentRequest(ua.handle(register, 0)[0])
+      const [via, ...rest] = request.via
+      if (!via) throw new Error("No Via")
+      const seen = new Map([...via.params, ["received", "203.0.113.1"], ["rport", "33172"]])
+      const ok = createResponse(
+        { ...request, via: [{ ...via, params: seen }, ...rest] },
+        200,
+        "OK",
+        {
+          toTag: "r1",
+        },
+      )
+      ua.handle(receive(serializeMessage(ok)), 10)
+      const media = { host: "192.0.2.10", port: 40_000 }
+      const call = { type: "call", call: "c1", uri: "sip:bob@example.com", to: bob, media } as const
+      const invite = sentRequest(ua.handle({ type: "command", command: call }, 20)[0])
+      expect(invite.contact).toStrictEqual([
+        { uri: "sip:alice@203.0.113.1:33172", params: new Map() },
+      ])
+    })
+
     it("sends a REGISTER through a client transaction and reports the binding", () => {
       const ua = registering()
       const request = sentRequest(ua.handle(register, 0)[0])

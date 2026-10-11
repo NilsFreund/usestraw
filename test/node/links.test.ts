@@ -56,6 +56,25 @@ describe("openUdp", () => {
     vi.restoreAllMocks()
   })
 
+  it("pings the server every 25 s to keep a NAT binding open, and stops when closed", async () => {
+    const sink = createSocket("udp4")
+    const received: string[] = []
+    sink.on("message", (data) => received.push(data.toString()))
+    await new Promise<void>((resolve) => sink.bind(0, "127.0.0.1", resolve))
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+    try {
+      const link = await openUdp({ address: "127.0.0.1", family: 4, port: sink.address().port })
+      link.start(recorder().handlers)
+      vi.advanceTimersByTime(25_000)
+      await vi.waitFor(() => expect(received).toStrictEqual(["\r\n\r\n"]))
+      link.close()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      sink.close()
+    }
+  })
+
   it("knows every address of the server, once each", async () => {
     const link = await openUdp({
       address: "127.0.0.1",
@@ -119,6 +138,14 @@ describe("openLink", () => {
     )
   })
 
+  it("prefers IPv4 for TLS where the server listens on both", async () => {
+    const server = await tlsRegistrar({}, { host: "::" })
+    const link = await openLink(tls(server.port), { ca: certificate })
+    expect(link.local.host).toBe("127.0.0.1")
+    link.close()
+    await server.close()
+  })
+
   it("opens TLS by hostname with SNI", async () => {
     const server = await tlsRegistrar()
     const link = await openLink(tls(server.port), { ca: certificate })
@@ -163,6 +190,62 @@ describe("openTls", () => {
     ).rejects.toThrow("The operation was aborted")
     expect(performance.now() - started).toBeLessThan(1000)
     await server.close()
+  })
+
+  it("pings the server every 30 s so idle connections stay up, and stops when closed", async () => {
+    const server = await tlsRegistrar()
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+    try {
+      const link = await openTls(tls(server.port), { ca: certificate })
+      link.start(recorder().handlers)
+      await vi.waitFor(() => expect(server.sockets).toHaveLength(1))
+      const [socket] = server.sockets
+      const ping = new Promise<string>((resolve) =>
+        socket?.once("data", (chunk: Buffer) => resolve(chunk.toString())),
+      )
+      vi.advanceTimersByTime(30_000)
+      expect(await ping).toBe("\r\n\r\n")
+      link.close()
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBe(0))
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+    }
+  })
+
+  it("keeps a connection whose server answers pings, and closes it once it stops", async () => {
+    const server = await tlsRegistrar()
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] })
+    try {
+      const link = await openTls(tls(server.port), { ca: certificate })
+      const { log, handlers } = recorder()
+      link.start(handlers)
+      await vi.waitFor(() => expect(server.sockets).toHaveLength(1))
+      const [socket] = server.sockets
+      const ping = async () => {
+        const pinged = new Promise((resolve) => socket?.once("data", resolve))
+        vi.advanceTimersByTime(30_000)
+        await pinged
+      }
+      const answer = async (user: string) => {
+        socket?.write(`\r\nOPTIONS sip:${user}@b SIP/2.0\r\nContent-Length: 0\r\n\r\n`)
+        await vi.waitFor(() => expect(log.at(-1)).toBe(`receive OPTIONS sip:${user}@b SIP/2.0`))
+      }
+      await ping()
+      await answer("first")
+      await ping()
+      await answer("second")
+      vi.advanceTimersByTime(10_000)
+      await answer("third")
+      await ping()
+      vi.advanceTimersByTime(9_999)
+      expect(log).toHaveLength(3)
+      vi.advanceTimersByTime(1)
+      await vi.waitFor(() => expect(log.at(-1)).toBe("close The server stopped answering"))
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+    }
   })
 
   it("answers a ping with a pong and closes on a framing error", async () => {

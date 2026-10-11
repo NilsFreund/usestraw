@@ -41,6 +41,11 @@ import { secureRandom } from "./random"
 export type PhoneStatus = "connecting" | "online" | "reconnecting" | "offline"
 
 const MAX_TIMEOUT = 2 ** 31 - 1
+// Short registrations keep NAT bindings fresh and let a restarted phone take over its line sooner
+const REGISTRATION = 600
+const MAX_RECONNECT = 60_000
+const STABLE = 60_000
+const STALE = REGISTRATION * 1000
 
 /** Options for {@link Phone.call}. */
 export interface CallOptions {
@@ -99,6 +104,7 @@ export interface Phone extends AsyncDisposable {
    * @throws {TypeError} for an address it cannot call, or an agent already in use
    * @throws {RangeError} for a timeout that is not a positive integer
    * @throws {DOMException} `InvalidStateError` once the phone is closing
+   * @throws {ConnectError} while the phone reconnects
    * @throws the signal's reason when it aborts first, or a socket error when no audio port is free
    */
   call(to: string, options?: CallOptions): Promise<LiveCall | UnansweredCall>
@@ -159,29 +165,27 @@ export async function connectPhone(settings: PhoneSettings): Promise<PhoneHandle
     const cause = timeout.aborted ? (timeout.reason as Error) : error
     throw connectError({ reason: "network" }, { label, username }, cause)
   })
-  return startPhone(link, settings)
+  const reopen = (cancel: AbortSignal) => {
+    const limit = AbortSignal.timeout(connectTimeout)
+    return openLink(server, tls, AbortSignal.any([cancel, limit, ...(signal ? [signal] : [])]))
+  }
+  return startPhone(link, settings, reopen)
 }
 
-export async function startPhone(link: Link, settings: PhoneSettings): Promise<PhoneHandle> {
+export async function startPhone(
+  first: Link,
+  settings: PhoneSettings,
+  reopen?: (cancel: AbortSignal) => Promise<Link>,
+): Promise<PhoneHandle> {
   const { aor, registrar, credentials, expires, closeTimeout, signal, label, username, trace } =
     settings
   const { maxCalls } = settings
   if (signal?.aborted) {
-    link.close()
+    first.close()
     throw signal.reason
   }
   const context = { label, username }
-  const coreOptions = {
-    address: link.local,
-    aor,
-    random: secureRandom,
-    ...(credentials ? { credentials } : {}),
-    ...(maxCalls === undefined ? {} : { maxCalls }),
-    ...(settings.acceptFrom === "server" ? { acceptFrom: link.peers } : {}),
-  }
   const debug = debugOutput()
-  const recorder = trace || debug ? createRecordedCore(coreOptions, { onStep: debug }) : undefined
-  const core = recorder ?? createCore(coreOptions)
   const clock = createClock()
   const listeners = createListeners()
   const pings = createPings()
@@ -197,11 +201,45 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
   let closing: Promise<void> | undefined
   let draining = false
   let snapshot: readonly Call[] = []
+  let link = first
+  let connected = false
+  let attempts = 0
+  let onlineAt = 0
+  let resumedAt: number | undefined
+  let retry: ReturnType<typeof setTimeout> | undefined
+  const cancel = new AbortController()
+  // One core for the phone's whole life: a new connection keeps the registration, its binding
+  // and the calls, and only the server only reaches us over our own TLS connection anyway
+  const coreOptions = {
+    address: first.local,
+    aor,
+    random: secureRandom,
+    ...(credentials ? { credentials } : {}),
+    ...(maxCalls === undefined ? {} : { maxCalls }),
+    ...(settings.acceptFrom === "server" && first.local.transport === "UDP"
+      ? { acceptFrom: first.peers }
+      : {}),
+  }
+  const recorder = trace || debug ? createRecordedCore(coreOptions, { onStep: debug }) : undefined
+  const core = recorder ?? createCore(coreOptions)
+
+  function open(next: Link): void {
+    link = next
+    connected = true
+    next.start({ receive, close: lost })
+    register()
+  }
+
+  function register(): void {
+    const registration = { to: link.remote, registrar, expires: expires ?? REGISTRATION }
+    run({ type: "command", command: { type: "register", ...registration } })
+  }
 
   function deliver(outputs: CoreOutput[]): void {
     for (const output of outputs) {
-      if (output.type === "send") link.send(output.data, output.to)
-      else notice(output.event)
+      if (output.type === "send") {
+        if (connected) link.send(output.data, output.to)
+      } else notice(output.event)
     }
     if (status !== "offline") clock.schedule(core.nextDeadline(), () => run({ type: "timeout" }))
   }
@@ -226,8 +264,15 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     else if (event.state === "registered") update("online")
     else {
       const failure = connectError(event.failure, context)
-      if (event.retryIn === undefined) fatal(failure)
-      else update("reconnecting", failure, Date.now() + event.retryIn)
+      if (event.retryIn !== undefined) update("reconnecting", failure, Date.now() + event.retryIn)
+      else if (
+        event.failure.reason === "rejected" &&
+        resumedAt !== undefined &&
+        performance.now() - resumedAt < STALE
+      )
+        later(failure)
+      else fatal(failure)
+      if (event.failure.reason === "timeout" && link.local.transport === "TLS") link.close()
     }
   }
 
@@ -282,6 +327,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     const { agent, signal: abort, timeout } = options
     abort?.throwIfAborted()
     if (closed()) throw new DOMException("The phone is closed", "InvalidStateError")
+    if (!connected) throw error
     if (agent) checkAgent(agent)
     if (timeout !== undefined && !isIntegerIn(timeout, 1, MAX_TIMEOUT)) {
       throw new RangeError(`The timeout must be a number of milliseconds, got ${show(timeout)}`)
@@ -315,6 +361,8 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
 
   function update(next: "online" | "reconnecting", failure?: ConnectError, at?: number): void {
     const changed = next !== status || failure !== error || at !== retryAt
+    if (next === "online" && status !== "online") onlineAt = performance.now()
+    if (next === "online") resumedAt = undefined
     status = next
     error = failure
     retryAt = at
@@ -323,8 +371,60 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     else starting.reject(failure)
   }
 
+  // A dropped connection keeps the registration and the calls, and the phone dials back in
   function lost(cause?: Error): void {
-    stop(leaving ? undefined : connectError({ reason: "network" }, context, cause))
+    if (status === "offline") return
+    const failure = connectError({ reason: "network" }, context, cause)
+    if (leaving || !started || !reopen) {
+      stop(leaving ? undefined : failure)
+      return
+    }
+    connected = false
+    if (performance.now() - onlineAt > STABLE) attempts = 0
+    reconnect(failure, reopen)
+    pings.abort(new DOMException("The connection to the server was lost", "NetworkError"))
+  }
+
+  function backoff(): number {
+    const ceiling = Math.min(MAX_RECONNECT, 1000 * 2 ** attempts)
+    attempts += 1
+    return Math.round(ceiling * (0.5 + secureRandom() / 2))
+  }
+
+  function reconnect(failure: ConnectError, again: (cancel: AbortSignal) => Promise<Link>): void {
+    const delay = backoff()
+    update("reconnecting", failure, Date.now() + delay)
+    retry = setTimeout(() => {
+      update("reconnecting", failure)
+      again(cancel.signal)
+        .then((next) => {
+          if (status === "offline") {
+            next.close()
+            return
+          }
+          resumedAt = performance.now()
+          open(next)
+        })
+        .catch((thrown: Error) => {
+          if (status !== "offline") {
+            reconnect(connectError({ reason: "network" }, context, thrown), again)
+          }
+        })
+    }, delay)
+  }
+
+  // Right after a reconnect the registrar may still count our old binding and refuse a new one
+  function later(failure: ConnectError): void {
+    const delay = backoff()
+    update("reconnecting", failure, Date.now() + delay)
+    retry = setTimeout(register, delay)
+  }
+
+  function end(ended: { readonly by: "local"; readonly reason: "timeout" }): void {
+    for (const [call, handle] of handles) {
+      handle.receive({ type: "call", call, state: "ended", ended })
+    }
+    handles.clear()
   }
 
   function fatal(failure: ConnectError): void {
@@ -347,18 +447,12 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     error = failure
     retryAt = undefined
     clock.cancel()
+    clearTimeout(retry)
+    cancel.abort()
     link.close()
     signal?.removeEventListener("abort", abort)
     pings.abort(new DOMException("The phone is closed", "InvalidStateError"))
-    for (const [call, handle] of handles) {
-      handle.receive({
-        type: "call",
-        call,
-        state: "ended",
-        ended: { by: "local", reason: "timeout" },
-      })
-    }
-    handles.clear()
+    end({ by: "local", reason: "timeout" })
     incoming.close()
     listeners.notify()
     leaving?.()
@@ -389,7 +483,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     leaving = resolve
     const timer = setTimeout(resolve, closeTimeout)
     try {
-      if (status !== "offline") {
+      if (status !== "offline" && connected) {
         run({ type: "command", command: { type: "unregister" } })
         await promise
       }
@@ -408,6 +502,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     if (draining || status === "offline") {
       throw new DOMException("The phone is closed", "InvalidStateError")
     }
+    if (!connected) throw error
     const callId = createCallId(secureRandom)
     const started = clock.now()
     run({ type: "command", command: { type: "options", uri, to: link.remote, callId } })
@@ -420,13 +515,7 @@ export async function startPhone(link: Link, settings: PhoneSettings): Promise<P
     settings.connectTimeout,
   )
   try {
-    link.start({ receive, close: lost })
-    const registration = {
-      to: link.remote,
-      registrar,
-      ...(expires === undefined ? {} : { expires }),
-    }
-    run({ type: "command", command: { type: "register", ...registration } })
+    open(first)
     await starting.promise
   } catch (thrown) {
     stop()

@@ -1,5 +1,5 @@
 import { createSocket, type SocketType } from "node:dgram"
-import type { LookupAddress } from "node:dns"
+import { lookup as dnsLookup, type LookupAddress } from "node:dns"
 import { lookup } from "node:dns/promises"
 import { once } from "node:events"
 import { type AddressInfo, isIP } from "node:net"
@@ -35,8 +35,11 @@ export interface Peer {
 }
 
 const KEEPALIVE = 30_000
+const NAT_KEEPALIVE = 25_000
 const MAX_BACKLOG = 1024 * 1024
 const PONG = new Uint8Array([13, 10])
+const PING = new Uint8Array([13, 10, 13, 10])
+const PONG_WAIT = 10_000
 
 export async function openLink(
   server: Server,
@@ -59,6 +62,8 @@ export async function openUdp(peer: Peer): Promise<Link> {
   await once(socket, "listening")
   let handlers: LinkHandlers | undefined
   let open = true
+  let keepalive: ReturnType<typeof setInterval> | undefined
+  const remote: TransportAddress = { transport: "UDP", host: peer.address, port: peer.port }
   socket.on("message", (data, info) => {
     handlers?.receive(new Uint8Array(data), {
       transport: "UDP",
@@ -67,19 +72,24 @@ export async function openUdp(peer: Peer): Promise<Link> {
     })
   })
   socket.on("error", () => undefined)
+  const send = (data: Uint8Array, to: TransportAddress) => {
+    try {
+      socket.send(data, to.port, to.host)
+    } catch {}
+  }
   return {
     local: { transport: "UDP", host, port: socket.address().port },
-    remote: { transport: "UDP", host: peer.address, port: peer.port },
+    remote,
     peers: [...new Set([peer.address, ...(peer.others ?? [])])],
+    // RFC 5626 §3.5.1 style CRLF pings keep a NAT binding open between registrations
     start: (next) => {
       handlers = next
+      keepalive = setInterval(() => send(PING, remote), NAT_KEEPALIVE)
+      keepalive.unref()
     },
-    send: (data, to) => {
-      try {
-        socket.send(data, to.port, to.host)
-      } catch {}
-    },
+    send,
     close: () => {
+      clearInterval(keepalive)
       if (open) socket.close()
       open = false
     },
@@ -96,6 +106,7 @@ export async function openTls(
   const socket = connect({
     host: server.host,
     port: server.port,
+    lookup: (host, settings, done) => dnsLookup(host, { ...settings, order: "ipv4first" }, done),
     ...(isIP(server.host) ? {} : { servername: server.host }),
     rejectUnauthorized,
     ...(ca === undefined ? {} : { ca }),
@@ -109,10 +120,24 @@ export async function openTls(
   socket.setKeepAlive(true, KEEPALIVE)
   let handlers: LinkHandlers | undefined
   let failure: Error | undefined
+  let keepalive: ReturnType<typeof setInterval> | undefined
+  let silence: ReturnType<typeof setTimeout> | undefined
+  let answers = false
   socket.on("error", (error) => {
     failure = error
   })
-  socket.on("close", () => handlers?.close(failure))
+  socket.on("close", () => {
+    clearInterval(keepalive)
+    clearTimeout(silence)
+    handlers?.close(failure)
+  })
+  // RFC 5626 §4.4.1: a server that answered pings and then stays silent is gone
+  const ping = () => {
+    write(PING)
+    if (!answers || silence) return
+    silence = setTimeout(() => socket.destroy(new Error("The server stopped answering")), PONG_WAIT)
+    silence.unref()
+  }
   const framer = createStreamFramer()
   const remote: TransportAddress = {
     transport: "TLS",
@@ -130,11 +155,19 @@ export async function openTls(
     peers: [remote.host],
     start: (next) => {
       handlers = next
+      keepalive = setInterval(ping, KEEPALIVE)
+      keepalive.unref()
       socket.on("data", (chunk: Buffer) => {
         for (const event of framer.push(new Uint8Array(chunk))) {
+          if (event.type === "error") {
+            socket.destroy(new Error(event.error))
+            continue
+          }
+          answers ||= event.type !== "message"
+          clearTimeout(silence)
+          silence = undefined
           if (event.type === "message") next.receive(event.data, remote)
           else if (event.type === "ping") write(PONG)
-          else if (event.type === "error") socket.destroy(new Error(event.error))
         }
       })
     },

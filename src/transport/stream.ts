@@ -26,7 +26,6 @@ export function createStreamFramer(): StreamFramer {
   let end = 0
   let scanned = 0
   let total: number | undefined
-  let halfPing = false
   let broken = false
 
   function push(chunk: Uint8Array): StreamEvent[] {
@@ -58,8 +57,7 @@ export function createStreamFramer(): StreamFramer {
     while (index < end && (bytes[index] === CR || bytes[index] === LF)) index++
     if (index === start || (index === end && bytes[end - 1] === CR)) return undefined
     const run = decoder.decode(bytes.subarray(start, index))
-    const ping = run.includes("\r\n\r\n") || (halfPing && run.startsWith("\r\n"))
-    halfPing = !ping && run.endsWith("\r\n")
+    const ping = run.includes("\r\n\r\n")
     start = index
     scanned = 0
     if (ping) return { type: "ping" }
@@ -94,7 +92,6 @@ export function createStreamFramer(): StreamFramer {
     start += size
     scanned = 0
     total = undefined
-    halfPing = false
     return { type: "message", data }
   }
 

@@ -32,7 +32,7 @@ import {
   checkSource,
 } from "./checks"
 import { event, send } from "./outputs"
-import { createContact, defaultRegistrar } from "./registration/binding"
+import { defaultRegistrar } from "./registration/binding"
 import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
@@ -122,8 +122,15 @@ export function createCore(options: CoreOptions): Core {
   const responder = createResponder(random)
   const trust = createTrust()
   const registration = createRegistration(identity, trust, credentials)
-  const contact = createContact(address, aor)
-  const calls = createCalls({ identity, contact, credentials, trust, timers })
+  const calls = createCalls({
+    identity,
+    get contact() {
+      return registration.contact
+    },
+    credentials,
+    trust,
+    timers,
+  })
 
   function handle(input: CoreInput, now: number): CoreOutput[] {
     checkTime(now)

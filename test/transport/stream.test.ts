@@ -193,8 +193,8 @@ describe("CR/LF keepalives (RFC 3261 §7.5, RFC 5626 §3.5.1)", () => {
     expect(framer.push(bytes("\n"))).toStrictEqual([{ type: "ping" }])
   })
 
-  it("recognizes a ping split into two pushes after its first CRLF", () => {
-    expect(types(feed("\r\n", "\r\n"))).toStrictEqual(["pong", "ping"])
+  it("takes CRLFs that arrive apart for pongs, which a server sends to our pings", () => {
+    expect(types(feed("\r\n", "\r\n"))).toStrictEqual(["pong", "pong"])
   })
 
   it("counts separate CRLF runs between messages separately", () => {

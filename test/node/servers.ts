@@ -67,7 +67,10 @@ export async function udpRegistrar(options: RegistrarOptions = {}): Promise<Test
 
 export async function tlsRegistrar(
   options: RegistrarOptions = {},
-  { allowHalfOpen = false }: { readonly allowHalfOpen?: boolean } = {},
+  {
+    allowHalfOpen = false,
+    host = "localhost",
+  }: { readonly allowHalfOpen?: boolean; readonly host?: string } = {},
 ): Promise<TestServer> {
   const server = registrar(options)(createRandom(9))
   const sockets: TLSSocket[] = []
@@ -98,7 +101,7 @@ export async function tlsRegistrar(
       }
     })
   })
-  await new Promise<void>((resolve) => tls.listen(0, "localhost", resolve))
+  await new Promise<void>((resolve) => tls.listen(0, host, resolve))
   const address = tls.address()
   return {
     port: typeof address === "object" && address ? address.port : 0,

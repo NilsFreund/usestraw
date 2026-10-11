@@ -41,6 +41,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Writes resolve at once until 30 s are queued. Interrupt with `clear()`, not a new writer.
 - Writes and a pending `writer.close()` reject once the call ends: add `.catch()` to writes you don't await.
 - A call whose far end sends no audio for 60 s is hung up with `reason: "timeout"`.
+- The phone reconnects on its own: `status` goes `"reconnecting"` and back to `"online"`; `phone.incoming` and running calls stay open meanwhile, and `call()` throws the `ConnectError` until it is back.
 - Readers that fall behind lose the oldest frames. Keep reading or cancel the stream.
 - `await using` needs Node 24 or TypeScript. On Node 22, call `phone.close()` yourself.
 

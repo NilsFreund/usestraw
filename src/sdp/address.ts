@@ -15,6 +15,20 @@ export function isUnspecified(host: string): boolean {
   return /^[0.:]+$/.test(host)
 }
 
+// RFC 1918, RFC 6598, RFC 3927, RFC 4193 and RFC 4291: addresses that only exist behind a NAT
+export function isPrivate(host: string): boolean {
+  if (host.includes(":")) {
+    const full = canonical(host)
+    const first = Number.parseInt(full, 16)
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || full === "0:0:0:0:0:0:0:1"
+  }
+  const [a, b = 0] = host.split(".").map(Number)
+  if (a === 10 || a === 127) return true
+  if (a === 172) return b >= 16 && b < 32
+  if (a === 100) return b >= 64 && b < 128
+  return (a === 192 && b === 168) || (a === 169 && b === 254)
+}
+
 // Hosts compare by value: case and the shorthand of IPv6 do not make another address
 export function sameHost(a: string, b: string): boolean {
   return canonical(a) === canonical(b)

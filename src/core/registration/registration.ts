@@ -1,17 +1,19 @@
 import { parseDeltaSeconds } from "../../message/fields/delta-seconds"
+import type { NameAddr } from "../../message/fields/name-addr"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
 import { clientKey } from "../../transaction/keys"
 import { createAuthenticator, type Trust } from "../authenticator"
 import type { Identity } from "../requests"
 import type { Credentials, RegistrationEvent, RegistrationFailure } from "../types"
-import { grantedExpiry, refreshDelay } from "./binding"
+import { createContact, grantedExpiry, listsBinding, publicAddress, refreshDelay } from "./binding"
 import { createRegisterRequest, createRegistrant } from "./request"
 import { isRetryable, retryDelay } from "./retry"
 import type { RegisterIntent, Registration, RegistrationInput, RegistrationOutput } from "./types"
 
 interface Attempt extends RegisterIntent {
   readonly raised?: boolean
+  readonly stale?: NameAddr
 }
 
 export function createRegistration(
@@ -21,7 +23,9 @@ export function createRegistration(
 ): Registration {
   const { random } = identity
   const authenticator = createAuthenticator(credentials, random)
-  const registrant = createRegistrant(identity)
+  let registrant = createRegistrant(identity)
+  let reachable = identity.address
+  let rewriting = true
   let seq = 0
   let pending: { readonly key: string; readonly attempt: Attempt } | undefined
   let queued: Attempt | undefined
@@ -52,7 +56,8 @@ export function createRegistration(
   function send(attempt: Attempt): RegistrationOutput[] {
     scheduled = undefined
     const { registrar, expires, to } = attempt
-    const request = createRegisterRequest(registrant, registrar, ++seq, expires, identity)
+    const { stale } = attempt
+    const request = createRegisterRequest(registrant, registrar, ++seq, expires, identity, stale)
     const authorized = {
       ...request,
       headers: [...request.headers, ...authenticator.authorize(request)],
@@ -99,8 +104,19 @@ export function createRegistration(
     const answered = authenticator.answered()
     if (answered.length > 0) trust.learn(answered)
     bound = { to: attempt.to, registrar: attempt.registrar, expires: attempt.expires }
+    const registered = notify({ type: "registration", state: "registered", expires: granted })
+    if (attempt.stale && !listsBinding(response, registrant.contact)) {
+      return [registered, ...send({ ...bound })]
+    }
+    const seen = rewriting && !attempt.stale ? publicAddress(response, reachable) : undefined
+    if (seen) {
+      const stale = registrant.contact
+      reachable = seen
+      registrant = { ...registrant, contact: createContact(seen, identity.aor) }
+      return [registered, ...send({ ...bound, stale })]
+    }
     scheduled = { at: now + refreshDelay(granted, random), attempt: bound }
-    return [notify({ type: "registration", state: "registered", expires: granted })]
+    return [registered]
   }
 
   function fail(
@@ -109,15 +125,21 @@ export function createRegistration(
     now: number,
     response?: SipResponse,
   ): RegistrationOutput[] {
-    if (attempt.expires === 0 || !isRetryable(failure)) {
-      if (attempt.expires === 0) bound = undefined
+    const { to, registrar, expires, stale } = attempt
+    if (stale && failure.reason === "rejected" && !isRetryable(failure)) {
+      rewriting = false
+      registrant = { ...registrant, contact: stale }
+      return send({ to, registrar, expires })
+    }
+    if (expires === 0 || !isRetryable(failure)) {
+      if (expires === 0) bound = undefined
       return [notify({ type: "registration", state: "failed", failure })]
     }
     failures += 1
     const retryIn = retryDelay(failures, random, response)
     scheduled = {
       at: now + retryIn,
-      attempt: { to: attempt.to, registrar: attempt.registrar, expires: attempt.expires },
+      attempt: { to, registrar, expires, ...(stale ? { stale } : {}) },
     }
     return [notify({ type: "registration", state: "failed", failure, retryIn })]
   }
@@ -127,7 +149,16 @@ export function createRegistration(
     return dispatch(scheduled.attempt)
   }
 
-  return { register, unregister, receive, expire, nextDeadline: () => scheduled?.at }
+  return {
+    get contact() {
+      return registrant.contact
+    },
+    register,
+    unregister,
+    receive,
+    expire,
+    nextDeadline: () => scheduled?.at,
+  }
 }
 
 function notify(event: RegistrationEvent): RegistrationOutput {

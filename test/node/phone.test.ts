@@ -96,7 +96,7 @@ describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
     const [request] = server.registrar.registers
     expect(request?.via[0]?.transport).toBe(transport.toUpperCase())
     expect(["127.0.0.1", "[::1]"]).toContain(request?.via[0]?.host)
-    expect(request?.via[0]?.port).toBeGreaterThan(0)
+    expect(String(request?.via[0]?.port)).toBe(request?.via[0]?.params.get("rport"))
   })
 
   it("pings the registrar or any uri through the server", async () => {
@@ -290,33 +290,53 @@ describe("connect", () => {
     expect(error).toMatchObject({ name: "TimeoutError" })
   })
 
-  it("closes with the reason when the server closes the connection", async () => {
+  it("reconnects and registers again when the server closes the connection", async () => {
     const server = await serve(tlsRegistrar())
     const phone = await phoneFor(options(server, "tls"))
     const seen = watch(phone)
     server.sockets[0]?.end()
-    await vi.waitFor(() => expect(phone.status).toBe("offline"))
-    expect(seen).toStrictEqual([
-      {
-        status: "offline",
-        error: `Network error with tls://localhost:${server.port}: the server closed the connection`,
-      },
-    ])
-    expect(phone.error?.reason).toBe("network")
-    await expect(phone.ping()).rejects.toThrow("The phone is closed")
-    await phone.close()
+    await vi.waitFor(() => expect(phone.status).toBe("reconnecting"))
+    const lost = `Network error with tls://localhost:${server.port}: the server closed the connection`
+    expect(seen).toStrictEqual([{ status: "reconnecting", error: lost }])
+    expect(phone.retryAt).toBeGreaterThan(Date.now())
+    await expect(phone.ping()).rejects.toThrow(lost)
+    await expect(phone.call("bob")).rejects.toThrow(lost)
+    await vi.waitFor(() => expect(phone.status).toBe("online"), { timeout: 3000 })
+    expect(server.sockets).toHaveLength(2)
+    expect(server.registrar.bindings.size).toBe(1)
+    expect(phone.error).toBeUndefined()
+    expect(phone.retryAt).toBeUndefined()
+    expect(await phone.ping()).toMatchObject({ status: 200 })
   })
 
-  it("closes with the cause when the stream breaks", async () => {
+  it("reconnects after the stream breaks", async () => {
     const server = await serve(tlsRegistrar())
     const phone = await phoneFor(options(server, "tls"))
     server.sockets[0]?.write("OPTIONS sip:a@b SIP/2.0\r\n\r\n")
-    await vi.waitFor(() => expect(phone.status).toBe("offline"))
+    await vi.waitFor(() => expect(phone.status).toBe("reconnecting"))
     expect(phone.error).toMatchObject({
       reason: "network",
       message: `Network error with tls://localhost:${server.port}: Missing Content-Length on a stream`,
       cause: { message: "Missing Content-Length on a stream" },
     })
+    await vi.waitFor(() => expect(phone.status).toBe("online"), { timeout: 3000 })
+  })
+
+  it("keeps trying while the server is gone, and stops when closed", async () => {
+    const server = await serve(tlsRegistrar())
+    const phone = await phoneFor({
+      ...options(server, "tls"),
+      signal: new AbortController().signal,
+    })
+    await server.close()
+    await vi.waitFor(() => expect(phone.status).toBe("reconnecting"))
+    const first = phone.retryAt ?? 0
+    await vi.waitFor(() => expect(phone.retryAt).toBeGreaterThan(first), { timeout: 3000 })
+    expect(phone.error?.reason).toBe("network")
+    const started = performance.now()
+    await phone.close()
+    expect(performance.now() - started).toBeLessThan(100)
+    expect(phone.status).toBe("offline")
   })
 
   it("closes cleanly when the connection drops during close", async () => {
@@ -343,6 +363,7 @@ describe("connect", () => {
     const phone = await phoneFor(options(server, "udp"))
     expect(phone.close()).toBe(phone.close())
     await phone.close()
+    expect(expiries(server)[0]).toBe("600")
     expect(expiries(server).filter((expires) => expires === "0")).toHaveLength(2)
   })
 

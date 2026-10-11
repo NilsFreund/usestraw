@@ -29,16 +29,14 @@ export function createRegisterRequest(
   seq: number,
   expires: number,
   identity: Identity,
+  stale?: NameAddr,
 ): SipRequest {
-  const { from, to, callId, contact } = registrant
+  const { from, to, callId } = registrant
+  const removed = stale && { ...stale, params: new Map([...stale.params, ["expires", "0"]]) }
+  const contact = removed ? [registrant.contact, removed] : [registrant.contact]
   const headers = [
     { name: "Expires", value: String(expires) },
     { name: "Supported", value: "path" },
   ]
-  return createRequest(
-    "REGISTER",
-    registrar,
-    { from, to, callId, seq, contact: [contact], headers },
-    identity,
-  )
+  return createRequest("REGISTER", registrar, { from, to, callId, seq, contact, headers }, identity)
 }

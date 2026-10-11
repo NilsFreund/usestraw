@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { familyOf, isUnspecified, sameHost } from "../../src/sdp/address"
+import { familyOf, isPrivate, isUnspecified, sameHost } from "../../src/sdp/address"
 
 describe("media addresses", () => {
   it.each([
@@ -43,5 +43,41 @@ describe("media addresses", () => {
     ["a::b::c", "A::B::C", true],
   ])("compares %s and %s as %s", (a, b, same) => {
     expect(sameHost(a, b)).toBe(same)
+  })
+})
+
+describe("isPrivate", () => {
+  it.each([
+    "10.0.0.5",
+    "127.0.0.1",
+    "172.16.0.1",
+    "172.31.255.255",
+    "192.168.1.10",
+    "100.64.0.1",
+    "100.127.255.255",
+    "169.254.1.1",
+    "fd00::5",
+    "FC00::1",
+    "fe80::1",
+    "febf::1",
+    "::1",
+  ])("knows %s lives behind a NAT or on the link", (host) => {
+    expect(isPrivate(host)).toBe(true)
+  })
+
+  it.each([
+    "192.0.2.20",
+    "172.15.255.255",
+    "172.32.0.1",
+    "100.63.255.255",
+    "100.128.0.1",
+    "192.169.0.1",
+    "169.253.1.1",
+    "11.0.0.1",
+    "2001:db8::5",
+    "fec0::1",
+    "::",
+  ])("takes %s for a public address", (host) => {
+    expect(isPrivate(host)).toBe(false)
   })
 })

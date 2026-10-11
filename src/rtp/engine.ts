@@ -1,5 +1,5 @@
 import type { Random } from "../core/types"
-import { sameHost } from "../sdp/address"
+import { isPrivate, sameHost } from "../sdp/address"
 import { STATIC_CODECS } from "../sdp/negotiate"
 import type { CallMedia, Codec, MediaAddress } from "../sdp/types"
 import { decodeG711, encodeG711, SAMPLES_PER_MS } from "./g711"
@@ -49,7 +49,7 @@ export function createMediaEngine(random: Random): MediaEngine {
   let media: CallMedia | undefined
   let latched: MediaAddress | undefined
   let candidate: Candidate | undefined
-  let learnUntil = Number.NEGATIVE_INFINITY
+  let learnUntil: number | undefined
   let origin: number | undefined
   let sendAt: number | undefined
   let sentAt: number | undefined
@@ -84,7 +84,7 @@ export function createMediaEngine(random: Random): MediaEngine {
     if (!media || !same(next.remote, media.remote)) {
       latched = undefined
       candidate = undefined
-      learnUntil = now + LEARN
+      learnUntil = undefined
     }
     media = next
     heardAt = next.direction === "sendrecv" ? now : undefined
@@ -94,22 +94,22 @@ export function createMediaEngine(random: Random): MediaEngine {
     playAt ??= now
   }
 
-  // RFC 3550 §A.1 and the RTP Bleed lesson: the signalled address always wins, and another one is
-  // learnt only early in the call, from the same port of the same host at once or after packets in sequence
+  // RFC 3550 §A.1 and the RTP Bleed lesson: the signalled address always wins, and another one
+  // is learnt only from a NATed (private) signalled address in the 2 s after the first packet, or
+  // from another port of the signalled host
   function receive(data: Uint8Array, from: MediaAddress, now: number): void {
     if (!media || from.port === 0) return
+    const packet = readRtp(data)
+    if (!packet) return
     const signalled = same(from, media.remote)
     const known = latched !== undefined && same(from, latched)
-    if (!signalled && !known && now > learnUntil) return
-    const packet = readRtp(data)
-    if (packet && (signalled || known) && heardAt !== undefined) heardAt = now
-    const codec = packet && codecOf(packet.payloadType)
-    if (!packet || !codec || packet.payload.length === 0 || packet.payload.length > MAX_PAYLOAD)
-      return
     if (signalled) {
       latched = undefined
       learnUntil = Number.NEGATIVE_INFINITY
-    } else if (!known && !learn(from, packet, media.remote)) return
+    } else if (!known && !learn(from, packet, media.remote, now)) return
+    if (heardAt !== undefined) heardAt = now
+    const codec = codecOf(packet.payloadType)
+    if (!codec || packet.payload.length === 0 || packet.payload.length > MAX_PAYLOAD) return
     const pcm = decodeG711(codec, packet.payload)
     jitter.push(
       { ssrc: packet.ssrc, sequence: packet.sequence, timestamp: packet.timestamp, pcm },
@@ -117,10 +117,19 @@ export function createMediaEngine(random: Random): MediaEngine {
     )
   }
 
-  function learn(from: MediaAddress, packet: RtpPacket, remote: MediaAddress): boolean {
+  function learn(
+    from: MediaAddress,
+    packet: RtpPacket,
+    remote: MediaAddress,
+    now: number,
+  ): boolean {
+    const nearby = sameHost(from.host, remote.host)
+    if (!nearby && !isPrivate(remote.host)) return false
+    learnUntil ??= now + LEARN
+    if (now > learnUntil) return false
     const count = candidate && continues(candidate, from, packet) ? candidate.count + 1 : 1
     candidate = { from, ssrc: packet.ssrc, sequence: packet.sequence, count }
-    if (count < PROBATION && !sameHost(from.host, remote.host)) return false
+    if (count < PROBATION && !nearby) return false
     latched = { host: from.host, port: from.port }
     learnUntil = Number.NEGATIVE_INFINITY
     return true

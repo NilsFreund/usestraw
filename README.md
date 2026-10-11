@@ -156,7 +156,7 @@ With `drain`, new callers get busy and running calls finish before the phone unr
 | `"no-answer"` | No response. Check host, port and transport. |
 | `"network"` | The connection failed, or the TLS certificate isn't trusted. |
 
-Once online, the phone re-registers on its own. During an outage, `status` is `"reconnecting"`, with `error` and `retryAt` set.
+Once online, the phone re-registers on its own and keeps its connection alive. When the server or the network fails, `status` is `"reconnecting"`, with `error` and `retryAt` set, until it is back. Running calls keep going through a reconnect when the server keeps them; one the server dropped meanwhile ends after a minute without audio.
 
 Ended calls have a `reason` too: `hangup`, `cancelled`, `busy`, `declined`, `not-found`, `no-answer`, `unavailable`, `rejected`, `unauthorized`, `incompatible` or `timeout`.
 
@@ -225,7 +225,8 @@ Standards: RFC 3261 and 6026 (SIP), 7616 and 8760 (digest auth), 3264 and 8866 (
 - Node only. Browser and Electron are next.
 - G.711 only (8 kHz narrowband), no Opus.
 - No SRTP. TLS protects signalling, but audio travels unencrypted, as on most SIP trunks.
-- No STUN or ICE. Behind NAT, your provider has to send audio back to where it came from. Most do.
+- No STUN or ICE. Behind NAT, Straw keeps the mapping open and registers its public address, but your provider has to send audio back to where it comes from (symmetric RTP: on Asterisk `rtp_symmetric=yes`, on Twilio Elastic SIP Trunking switch it on). Most do.
+- No RTCP and no DNS SRV lookups: give the server's host name.
 - No DTMF, hold, transfer, TCP, WebSocket or video yet.
 
 ## Security
@@ -234,7 +235,7 @@ Standards: RFC 3261 and 6026 (SIP), 7616 and 8760 (digest auth), 3264 and 8866 (
 - Over UDP only your SIP server may start calls; strangers who find the port get no answer at all. `acceptFrom: "anyone"` allows direct IP calls.
 - Straw answers authentication only for the realms your server used when registering, never with a weaker hash, and never inside a call, where the far end could be asking. Digest still lets a callee behind a provider that merely forwards challenges ask for a hash, so use a long random SIP password.
 - An incoming call starts sending audio only once the caller confirmed it, so a forged call cannot aim your audio at someone else.
-- Audio comes from the signalled address. When that is a private address behind NAT, Straw learns the real one from the first packets in the first 2 s, like most SIP stacks (RTP Bleed protection).
+- Audio comes from the signalled address. Only when that is a private address behind NAT does Straw learn the real one, from the first packets within 2 s, like most SIP stacks; a public address is never replaced by another host (RTP Bleed protection).
 - The parser has hard size limits and is fuzzed.
 - Passwords never show up in errors, logs or traces.
 

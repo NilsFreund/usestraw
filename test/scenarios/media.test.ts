@@ -143,7 +143,7 @@ describe("media engines under hostile and drifting input", () => {
     for (let now = 0; now <= 120_000; now++) {
       for (const output of sender.handle({ type: "timeout" }, now)) {
         if (output.type === "send")
-          receiver.handle({ type: "packet", data: output.data, from: right }, now * stretch + 30)
+          receiver.handle({ type: "packet", data: output.data, from: left }, now * stretch + 30)
       }
       for (const output of receiver.handle({ type: "timeout" }, now * stretch + 30)) {
         if (output.type !== "frame") continue
@@ -177,7 +177,7 @@ describe("media engines under hostile and drifting input", () => {
       }
       if (now >= 1000 && now < 1500) continue
       for (const data of backlog.splice(0))
-        receiver.handle({ type: "packet", data, from: right }, now)
+        receiver.handle({ type: "packet", data, from: left }, now)
       for (const output of receiver.handle({ type: "timeout" }, now)) {
         if (output.type === "frame" && now === 3000) last = output.pcm[0] ?? 0
       }

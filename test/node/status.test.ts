@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { getHeader, replay } from "../../src"
 import { ConnectError, connectError } from "../../src/node/errors"
+import type { Link } from "../../src/node/links"
 import { type ConnectOptions, type PhoneSettings, resolveOptions } from "../../src/node/options"
 import { type Phone, startPhone } from "../../src/node/phone"
 import { type MemoryNetwork, memoryNetwork } from "./memory"
@@ -166,6 +167,260 @@ describe("phone status", () => {
     expect(await call?.ended).toStrictEqual({ by: "us", reason: "timeout" })
     expect(seen[0]).toStrictEqual({ status: "online", reason: "wrong-password" })
     expect(seen.at(-1)).toStrictEqual({ status: "offline", reason: "wrong-password" })
+  })
+
+  it("keeps its calls and incoming through a lost connection and dials back in", async () => {
+    const network = memoryNetwork()
+    const phone = await startPhone(
+      network.link,
+      { ...resolveOptions(account), expires: 60 },
+      async () => network.link,
+    )
+    const sdp =
+      "v=0\r\no=- 1 1 IN IP4 192.0.2.20\r\ns=-\r\nc=IN IP4 192.0.2.20\r\nt=0 0\r\nm=audio 4000 RTP/AVP 0\r\n"
+    network.inject(
+      new TextEncoder().encode(
+        [
+          "INVITE sip:alice@192.0.2.10 SIP/2.0",
+          "Via: SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bKlost",
+          "Max-Forwards: 70",
+          "From: <sip:bob@example.com>;tag=b1",
+          "To: <sip:alice@example.com>",
+          "Call-ID: lost-1",
+          "CSeq: 1 INVITE",
+          "Contact: <sip:bob@192.0.2.20>",
+          "Content-Type: application/sdp",
+          `Content-Length: ${sdp.length}`,
+          "",
+          sdp,
+        ].join("\r\n"),
+      ),
+    )
+    const iterator = phone.incoming[Symbol.asyncIterator]()
+    const { value: call } = await iterator.next()
+    const next = iterator.next()
+    network.drop(new Error("reset"))
+    expect(phone.status).toBe("reconnecting")
+    expect(phone.error).toMatchObject({ reason: "network", cause: new Error("reset") })
+    expect(call?.status).toBe("ringing")
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("online")
+    expect(phone.calls).toStrictEqual([call])
+    expect(network.registrar.registers.map((request) => request.callId)).toStrictEqual(
+      Array(network.registrar.registers.length).fill(network.registrar.registers[0]?.callId),
+    )
+    expect(await Promise.race([next.then(() => "yielded"), Promise.resolve("open")])).toBe("open")
+    await closeNow(phone)
+    expect(await call?.ended).toStrictEqual({ by: "us", reason: "busy" })
+    expect(await next).toStrictEqual({ value: undefined, done: true })
+  })
+
+  async function streaming(reopen?: (cancel: AbortSignal) => Promise<Link>) {
+    const network = memoryNetwork({}, { stream: true })
+    const phone = await startPhone(
+      network.link,
+      { ...resolveOptions(account), expires: 60 },
+      reopen ?? (async () => network.link),
+    )
+    return { network, phone }
+  }
+
+  it("goes offline on a lost connection it cannot dial again", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network)
+    network.drop(new Error("gone"))
+    expect(phone.status).toBe("offline")
+    expect(phone.error).toMatchObject({ reason: "network", cause: new Error("gone") })
+  })
+
+  it("fails to connect when the connection drops before the registration", async () => {
+    const network = memoryNetwork({}, { stream: true })
+    network.online = false
+    const connecting = startPhone(network.link, resolveOptions(account), async () => network.link)
+    const failed = expect(connecting).rejects.toMatchObject({ reason: "network" })
+    network.drop(new Error("reset"))
+    await failed
+  })
+
+  it("stays offline when a refused refresh closes its stream connection", async () => {
+    const { network, phone } = await streaming()
+    network.replace({ users: { alice: "changed" } })
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(phone.status).toBe("offline")
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(phone.status).toBe("offline")
+    expect(phone.error?.reason).toBe("wrong-password")
+  })
+
+  it("drops a silent stream connection and dials back in", async () => {
+    const { network, phone } = await streaming()
+    network.online = false
+    await vi.advanceTimersByTimeAsync(70_000)
+    expect(network.closed).toBe(true)
+    expect(phone.status).toBe("reconnecting")
+    network.online = true
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(phone.status).toBe("online")
+  })
+
+  it("backs off when the connection keeps dropping right after it came back", async () => {
+    const { network, phone } = await streaming()
+    network.drop()
+    const first = (phone.retryAt ?? 0) - Date.now()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("online")
+    network.drop()
+    const second = (phone.retryAt ?? 0) - Date.now()
+    expect(first).toBeLessThanOrEqual(1000)
+    expect(second).toBeGreaterThanOrEqual(1000)
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(61_000)
+    network.drop()
+    expect((phone.retryAt ?? 0) - Date.now()).toBeLessThanOrEqual(1000)
+  })
+
+  it("keeps one trace across connections, and shows no retry time while it dials", async () => {
+    const attempt = Promise.withResolvers<Link>()
+    const { network, phone } = await streaming(() => attempt.promise)
+    network.drop()
+    expect(phone.retryAt).toBeDefined()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.retryAt).toBeUndefined()
+    attempt.resolve(network.link)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(phone.status).toBe("online")
+    const trace = phone.trace ?? ""
+    expect(trace.match(/"straw":"recording"/g)).toHaveLength(1)
+    expect(replay(trace)).toMatchObject({ ok: true })
+  })
+
+  it("sends nothing while it has no connection", async () => {
+    const { network, phone } = await streaming()
+    network.drop()
+    const sent = network.sent
+    network.inject(
+      new TextEncoder().encode(
+        [
+          "OPTIONS sip:alice@192.0.2.10 SIP/2.0",
+          "Via: SIP/2.0/TLS 192.0.2.20:5061;branch=z9hG4bKgap",
+          "From: <sip:probe@example.com>;tag=p1",
+          "To: <sip:alice@example.com>",
+          "Call-ID: gap-1",
+          "CSeq: 1 OPTIONS",
+          "Content-Length: 0",
+          "",
+          "",
+        ].join("\r\n"),
+      ),
+    )
+    expect(network.sent).toBe(sent)
+    expect(phone.status).toBe("reconnecting")
+  })
+
+  it("waits out a registrar that still counts its old binding after a reconnect", async () => {
+    const { network, phone } = await streaming()
+    network.drop()
+    network.replace({ script: [403] })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("reconnecting")
+    expect(phone.error?.reason).toBe("refused")
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(phone.status).toBe("online")
+  })
+
+  it("takes a refusal after it is back online seriously again", async () => {
+    const { network, phone } = await streaming()
+    network.drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("online")
+    network.replace({ script: Array(10).fill(403) })
+    await vi.advanceTimersByTimeAsync(400_000)
+    expect(phone.status).toBe("offline")
+    expect(phone.error?.reason).toBe("refused")
+  })
+
+  it("does not wait out a wrong password after a reconnect", async () => {
+    const { network, phone } = await streaming()
+    network.drop()
+    network.replace({ users: { alice: "changed" } })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("offline")
+    expect(phone.error?.reason).toBe("wrong-password")
+  })
+
+  it("gives up on a refusing registrar once its old binding must have expired", async () => {
+    const { network, phone } = await streaming()
+    network.drop()
+    network.replace({ script: Array(100).fill(403) })
+    await vi.advanceTimersByTimeAsync(590_000)
+    expect(phone.status).toBe("reconnecting")
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(phone.status).toBe("offline")
+    expect(phone.error?.reason).toBe("refused")
+  })
+
+  it("tries again after an attempt that fails", async () => {
+    let tries = 0
+    const network = memoryNetwork({}, { stream: true })
+    const phone = await startPhone(network.link, resolveOptions(account), async () => {
+      tries += 1
+      if (tries === 1) throw new Error("refused")
+      return network.link
+    })
+    network.drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("reconnecting")
+    expect(phone.error).toMatchObject({ cause: new Error("refused") })
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(tries).toBe(2)
+    expect(phone.status).toBe("online")
+  })
+
+  it("calls off a reconnect attempt when the phone closes", async () => {
+    let signal: AbortSignal | undefined
+    const { network, phone } = await streaming(
+      (cancel) =>
+        new Promise((_, reject) => {
+          signal = cancel
+          cancel.addEventListener("abort", () => reject(cancel.reason))
+        }),
+    )
+    network.drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    await closeNow(phone)
+    expect(signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  async function droppedWhileClosing() {
+    const network = memoryNetwork()
+    const attempt = Promise.withResolvers<Link>()
+    const phone = await startPhone(
+      network.link,
+      { ...resolveOptions(account), expires: 60 },
+      () => attempt.promise,
+    )
+    network.drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    await closeNow(phone)
+    return { network, attempt, phone }
+  }
+
+  it("closes a connection that comes back after the phone closed", async () => {
+    const { network, attempt, phone } = await droppedWhileClosing()
+    const late = { ...network.link, close: vi.fn() }
+    attempt.resolve(late)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(late.close).toHaveBeenCalledOnce()
+    expect(phone.status).toBe("offline")
+  })
+
+  it("stops trying when an attempt fails after the phone closed", async () => {
+    const { attempt, phone } = await droppedWhileClosing()
+    attempt.reject(new Error("refused"))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(phone.status).toBe("offline")
   })
 
   it("closes for good when a refresh is refused", async () => {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { createResponse, type TransportAddress } from "../../../src"
+import { createResponse, type NameAddr, type TransportAddress } from "../../../src"
 import {
   createContact,
   defaultRegistrar,
   grantedExpiry,
+  listsBinding,
+  publicAddress,
   refreshDelay,
 } from "../../../src/core/registration/binding"
 import { alice, parsedRequest, register } from "../../helpers"
@@ -88,9 +90,16 @@ describe("grantedExpiry (RFC 3261 §10.2.4)", () => {
     )
   })
 
-  it("falls back to the Expires header when several foreign bindings, SIP or not, are listed", () => {
-    const response = ok([binding("sip:a@192.0.2.1", "60"), binding("tel:+4930123", "60")], "900")
-    expect(grantedExpiry(response, contact, 3600)).toBe(900)
+  it("does not take a binding that is being removed for its own", () => {
+    const response = ok([binding("sip:a@192.0.2.1", "0"), binding("sip:b@192.0.2.2", "300")])
+    expect(grantedExpiry(response, contact, 3600)).toBe(300)
+  })
+
+  it("takes the soonest expiry when it cannot tell which binding is its own", () => {
+    const response = ok([binding("sip:a@192.0.2.1", "600"), binding("tel:+4930123", "60")], "900")
+    expect(grantedExpiry(response, contact, 3600)).toBe(60)
+    const bare = ok([binding("sip:a@192.0.2.1", null), binding("tel:+4930123", null)], "900")
+    expect(grantedExpiry(bare, contact, 3600)).toBe(900)
   })
 
   it("never grants more than requested", () => {
@@ -121,5 +130,105 @@ describe("refreshDelay", () => {
 
   it("never refreshes more often than every 5 s", () => {
     expect(refreshDelay(1, () => 0.5)).toBe(5000)
+  })
+})
+
+describe("publicAddress (RFC 3581 §4)", () => {
+  const at = (host: string, port = 5060, transport = "UDP") =>
+    ({ transport, host, port }) as TransportAddress
+  const seen = (params: [string, string][], current = at("192.168.1.10")) => {
+    const response = createResponse(request, 200, "OK")
+    const [via] = response.via
+    if (!via) throw new Error("No Via")
+    return publicAddress({ ...response, via: [{ ...via, params: new Map(params) }] }, current)
+  }
+
+  it("moves to where the registrar saw us over UDP", () => {
+    expect(
+      seen([
+        ["received", "203.0.113.1"],
+        ["rport", "33172"],
+      ]),
+    ).toStrictEqual(at("203.0.113.1", 33_172))
+    expect(
+      seen(
+        [
+          ["received", "192.168.1.5"],
+          ["rport", "5070"],
+        ],
+        at("172.17.0.2"),
+      ),
+    ).toStrictEqual(at("192.168.1.5", 5070))
+  })
+
+  it.each([
+    [
+      "the same address, however it is spelt",
+      [
+        ["received", "2001:DB8::0:5"],
+        ["rport", "5060"],
+      ],
+      at("2001:db8::5"),
+    ],
+    ["no rport", [["received", "203.0.113.1"]], at("192.168.1.10")],
+    [
+      "port 0",
+      [
+        ["received", "203.0.113.1"],
+        ["rport", "0"],
+      ],
+      at("192.168.1.10"),
+    ],
+    [
+      "a name instead of an IP",
+      [
+        ["received", "nat.example"],
+        ["rport", "1"],
+      ],
+      at("192.168.1.10"),
+    ],
+    [
+      "TLS, where the connection carries the calls",
+      [
+        ["received", "203.0.113.1"],
+        ["rport", "1"],
+      ],
+      at("192.168.1.10", 5060, "TLS"),
+    ],
+    [
+      "a private address seen from a public one",
+      [
+        ["received", "10.0.0.9"],
+        ["rport", "5060"],
+      ],
+      at("203.0.113.7"),
+    ],
+    [
+      "a private port change",
+      [
+        ["received", "192.168.1.10"],
+        ["rport", "7000"],
+      ],
+      at("192.168.1.10"),
+    ],
+  ] as [string, [string, string][], TransportAddress][])(
+    "stays put for %s",
+    (_, params, current) => {
+      expect(seen(params, current)).toBeUndefined()
+    },
+  )
+})
+
+describe("listsBinding", () => {
+  const ours = { uri: "sip:alice@203.0.113.1:33172", params: new Map() }
+  const ok = (contact: NameAddr[]) => ({ ...createResponse(request, 200, "OK"), contact })
+
+  it("finds our binding, and trusts a registrar that lists none", () => {
+    expect(listsBinding(ok([ours]), ours)).toBe(true)
+    expect(listsBinding(ok([]), ours)).toBe(true)
+    expect(listsBinding({ ...ok([]), contact: "*" }, ours)).toBe(true)
+    expect(listsBinding(ok([{ uri: "sip:alice@192.168.1.10", params: new Map() }]), ours)).toBe(
+      false,
+    )
   })
 })

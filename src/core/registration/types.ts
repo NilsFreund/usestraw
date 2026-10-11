@@ -1,3 +1,4 @@
+import type { NameAddr } from "../../message/fields/name-addr"
 import type { SipRequest } from "../../message/types"
 import type { TransactionEvent } from "../../transaction/types"
 import type { TransportAddress } from "../../transport/address"
@@ -16,6 +17,7 @@ export type RegistrationOutput =
 export type RegistrationInput = Extract<TransactionEvent, { readonly type: "response" | "timeout" }>
 
 export interface Registration {
+  readonly contact: NameAddr
   register(intent: RegisterIntent): RegistrationOutput[]
   unregister(): RegistrationOutput[]
   receive(input: RegistrationInput, now: number): RegistrationOutput[]

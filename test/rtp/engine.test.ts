@@ -241,14 +241,24 @@ describe("media engine: hearing", () => {
 describe("media engine: who it listens to (symmetric RTP without RTP Bleed)", () => {
   const destination = (engine: MediaEngine, at: number) =>
     sent(engine.handle({ type: "timeout" }, at))[0]?.to
+  const natted = { host: "10.0.0.5", port: 4000 }
+  const behindNat = () => live({ remote: natted })
 
   it("learns a peer behind NAT after three packets in sequence and answers there", () => {
-    const engine = live()
+    const engine = behindNat()
     hear(engine, nat, [0, 1], 0)
-    expect(destination(engine, 0)).toStrictEqual(remote)
-    hear(engine, nat, [2], 40)
+    expect(destination(engine, 0)).toStrictEqual(natted)
+    hear(engine, nat, [2], 40, { payloadType: 13 })
     expect(destination(engine, 40)).toStrictEqual(nat)
-    expect(frames(engine.handle({ type: "timeout" }, 120)).map(level)).toContain(1)
+    hear(engine, nat, [3], 60)
+    expect(frames(engine.handle({ type: "timeout" }, 140)).map(level)).toContain(1)
+  })
+
+  it("never lets another host replace a public signalled address", () => {
+    const engine = live()
+    hear(engine, nat, [0, 1, 2, 3], 0)
+    expect(destination(engine, 0)).toStrictEqual(remote)
+    expect(frames(engine.handle({ type: "timeout" }, 120)).map(level)).not.toContain(1)
   })
 
   it("follows a new port of the signalled host at once", () => {
@@ -283,39 +293,44 @@ describe("media engine: who it listens to (symmetric RTP without RTP Bleed)", ()
       ],
     ],
   ] as const)("does not learn from three packets with %s", (_, packets) => {
-    const engine = live()
+    const engine = behindNat()
     for (const [from, index, ssrc] of packets) hear(engine, from, [index], 0, { ssrc })
-    expect(destination(engine, 0)).toStrictEqual(remote)
+    expect(destination(engine, 0)).toStrictEqual(natted)
   })
 
   it("never lets a stranger take over once the signalled address speaks", () => {
-    const engine = live()
-    hear(engine, remote, [0], 0)
+    const engine = behindNat()
+    hear(engine, natted, [0], 0)
     hear(engine, stranger, [1, 2, 3, 4], 10, { value: -1000 })
-    expect(destination(engine, 20)).toStrictEqual(remote)
+    expect(destination(engine, 20)).toStrictEqual(natted)
     expect(frames(engine.handle({ type: "timeout" }, 200)).map(level)).not.toContain(-1)
   })
 
-  it("stops learning two seconds after the media is known and after it learnt once", () => {
-    const engine = live()
-    hear(engine, nat, [0, 1, 2], 2001)
-    expect(destination(engine, 2001)).toStrictEqual(remote)
-    const edge = live()
-    hear(edge, nat, [0, 1, 2], 2000)
+  it("learns within two seconds of the first packet, however late it comes, and only once", () => {
+    const late = behindNat()
+    hear(late, nat, [0, 1, 2], 10_000)
+    expect(destination(late, 10_000)).toStrictEqual(nat)
+    const slow = behindNat()
+    hear(slow, nat, [0, 1], 0)
+    hear(slow, nat, [2], 2001)
+    expect(destination(slow, 2001)).toStrictEqual(natted)
+    const edge = behindNat()
+    hear(edge, nat, [0, 1], 0)
+    hear(edge, nat, [2], 2000)
     expect(destination(edge, 2000)).toStrictEqual(nat)
-    const early = live()
+    const early = behindNat()
     hear(early, nat, [0, 1, 2], 0)
     hear(early, stranger, [3, 4, 5], 20)
     expect(destination(early, 40)).toStrictEqual(nat)
   })
 
   it("forgets what it learnt, and a half-learnt source, when the media moves", () => {
-    const engine = live()
+    const engine = behindNat()
     hear(engine, nat, [0, 1, 2], 0)
-    const moved = { ...media, remote: { host: "192.0.2.30", port: 5000 } }
+    const moved = { ...media, remote: { host: "192.168.1.30", port: 5000 } }
     engine.handle({ type: "media", media: moved }, 10)
     expect(destination(engine, 20)).toStrictEqual(moved.remote)
-    const half = live()
+    const half = behindNat()
     hear(half, nat, [0, 1], 0)
     half.handle({ type: "media", media: moved }, 10)
     hear(half, nat, [2], 20)
@@ -323,17 +338,17 @@ describe("media engine: who it listens to (symmetric RTP without RTP Bleed)", ()
   })
 
   it("goes back to the signalled address when it speaks after a latch", () => {
-    const engine = live()
+    const engine = behindNat()
     hear(engine, nat, [0, 1, 2], 0)
-    hear(engine, remote, [3], 20)
-    expect(destination(engine, 20)).toStrictEqual(remote)
+    hear(engine, natted, [3], 20)
+    expect(destination(engine, 20)).toStrictEqual(natted)
   })
 
   it("learns again when the media moves, and compares IPv6 hosts by value", () => {
     const engine = live({ remote: { host: "2001:DB8:0:0::5", port: 4000 } })
     hear(engine, { host: "2001:db8::5", port: 4000 }, [0], 0)
     expect(destination(engine, 0)).toStrictEqual({ host: "2001:DB8:0:0::5", port: 4000 })
-    const moved = { ...media, remote: { host: "192.0.2.30", port: 5000 } }
+    const moved = { ...media, remote: { host: "fd00::5", port: 5000 } }
     engine.handle({ type: "media", media: moved }, 5000)
     hear(engine, nat, [10, 11, 12], 5000)
     expect(destination(engine, 5000)).toStrictEqual(nat)
