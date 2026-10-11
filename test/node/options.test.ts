@@ -53,6 +53,7 @@ describe("resolveOptions", () => {
       connectTimeout: 10_000,
       trace: true,
       acceptFrom: "server",
+      register: true,
       credentials: { username: "alice", password: "secret" },
       signal,
       tls: { ca: "pem" },
@@ -68,6 +69,9 @@ describe("resolveOptions", () => {
         server: undefined,
         signal: undefined,
         tls: { ca: undefined },
+        acceptFrom: undefined,
+        register: undefined,
+        localPort: undefined,
       }),
     ).toStrictEqual({
       aor: "sip:alice@example.com",
@@ -79,6 +83,7 @@ describe("resolveOptions", () => {
       connectTimeout: 10_000,
       trace: true,
       acceptFrom: "server",
+      register: true,
     })
   })
 
@@ -188,6 +193,7 @@ describe("resolveOptions", () => {
       connectTimeout: 10_000,
       trace: true,
       acceptFrom: "server",
+      register: true,
       credentials: { username: "agent", password: "secret" },
       signal,
     })
@@ -249,6 +255,62 @@ describe("resolveOptions", () => {
     )
     expect(() =>
       resolveOptions("udp://dev@127.0.0.1", { acceptFrom: "everyone" as "anyone" }),
-    ).toThrow(new TypeError('acceptFrom must be "server" or "anyone", got "everyone"'))
+    ).toThrow(
+      new TypeError(
+        'acceptFrom must be "server", "anyone" or a list of IPs and CIDR ranges, got "everyone"',
+      ),
+    )
+  })
+
+  it("takes a copy of the IPs and ranges that may call besides the server", () => {
+    const ranges = ["198.51.100.0/24", "2001:db8::7"]
+    const settings = resolveOptions("udp://dev@127.0.0.1", { acceptFrom: ranges })
+    ranges.push("0.0.0.0/0")
+    expect(settings.acceptFrom).toStrictEqual(["198.51.100.0/24", "2001:db8::7"])
+    expect(() =>
+      resolveOptions("udp://dev@127.0.0.1", { acceptFrom: ["sip.example.com"] }),
+    ).toThrow(
+      new TypeError('acceptFrom must list IP addresses or CIDR ranges, got ["sip.example.com"]'),
+    )
+  })
+
+  it("connects to a trunk without registering, on a fixed local port", () => {
+    const settings = resolveOptions("udp://dev@127.0.0.1", { register: false, localPort: 5060 })
+    expect(settings).toMatchObject({ register: false, localPort: 5060 })
+    expect(() => resolveOptions("udp://dev@127.0.0.1", { register: "no" as never })).toThrow(
+      new TypeError('register must be true or false, got "no"'),
+    )
+  })
+
+  it.each([0, 65_536, 5060.5])("refuses localPort %s", (localPort) => {
+    expect(() => resolveOptions("udp://dev@127.0.0.1", { localPort })).toThrow(
+      new RangeError(`localPort must be an integer from 1 to 65535, got ${localPort}`),
+    )
+  })
+
+  it("takes the lowest and highest port", () => {
+    expect(resolveOptions("udp://dev@127.0.0.1", { localPort: 1 }).localPort).toBe(1)
+    expect(resolveOptions("udp://dev@127.0.0.1", { localPort: 65_535 }).localPort).toBe(65_535)
+  })
+
+  it("refuses a fixed port or an acceptFrom list over TLS, where nobody else can call in", () => {
+    expect(resolveOptions("tls://dev@127.0.0.1", { register: false }).register).toBe(false)
+    expect(resolveOptions("tls://dev@127.0.0.1", { acceptFrom: "anyone" }).acceptFrom).toBe(
+      "anyone",
+    )
+    expect(() => resolveOptions("tls://dev@127.0.0.1", { localPort: 5061 })).toThrow(
+      new TypeError("localPort only works with a udp:// server"),
+    )
+    expect(() => resolveOptions("tls://dev@127.0.0.1", { acceptFrom: ["192.0.2.1"] })).toThrow(
+      new TypeError("An acceptFrom list only works with a udp:// server"),
+    )
+  })
+
+  it("refuses a list with holes", () => {
+    // biome-ignore lint/suspicious/noSparseArray: a hole is what this test is about
+    const acceptFrom = [, "192.0.2.1"] as string[]
+    expect(() => resolveOptions("udp://dev@127.0.0.1", { acceptFrom })).toThrow(
+      /^acceptFrom must list IP addresses or CIDR ranges/,
+    )
   })
 })

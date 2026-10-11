@@ -27,6 +27,11 @@ export interface TlsSettings {
   readonly rejectUnauthorized?: boolean
 }
 
+export interface LinkSettings {
+  readonly tls?: TlsSettings | undefined
+  readonly port?: number | undefined
+}
+
 export interface Peer {
   readonly address: string
   readonly family: number
@@ -43,7 +48,7 @@ const PONG_WAIT = 10_000
 
 export async function openLink(
   server: Server,
-  tls?: TlsSettings,
+  { tls, port }: LinkSettings = {},
   signal?: AbortSignal,
 ): Promise<Link> {
   if (server.transport === "TLS") return openTls(server, tls, signal)
@@ -51,15 +56,20 @@ export async function openLink(
   signal?.throwIfAborted()
   const { address, family } = found[0] as LookupAddress
   const others = found.filter((entry) => entry.family === family).map((entry) => entry.address)
-  return openUdp({ address, family, port: server.port, others })
+  return openUdp({ address, family, port: server.port, others }, port)
 }
 
-export async function openUdp(peer: Peer): Promise<Link> {
+export async function openUdp(peer: Peer, port = 0): Promise<Link> {
   const type: SocketType = peer.family === 6 ? "udp6" : "udp4"
   const host = await outboundAddress(type, peer)
   const socket = createSocket(type)
-  socket.bind(0)
-  await once(socket, "listening")
+  socket.bind({ port, exclusive: true })
+  try {
+    await once(socket, "listening")
+  } catch (error) {
+    socket.close()
+    throw error
+  }
   let handlers: LinkHandlers | undefined
   let open = true
   let keepalive: ReturnType<typeof setInterval> | undefined

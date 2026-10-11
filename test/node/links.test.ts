@@ -1,4 +1,4 @@
-import { createSocket } from "node:dgram"
+import { createSocket, Socket } from "node:dgram"
 import dns from "node:dns"
 import { isIP } from "node:net"
 import { networkInterfaces } from "node:os"
@@ -118,6 +118,28 @@ describe("openUdp", () => {
     link.close()
   })
 
+  it("binds the port it is given, and frees the socket when that port is taken", async () => {
+    await vi.waitFor(() => expect(udpHandles()).toBe(0))
+    const taken = createSocket("udp4")
+    await new Promise<void>((resolve) => taken.bind(0, resolve))
+    const port = taken.address().port
+    const peer = { address: "127.0.0.1", family: 4, port: 5060 }
+    await expect(openUdp(peer, port)).rejects.toMatchObject({ code: "EADDRINUSE" })
+    await vi.waitFor(() => expect(udpHandles()).toBe(1))
+    taken.close()
+    const link = await openLink({ transport: "UDP", host: "127.0.0.1", port: 5060 }, { port })
+    expect(link.local).toStrictEqual({ transport: "UDP", host: "127.0.0.1", port })
+    link.close()
+  })
+
+  it("binds its port exclusively, so cluster workers never share one", async () => {
+    const bind = vi.spyOn(Socket.prototype, "bind")
+    const link = await openUdp({ address: "127.0.0.1", family: 4, port: 5060 })
+    expect(bind).toHaveBeenCalledWith({ port: 0, exclusive: true })
+    bind.mockRestore()
+    link.close()
+  })
+
   it("fails when the address family does not match", async () => {
     await expect(openUdp({ address: "::1", family: 4, port: 5060 })).rejects.toThrow()
   })
@@ -140,7 +162,7 @@ describe("openLink", () => {
 
   it("prefers IPv4 for TLS where the server listens on both", async () => {
     const server = await tlsRegistrar({}, { host: "::" })
-    const link = await openLink(tls(server.port), { ca: certificate })
+    const link = await openLink(tls(server.port), { tls: { ca: certificate } })
     expect(link.local.host).toBe("127.0.0.1")
     link.close()
     await server.close()
@@ -148,7 +170,7 @@ describe("openLink", () => {
 
   it("opens TLS by hostname with SNI", async () => {
     const server = await tlsRegistrar()
-    const link = await openLink(tls(server.port), { ca: certificate })
+    const link = await openLink(tls(server.port), { tls: { ca: certificate } })
     const { address } = await localhost(server.port)
     await vi.waitFor(() => expect(server.sockets).toHaveLength(1))
     expect(server.sockets[0]?.servername).toBe("localhost")

@@ -5,7 +5,7 @@ import { parseMessage } from "../message/parse"
 import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
 import { isRequest, type SipRequest } from "../message/types"
-import { sameHost as sameAddress } from "../sdp/address"
+import { inRange } from "../sdp/address"
 import { isPlayable } from "../sdp/negotiate"
 import { checkTime, earliest } from "../support/time"
 import { resolveTimers, type TimerSettings } from "../transaction/timers"
@@ -17,7 +17,6 @@ import { createCalls } from "./calls/calls"
 import { INCOMPATIBLE_MEDIA } from "./calls/replies"
 import type { CallOutput } from "./calls/types"
 import {
-  checkAcceptFrom,
   checkAddress,
   checkAor,
   checkCall,
@@ -30,6 +29,7 @@ import {
   checkRejection,
   checkRequestUri,
   checkSource,
+  parseAcceptFrom,
 } from "./checks"
 import { event, send } from "./outputs"
 import { defaultRegistrar } from "./registration/binding"
@@ -67,8 +67,8 @@ export interface CoreOptions {
   /** Turns incoming calls away as busy (486) while this many calls run. Defaults to 100. */
   readonly maxCalls?: number | undefined
   /**
-   * IP addresses that may start calls and other requests, such as the server's; anyone when
-   * unset. Requests inside a call only need to match the call.
+   * IP addresses and CIDR ranges that may start calls and other requests, such as the server's;
+   * anyone when unset. Requests inside a call only need to match the call.
    */
   readonly acceptFrom?: readonly string[] | undefined
 }
@@ -113,7 +113,7 @@ export function createCore(options: CoreOptions): Core {
   const credentials = options.credentials && Object.freeze({ ...options.credentials })
   if (credentials) checkCredentials(credentials)
   checkMaxCalls(maxCalls)
-  if (acceptFrom !== undefined) checkAcceptFrom(acceptFrom)
+  const accepted = acceptFrom === undefined ? undefined : parseAcceptFrom(acceptFrom)
   // Ended calls linger for 64·T1, so a flood of short calls is capped before it costs memory
   const capacity = Math.max(64, 4 * maxCalls)
   const timers = resolveTimers(options.timers)
@@ -154,12 +154,13 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  // Strangers only get through inside a call, whose unguessable ids they have to match
+  // Strangers only get through inside a call, whose unguessable ids they have to match. A CANCEL
+  // is not inside the call and takes the INVITE's way, so it never comes from a stranger
   function accepts(request: SipRequest, from: TransportAddress): boolean {
-    if (acceptFrom === undefined || acceptFrom.some((host) => sameAddress(host, from.host))) {
+    if (accepted === undefined || accepted.some((range) => inRange(from.host, range))) {
       return true
     }
-    return request.to.params.has("tag") && isForCalls(request)
+    return request.method !== "CANCEL" && request.to.params.has("tag") && isForCalls(request)
   }
 
   function receive(data: Uint8Array, from: TransportAddress, now: number): CoreOutput[] {
@@ -258,6 +259,9 @@ export function createCore(options: CoreOptions): Core {
     return outputs.flatMap((output) => {
       if (output.type === "send") return [send(output.message, output.to)]
       const happened = output.event
+      if (happened.type === "response" && happened.response.cseq.method === "OPTIONS") {
+        registration.observe(happened.response)
+      }
       if (isRegistration(happened)) {
         return translateRegistration(registration.receive(happened, now), now)
       }

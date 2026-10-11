@@ -30,7 +30,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Call fields: `id`, `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `toJSON()`.
 - Call reasons: hangup, cancelled, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, timeout.
 - `connect()` rejects with `ConnectError`; switch on `error.reason`: wrong-password, password-missing, unsupported-auth, refused, unavailable, no-answer, network.
-- Options of `connect`: `password`, `authUser`, `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100), `acceptFrom` ("server" by default, or "anyone" for direct IP calls over UDP).
+- Options of `connect`: `password`, `authUser`, `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100), `acceptFrom` ("server" by default, "anyone" for direct IP calls, or IPs and CIDR ranges allowed besides the server, over UDP), `register` (false for an IP-authenticated trunk: connect only pings the server, then once a minute), `localPort` (fixed local UDP port for the trunk to call).
 
 ## Pitfalls
 

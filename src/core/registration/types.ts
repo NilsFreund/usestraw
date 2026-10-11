@@ -1,5 +1,5 @@
 import type { NameAddr } from "../../message/fields/name-addr"
-import type { SipRequest } from "../../message/types"
+import type { SipRequest, SipResponse } from "../../message/types"
 import type { TransactionEvent } from "../../transaction/types"
 import type { TransportAddress } from "../../transport/address"
 import type { RegistrationEvent } from "../types"
@@ -21,6 +21,7 @@ export interface Registration {
   register(intent: RegisterIntent): RegistrationOutput[]
   unregister(): RegistrationOutput[]
   receive(input: RegistrationInput, now: number): RegistrationOutput[]
+  observe(response: SipResponse): void
   expire(now: number): RegistrationOutput[]
   nextDeadline(): number | undefined
 }

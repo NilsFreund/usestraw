@@ -144,6 +144,14 @@ export function createRegistration(
     return [notify({ type: "registration", state: "failed", failure, retryIn })]
   }
 
+  // Without a registration, answers to OPTIONS show where calls have to come to
+  function observe(response: SipResponse): void {
+    const seen = seq === 0 ? publicAddress(response, reachable) : undefined
+    if (!seen) return
+    reachable = seen
+    registrant = { ...registrant, contact: createContact(seen, identity.aor) }
+  }
+
   function expire(now: number): RegistrationOutput[] {
     if (!scheduled || scheduled.at > now) return []
     return dispatch(scheduled.attempt)
@@ -156,6 +164,7 @@ export function createRegistration(
     register,
     unregister,
     receive,
+    observe,
     expire,
     nextDeadline: () => scheduled?.at,
   }

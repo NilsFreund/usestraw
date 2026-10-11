@@ -652,3 +652,132 @@ describe("phone status", () => {
     await closeNow(phone)
   })
 })
+
+describe("phone on a trunk", () => {
+  const trunk = { register: false } as const
+  const at = (host: string) => ({ transport: "UDP", host, port: 5060 }) as const
+  const streamed = async () => {
+    const network = memoryNetwork({}, { stream: true })
+    const settings = resolveOptions({ ...account, ...trunk })
+    const phone = await startPhone(network.link, settings, async () => network.link)
+    return { network, phone }
+  }
+
+  it("goes online once the server answers, and never registers", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network, trunk)
+    expect(phone.status).toBe("online")
+    expect(network.sent).toBe(1)
+    await closeNow(phone)
+    expect(network.sent).toBe(1)
+    expect(network.registrar.registers).toStrictEqual([])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("takes any answer as a sign of life", async () => {
+    const network = memoryNetwork({ optionsStatus: 405 })
+    const phone = await options(network, trunk)
+    expect(phone.status).toBe("online")
+    await closeNow(phone)
+  })
+
+  it("fails as no-answer when the server stays silent", async () => {
+    const network = memoryNetwork()
+    network.online = false
+    const starting = options(network, trunk).catch((thrown: unknown) => thrown)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await starting).toStrictEqual(connectError({ reason: "timeout" }, context))
+  })
+
+  it("checks the server every minute and reports it gone until it answers again", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network, trunk)
+    const seen = watch(phone)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(network.sent).toBe(2)
+    network.online = false
+    await vi.advanceTimersByTimeAsync(92_001)
+    expect(phone.status).toBe("reconnecting")
+    expect(phone.error?.reason).toBe("no-answer")
+    const retryAt = phone.retryAt ?? 0
+    expect(retryAt - Date.now()).toBeLessThanOrEqual(1000)
+    network.online = true
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("online")
+    expect(seen).toStrictEqual([
+      { status: "reconnecting", reason: "no-answer", retryAt },
+      { status: "reconnecting", reason: "no-answer" },
+      { status: "online" },
+    ])
+    expect(network.registrar.registers).toStrictEqual([])
+    await closeNow(phone)
+  })
+
+  it("stays offline when closed while a ping is out", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network, trunk)
+    network.online = false
+    await vi.advanceTimersByTimeAsync(60_000)
+    await closeNow(phone)
+    expect(phone.status).toBe("offline")
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("leaves no timer behind when closed while it waits to check again", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network, trunk)
+    network.online = false
+    await vi.advanceTimersByTimeAsync(92_001)
+    expect(phone.retryAt).toBeDefined()
+    await closeNow(phone)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("drops a stream connection whose server stops answering, and checks once a minute again after dialing back in", async () => {
+    const { network, phone } = await streamed()
+    network.online = false
+    await vi.advanceTimersByTimeAsync(92_001)
+    expect(network.closed).toBe(true)
+    expect(phone.status).toBe("reconnecting")
+    network.online = true
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(phone.status).toBe("online")
+    const sent = network.sent
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(network.sent).toBe(sent + 1)
+    await closeNow(phone)
+  })
+
+  it("stops checking once closed", async () => {
+    const { network, phone } = await streamed()
+    network.online = false
+    network.drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    await closeNow(phone)
+    const sent = network.sent
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(network.sent).toBe(sent)
+    expect(phone.status).toBe("offline")
+  })
+
+  it("takes requests from the listed ranges besides the server, and from nobody else", async () => {
+    const network = memoryNetwork()
+    const phone = await options(network, { ...trunk, acceptFrom: ["198.51.100.0/24"] })
+    const sent = network.destinations.length
+    network.inject(incoming("198.51.100.7:5060"), at("198.51.100.7"))
+    network.inject(incoming("203.0.113.9:5060"), at("203.0.113.9"))
+    network.inject(incoming())
+    expect(network.destinations.slice(sent).map((to) => to.host)).toStrictEqual([
+      "198.51.100.7",
+      "192.0.2.20",
+    ])
+    await closeNow(phone)
+  })
+
+  it("closes its link when the core refuses the settings", async () => {
+    const network = memoryNetwork()
+    const settings = { ...resolveOptions(account), acceptFrom: ["nowhere"] }
+    await expect(startPhone(network.link, settings)).rejects.toThrow(TypeError)
+    expect(network.closed).toBe(true)
+  })
+})

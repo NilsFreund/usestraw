@@ -1,4 +1,4 @@
-import { createSocket } from "node:dgram"
+import { createSocket, Socket } from "node:dgram"
 import dns from "node:dns"
 import { once } from "node:events"
 import { isIP } from "node:net"
@@ -263,6 +263,13 @@ describe("openAudio", () => {
     await expect(openAudio("192.0.2.1", () => undefined)).rejects.toMatchObject({
       code: "EADDRNOTAVAIL",
     })
+  })
+
+  it("binds its port exclusively, so cluster workers never share one", async () => {
+    const bind = vi.spyOn(Socket.prototype, "bind")
+    await open()
+    expect(bind).toHaveBeenCalledWith(expect.objectContaining({ exclusive: true }))
+    bind.mockRestore()
   })
 
   it("binds IPv6 hosts too", async () => {

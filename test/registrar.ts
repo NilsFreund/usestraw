@@ -30,6 +30,7 @@ export interface RegistrarOptions {
   readonly rewrite?: string
   readonly script?: readonly number[]
   readonly retryAfter?: number
+  readonly optionsStatus?: number
 }
 
 export interface Registrar extends Core {
@@ -52,6 +53,7 @@ export function registrar(options: RegistrarOptions = {}): (random: Random) => R
     rewrite,
     script = [],
     retryAfter,
+    optionsStatus = 200,
   } = options
   const [status, reason, challengeName, answerName] = proxy
     ? [407, "Proxy Authentication Required", "Proxy-Authenticate", "Proxy-Authorization"]
@@ -162,7 +164,8 @@ export function registrar(options: RegistrarOptions = {}): (random: Random) => R
         }
         const to = replyAddress(topVia(request), input.from)
         if (request.method === "OPTIONS") {
-          return [{ type: "send", data: serializeMessage(createResponse(request, 200, "OK")), to }]
+          const response = createResponse(request, optionsStatus, "OK")
+          return [{ type: "send", data: serializeMessage(response), to }]
         }
         if (request.method !== "REGISTER") return []
         registers.push(request)

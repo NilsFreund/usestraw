@@ -157,7 +157,7 @@ async function bindEven(host: string, random: Random): Promise<Socket> {
     const port = FIRST_PORT + 2 * Math.floor(random() * (PORTS / 2))
     const socket = createSocket(isIP(host) === 6 ? "udp6" : "udp4")
     try {
-      socket.bind(port, host)
+      socket.bind({ port, address: host, exclusive: true })
       await once(socket, "listening")
       return socket
     } catch (error) {

@@ -1,3 +1,5 @@
+import { createSocket } from "node:dgram"
+import { once } from "node:events"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { getHeader, replay } from "../../src"
 import { ConnectError, type ConnectOptions, connect, type Phone } from "../../src/node"
@@ -189,6 +191,39 @@ describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
 })
 
 describe("connect", () => {
+  it("connects to a trunk without registering, and takes calls at its fixed port", async () => {
+    const server = await serve(udpRegistrar())
+    const probe = createSocket("udp4")
+    await new Promise<void>((resolve) => probe.bind(0, "127.0.0.1", resolve))
+    const port = probe.address().port
+    probe.close()
+    const phone = await phoneFor({ ...options(server, "udp"), register: false, localPort: port })
+    expect(phone.status).toBe("online")
+    expect(server.registrar.registers).toStrictEqual([])
+    const trunk = createSocket("udp4")
+    cleanups.push(() => new Promise((resolve) => trunk.close(() => resolve())))
+    const answered = once(trunk, "message")
+    trunk.send(
+      [
+        `OPTIONS sip:alice@127.0.0.1:${port} SIP/2.0`,
+        "Via: SIP/2.0/UDP 127.0.0.1:5999;rport;branch=z9hG4bKtrunk",
+        "From: <sip:trunk@example.com>;tag=t1",
+        "To: <sip:alice@example.com>",
+        "Call-ID: trunk-1",
+        "CSeq: 1 OPTIONS",
+        "Content-Length: 0",
+        "",
+        "",
+      ].join("\r\n"),
+      port,
+      "127.0.0.1",
+    )
+    const [reply] = (await answered) as [Buffer]
+    expect(reply.toString().split("\r\n", 1)[0]).toBe("SIP/2.0 200 OK")
+    await phone.close()
+    expect(server.registrar.registers).toStrictEqual([])
+  })
+
   it("derives a UDP server from a sip uri", async () => {
     const server = await serve(udpRegistrar())
     const phone = await phoneFor({ uri: `sip:alice@127.0.0.1:${server.port}`, password: "secret" })

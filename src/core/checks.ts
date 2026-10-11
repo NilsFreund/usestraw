@@ -2,7 +2,7 @@ import { isCallId } from "../message/fields/call-id"
 import { isIp } from "../message/fields/host"
 import { isRequestUri, isUri, splitSipUri } from "../message/fields/uri"
 import { hasLineBreak, isText, show } from "../message/syntax"
-import { familyOf, isUnspecified } from "../sdp/address"
+import { familyOf, isUnspecified, parseRange, type Range } from "../sdp/address"
 import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
 import { isAddress, type TransportAddress } from "../transport/address"
@@ -94,10 +94,17 @@ export function checkRejection(status: number): void {
   }
 }
 
-export function checkAcceptFrom(hosts: readonly string[]): void {
-  if (!Array.isArray(hosts) || !hosts.every(isIp)) {
-    throw new TypeError(`acceptFrom must list IP addresses, got ${show(hosts)}`)
+export function parseAcceptFrom(ranges: readonly string[]): Range[] {
+  const valid = Array.isArray(ranges)
+  const parsed = valid
+    ? Array.from(ranges, (range: unknown) =>
+        typeof range === "string" ? parseRange(range) : undefined,
+      )
+    : []
+  if (!valid || parsed.includes(undefined)) {
+    throw new TypeError(`acceptFrom must list IP addresses or CIDR ranges, got ${show(ranges)}`)
   }
+  return parsed.filter((range) => range !== undefined)
 }
 
 export function checkMaxCalls(maxCalls: number): void {

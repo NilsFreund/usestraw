@@ -242,6 +242,59 @@ describe("createCore", () => {
       ])
     })
 
+    const seenAt = (request: SipRequest, received: string, rport: string) => {
+      const [via, ...rest] = request.via
+      if (!via) throw new Error("No Via")
+      const params = new Map([...via.params, ["received", received], ["rport", rport]])
+      const answer = { ...request, via: [{ ...via, params }, ...rest] }
+      return serializeMessage(createResponse(answer, 200, "OK", { toTag: "r1" }))
+    }
+    const contactOf = (ua: Core, at: number) => {
+      const media = { host: "192.0.2.10", port: 40_000 }
+      const call = {
+        type: "call",
+        call: `c${at}`,
+        uri: "sip:bob@example.com",
+        to: bob,
+        media,
+      } as const
+      return sentRequest(ua.handle({ type: "command", command: call }, at)[0]).contact
+    }
+
+    it("places calls from the public address an OPTIONS answer showed, when it never registers", () => {
+      const ua = registering()
+      const ping = sentRequest(ua.handle(options(), 0)[0])
+      ua.handle(receive(seenAt(ping, "203.0.113.1", "33172")), 10)
+      expect(contactOf(ua, 20)).toStrictEqual([
+        { uri: "sip:alice@203.0.113.1:33172", params: new Map() },
+      ])
+    })
+
+    it("never trades the public address it learnt for a private one", () => {
+      const ua = createCore({
+        address: { ...alice, host: "10.0.0.5" },
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+      })
+      const first = sentRequest(ua.handle(options(), 0)[0])
+      ua.handle(receive(seenAt(first, "203.0.113.1", "33172")), 10)
+      const second = sentRequest(ua.handle(options(), 20)[0])
+      ua.handle(receive(seenAt(second, "10.0.0.9", "5060")), 30)
+      expect(contactOf(ua, 40)).toStrictEqual([
+        { uri: "sip:alice@203.0.113.1:33172", params: new Map() },
+      ])
+    })
+
+    it("leaves the Contact to the registration once it registers", () => {
+      const ua = registering()
+      sentRequest(ua.handle(register, 0)[0])
+      const ping = sentRequest(ua.handle(options(), 1)[0])
+      ua.handle(receive(seenAt(ping, "203.0.113.1", "33172")), 10)
+      expect(contactOf(ua, 20)).toStrictEqual([
+        { uri: "sip:alice@192.0.2.10:5060", params: new Map() },
+      ])
+    })
+
     it("sends a REGISTER through a client transaction and reports the binding", () => {
       const ua = registering()
       const request = sentRequest(ua.handle(register, 0)[0])
@@ -559,6 +612,22 @@ describe("createCore", () => {
       expect(statuses(guarded.handle(receive(forged), 0))).toStrictEqual([481])
     })
 
+    it("never lets a stranger cancel a ringing call, even with a To tag", () => {
+      const guarded = createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        acceptFrom: ["192.0.2.20"],
+      })
+      expect(statuses(guarded.handle(receive(incoming("INVITE")), 0))).toStrictEqual([180])
+      const cancel = incoming("CANCEL", undefined, "To: <sip:alice@example.com>;tag=forged")
+      const stranger = { ...bob, host: "203.0.113.9" }
+      expect(events(guarded.handle(receive(cancel, stranger), 1))).toMatchObject([
+        { type: "invalid", error: "CANCEL from 203.0.113.9, not an accepted host" },
+      ])
+      expect(statuses(guarded.handle(receive(cancel), 2))).toStrictEqual([200, 487])
+    })
+
     it("compares IPv6 sources by value", () => {
       const guarded = createCore({
         address: alice,
@@ -570,7 +639,22 @@ describe("createCore", () => {
       expect(statuses(guarded.handle(receive(incoming("OPTIONS"), source), 0))).toStrictEqual([200])
     })
 
-    it.each([[["example.com"]], ["192.0.2.20" as unknown as string[]]])(
+    it("lets a whole CIDR range start requests, and nobody outside it", () => {
+      const guarded = createCore({
+        address: alice,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        acceptFrom: ["198.51.100.0/30", "2001:db8::/32"],
+      })
+      const from = (host: string) =>
+        statuses(guarded.handle(receive(incoming("OPTIONS"), { ...bob, host }), 0))
+      expect(from("198.51.100.3")).toStrictEqual([200])
+      expect(from("2001:db8:ffff::1")).toStrictEqual([200])
+      expect(from("198.51.100.4")).toStrictEqual([])
+      expect(from("192.0.2.20")).toStrictEqual([])
+    })
+
+    it.each([[["example.com"]], [["192.0.2.0/33"]], [[5]], ["192.0.2.20" as unknown as string[]]])(
       "refuses acceptFrom %j",
       (acceptFrom) => {
         expect(() =>
@@ -578,9 +662,9 @@ describe("createCore", () => {
             address: alice,
             aor: "sip:alice@example.com",
             random: Math.random,
-            acceptFrom,
+            acceptFrom: acceptFrom as string[],
           }),
-        ).toThrow(/^acceptFrom must list IP addresses, got /)
+        ).toThrow(/^acceptFrom must list IP addresses or CIDR ranges, got /)
       },
     )
 

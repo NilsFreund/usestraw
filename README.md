@@ -142,6 +142,25 @@ process.once("SIGTERM", () => {
 
 With `drain`, new callers get busy and running calls finish before the phone unregisters. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run, and a call that sends no audio for a minute is hung up with `reason: "timeout"` (not while on hold). On Node 24 or in TypeScript, `await using` closes a phone or hangs up a call at the end of the scope.
 
+## Trunks
+
+A trunk with IP authentication sends calls to a fixed address and needs no registration:
+
+```ts
+const phone = await connect({
+  uri: "sip:+4930123456@sip.carrier.example", // your number, used as caller ID
+  register: false,
+  localPort: 5060,
+  acceptFrom: ["203.0.113.0/24", "198.51.100.16/28"],
+})
+```
+
+`connect()` then only checks that the server answers a SIP ping, and fails with `"no-answer"` if it doesn't, often because the trunk doesn't allow this machine's IP yet. The phone pings again every minute and goes `"reconnecting"` while the server is silent.
+
+Give the trunk this machine's public IP and `localPort`, and list every signaling range your provider publishes in `acceptFrom`: calls often come from more addresses than the server's name resolves to. Open `localPort` and UDP 16384–24575 (audio) to the provider's signaling and media ranges, and forward them behind NAT. Straw learns its public address from the pings and puts it in Contact; audio needs symmetric RTP, see Limits.
+
+A `password` answers digest challenges on outgoing calls. Over UDP a listed address can be forged, so don't treat caller ID as proof.
+
 ## Errors
 
 `connect()` rejects with a `ConnectError`. Switch on `reason`:
@@ -153,7 +172,7 @@ With `drain`, new callers get busy and running calls finish before the phone unr
 | `"unsupported-auth"` | The server wants auth that Straw doesn't speak. |
 | `"refused"` | Registration denied for good, e.g. 403. |
 | `"unavailable"` | The server can't register you right now, e.g. 503. |
-| `"no-answer"` | No response. Check host, port and transport. |
+| `"no-answer"` | No response. Check host, port and transport, and that a trunk allows your IP. |
 | `"network"` | The connection failed, or the TLS certificate isn't trusted. |
 
 Once online, the phone re-registers on its own and keeps its connection alive. When the server or the network fails, `status` is `"reconnecting"`, with `error` and `retryAt` set, until it is back. Running calls keep going through a reconnect when the server keeps them; one the server dropped meanwhile ends after a minute without audio.
@@ -198,7 +217,7 @@ Replays need the usestraw version that made the trace, and a trace that grew pas
 
 | | |
 | --- | --- |
-| `connect(url, options?)` | Registers and resolves once online. Options: `password`, `authUser`, `tls.ca`, `signal`, `trace`, `maxCalls`. |
+| `connect(url, options?)` | Registers (or pings, with `register: false`) and resolves once online. Options: `password`, `authUser`, `tls.ca`, `signal`, `trace`, `maxCalls`, `acceptFrom`, `register`, `localPort`. |
 | `phone.status` | `"connecting"`, `"online"`, `"reconnecting"` or `"offline"`, plus `error` and `retryAt`. |
 | `phone.incoming` | Ringing calls, for `for await`. |
 | `phone.call(to, options?)` | Calls out. Options: `agent`, `timeout`, `signal`. |
@@ -224,16 +243,17 @@ Standards: RFC 3261 and 6026 (SIP), 7616 and 8760 (digest auth), 3264 and 8866 (
 
 - Node only. Browser and Electron are next.
 - G.711 only (8 kHz narrowband), no Opus.
-- No SRTP. TLS protects signalling, but audio travels unencrypted, as on most SIP trunks.
+- No SRTP. TLS protects signaling, but audio travels unencrypted, as on most SIP trunks.
 - No STUN or ICE. Behind NAT, Straw keeps the mapping open and registers its public address, but your provider has to send audio back to where it comes from (symmetric RTP: on Asterisk `rtp_symmetric=yes`, on Twilio Elastic SIP Trunking switch it on). Most do.
-- No RTCP and no DNS SRV lookups: give the server's host name.
+- No RTCP and no DNS SRV lookups: give the server's host name. Over UDP, Straw resolves it once.
+- No TLS server, so a trunk without registration calls in over UDP.
 - No DTMF, hold, transfer, TCP, WebSocket or video yet.
 
 ## Security
 
 - `tls://` verifies certificates. Use `tls.ca` for a private CA.
-- Over UDP only your SIP server may start calls; strangers who find the port get no answer at all. `acceptFrom: "anyone"` allows direct IP calls.
-- Straw answers authentication only for the realms your server used when registering, never with a weaker hash, and never inside a call, where the far end could be asking. Digest still lets a callee behind a provider that merely forwards challenges ask for a hash, so use a long random SIP password.
+- Over UDP only your SIP server may start calls; strangers who find the port get no answer at all. `acceptFrom` adds IPs and CIDR ranges, or allows `"anyone"` for direct IP calls.
+- Straw answers authentication only for the realms your server used when registering, never with a weaker hash, and never inside a call, where the far end could be asking. With `register: false` it has nothing to learn from and answers any challenge to an outgoing call. Digest also lets a callee behind a provider that merely forwards challenges ask for a hash, so use a long random SIP password.
 - An incoming call starts sending audio only once the caller confirmed it, so a forged call cannot aim your audio at someone else.
 - Audio comes from the signalled address. Only when that is a private address behind NAT does Straw learn the real one, from the first packets within 2 s, like most SIP stacks; a public address is never replaced by another host (RTP Bleed protection).
 - The parser has hard size limits and is fuzzed.

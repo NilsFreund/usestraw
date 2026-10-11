@@ -1,4 +1,4 @@
-import { checkCredentials, checkMaxCalls } from "../core/checks"
+import { checkCredentials, checkMaxCalls, parseAcceptFrom } from "../core/checks"
 import type { Credentials } from "../core/types"
 import { formatHost, isSocketHost } from "../message/fields/host"
 import { isUri, splitSipUri } from "../message/fields/uri"
@@ -36,12 +36,22 @@ export interface ConnectUrlOptions {
    */
   readonly maxCalls?: number | undefined
   /**
-   * Who may call this phone over UDP: only your SIP server, or `"anyone"` who finds its port, for
-   * direct IP calls. Over TLS only the server can reach it anyway.
+   * Who may call this phone over UDP: your SIP server, `"anyone"` who finds its port, or the server
+   * plus a list of IPs and CIDR ranges, like your trunk's signaling addresses. Over TLS only the
+   * server can reach it anyway.
    *
    * @default "server"
    */
-  readonly acceptFrom?: "server" | "anyone" | undefined
+  readonly acceptFrom?: "server" | "anyone" | readonly string[] | undefined
+  /**
+   * `false` for a trunk that already knows your address: the phone never registers, and checks
+   * instead that the server answers a SIP ping, on connect and every minute after.
+   *
+   * @default true
+   */
+  readonly register?: boolean | undefined
+  /** The local UDP port, for a trunk that sends calls to a fixed address. Any free one if unset. */
+  readonly localPort?: number | undefined
 }
 
 /** {@link connect} options without a URL. */
@@ -75,7 +85,9 @@ export interface PhoneSettings {
   readonly tls?: TlsSettings
   readonly trace: boolean
   readonly maxCalls?: number
-  readonly acceptFrom: "server" | "anyone"
+  readonly acceptFrom: "server" | "anyone" | readonly string[]
+  readonly register: boolean
+  readonly localPort?: number
 }
 
 const SERVER = /^(udp|tls):\/\/(\[[^\]]*\]|[^:/[\]]+)(?::(\d{1,5}))?$/i
@@ -89,10 +101,20 @@ export function resolveOptions(
   if (!options) {
     throw new TypeError("Missing connection URL: pass tls://user:password@host[:port]")
   }
-  const { uri, password, signal, tls, trace = true, maxCalls, acceptFrom = "server" } = options
+  const { uri, password, signal, tls, trace = true, maxCalls, register = true, localPort } = options
+  const { acceptFrom = "server" } = options
   if (maxCalls !== undefined) checkMaxCalls(maxCalls)
-  if (acceptFrom !== "server" && acceptFrom !== "anyone") {
-    throw new TypeError(`acceptFrom must be "server" or "anyone", got ${show(acceptFrom)}`)
+  if (Array.isArray(acceptFrom)) parseAcceptFrom(acceptFrom)
+  else if (acceptFrom !== "server" && acceptFrom !== "anyone") {
+    throw new TypeError(
+      `acceptFrom must be "server", "anyone" or a list of IPs and CIDR ranges, got ${show(acceptFrom)}`,
+    )
+  }
+  if (typeof register !== "boolean") {
+    throw new TypeError(`register must be true or false, got ${show(register)}`)
+  }
+  if (localPort !== undefined && !isIntegerIn(localPort, 1, 65535)) {
+    throw new RangeError(`localPort must be an integer from 1 to 65535, got ${show(localPort)}`)
   }
   const invalidUri = new TypeError(`Invalid uri ${show(redact(uri))}: use sip:user@domain`)
   const parts = isUri(uri) ? splitSipUri(uri) : undefined
@@ -107,6 +129,12 @@ export function resolveOptions(
   if (parts.scheme === "sips" && server.transport !== "TLS") {
     throw new TypeError(`A sips: uri needs a tls:// server, got ${given}`)
   }
+  if (server.transport !== "UDP" && localPort !== undefined) {
+    throw new TypeError("localPort only works with a udp:// server")
+  }
+  if (server.transport !== "UDP" && Array.isArray(acceptFrom)) {
+    throw new TypeError("An acceptFrom list only works with a udp:// server")
+  }
   const username = options.authUser ?? parts.user
   const credentials = password === undefined ? undefined : { username, password }
   if (credentials) checkCredentials(credentials)
@@ -119,7 +147,9 @@ export function resolveOptions(
     closeTimeout: 5000,
     connectTimeout: 10_000,
     trace,
-    acceptFrom,
+    acceptFrom: typeof acceptFrom === "string" ? acceptFrom : [...acceptFrom],
+    register,
+    ...(localPort === undefined ? {} : { localPort }),
     ...(credentials ? { credentials } : {}),
     ...(signal ? { signal } : {}),
     ...(maxCalls === undefined ? {} : { maxCalls }),
