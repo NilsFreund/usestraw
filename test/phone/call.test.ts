@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from "vitest"
-import type { CoreCommand } from "../../src"
-import { type Agent, type CallSetup, createCall } from "../../src/node/calls"
+import { describe, expect, expectTypeOf, it, vi } from "vitest"
+import type { CoreCommand, CallReason as CoreReason } from "../../src/core"
+import { openAudio } from "../../src/node/audio"
+import {
+  type Agent,
+  type CallReason,
+  type CallSetup,
+  createCall,
+  type LiveCall,
+  type RingingCall,
+} from "../../src/phone/call"
 
 const media = {
   remote: { host: "127.0.0.1", port: 9000 },
@@ -10,14 +18,19 @@ const media = {
   direction: "sendrecv",
 } as const
 
-function handle(direction: CallSetup["direction"] = "incoming", host = "127.0.0.1", agent?: Agent) {
+function handle(
+  direction: CallSetup["direction"] = "incoming",
+  host = "127.0.0.1",
+  agent?: Agent,
+  open: CallSetup["openAudio"] = (silent) => openAudio(host, silent),
+) {
   const commands: CoreCommand[] = []
   const created = createCall({
     id: "c1",
     direction,
     from: "bob",
     to: "alice",
-    host,
+    openAudio: open,
     ...(agent ? { agent } : {}),
     run: (command) => commands.push(command),
     changed: () => undefined,
@@ -49,6 +62,7 @@ describe("a call's own state", () => {
   it("does not answer when the caller gave up while the audio opened", async () => {
     const call = handle()
     const accepting = (call.call as unknown as { accept(): Promise<unknown> }).accept()
+    expect(call.call.status).toBe("answering")
     call.receive(ended())
     expect(await accepting).toMatchObject({ ok: false, status: "ended", reason: "cancelled" })
     expect(call.commands).toStrictEqual([])
@@ -57,6 +71,7 @@ describe("a call's own state", () => {
   it("turns the call away with 503 instead of throwing when it cannot open audio", async () => {
     const call = handle("incoming", "192.0.2.1")
     const accepting = (call.call as unknown as { accept(): Promise<unknown> }).accept()
+    expect(call.call.status).toBe("answering")
     await expect.poll(() => call.commands).toStrictEqual([{ type: "end", call: "c1", status: 503 }])
     call.receive({
       type: "call",
@@ -65,6 +80,58 @@ describe("a call's own state", () => {
       ended: { by: "local", reason: "unavailable", status: 503 },
     })
     expect(await accepting).toMatchObject({ ok: false, reason: "unavailable" })
+  })
+
+  it("turns the call away with 503 when the platform throws instead of rejecting", async () => {
+    const call = handle("incoming", "127.0.0.1", undefined, () => {
+      throw new Error("no audio")
+    })
+    const accepting = (call.call as RingingCall).accept()
+    await expect.poll(() => call.commands).toStrictEqual([{ type: "end", call: "c1", status: 503 }])
+    call.receive({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "local", reason: "unavailable", status: 503 },
+    })
+    expect(await accepting).toMatchObject({ ok: false, reason: "unavailable" })
+    await expect(call.open()).rejects.toThrow("no audio")
+  })
+
+  it("turns a call down as busy when it ends while it is being answered", async () => {
+    const call = handle()
+    const accepting = (call.call as RingingCall).accept()
+    void call.call.end()
+    call.receive({
+      type: "call",
+      call: "c1",
+      state: "ended",
+      ended: { by: "local", reason: "busy", status: 486 },
+    })
+    expect(await accepting).toMatchObject({ ok: false, reason: "busy" })
+    expect(await call.call.ended).toStrictEqual({ by: "us", reason: "busy" })
+    await call.open()
+    expect(call.commands).toStrictEqual([{ type: "end", call: "c1" }])
+  })
+
+  it("keeps the first answer when a listener accepts again while it answers", async () => {
+    const call = handle()
+    const ringing = call.call as RingingCall
+    const second = new TransformStream<Int16Array, Int16Array<ArrayBuffer>>()
+    const abort = vi.spyOn(second.writable, "abort")
+    const again: Promise<unknown>[] = []
+    ringing.subscribe(() => {
+      if (call.call.status === "answering" && again.length === 0) again.push(ringing.accept(second))
+    })
+    const first = ringing.accept()
+    expect(again).toStrictEqual([first])
+    expect(abort).not.toHaveBeenCalled()
+    call.receive(ended())
+    expect(await first).toMatchObject({ ok: false, reason: "cancelled" })
+  })
+
+  it("names the same end reasons as the core", () => {
+    expectTypeOf<CallReason>().toEqualTypeOf<CoreReason>()
   })
 
   it("goes live without media for a late offer and stays live on later updates", async () => {
@@ -99,6 +166,26 @@ describe("a call's own state", () => {
       done: true,
       value: undefined,
     })
+  })
+
+  it("shows the app its streams, rate, played time and clear(), not the socket", async () => {
+    const call = handle("outgoing")
+    const audio = await call.open()
+    call.receive({ type: "call", call: "c1", state: "live", media })
+    const shown = (call.call as LiveCall).audio
+    expect(Object.keys(shown).sort()).toStrictEqual([
+      "clear",
+      "played",
+      "readable",
+      "sampleRate",
+      "writable",
+    ])
+    expect(shown).toMatchObject({ readable: audio.readable, writable: audio.writable })
+    expect(shown).toMatchObject({ sampleRate: 8000, played: 0 })
+    const clear = vi.spyOn(audio, "clear")
+    shown.clear()
+    expect(clear).toHaveBeenCalledOnce()
+    call.receive(ended("hangup"))
   })
 
   it("leaves a call that already ended alone, and opens no audio for it", async () => {
@@ -204,7 +291,7 @@ describe("a call's own state", () => {
       await vi.advanceTimersByTimeAsync(1_000)
       expect(call.commands).toStrictEqual([placing, { type: "end", call: "c1" }])
       call.receive(ended("hangup"))
-      expect(await call.call.ended).toStrictEqual({ by: "us", reason: "timeout" })
+      expect(await call.call.ended).toStrictEqual({ by: "us", reason: "dropped" })
     } finally {
       vi.useRealTimers()
     }

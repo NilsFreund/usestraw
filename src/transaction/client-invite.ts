@@ -1,9 +1,9 @@
 import type { SipRequest, SipResponse } from "../message/types"
 import { isReliable, type TransportAddress } from "../transport/address"
-import { createAck } from "./ack"
+import { createFailureAck } from "./ack"
 import { createAlarms } from "./alarms"
 import { clientKey } from "./keys"
-import { notify, send } from "./outputs"
+import { emit, send } from "./outputs"
 import { defaultTimers, type TimerSettings, transactionTimeout } from "./timers"
 import type { ClientTransaction, TransactionOutput } from "./types"
 
@@ -30,14 +30,14 @@ export function createClientInvite(
     from: TransportAddress,
     now: number,
   ): TransactionOutput[] {
-    const passed = notify({ type: "response", response, from })
+    const passed = emit({ type: "response", response, from })
     switch (state) {
       case "calling":
       case "proceeding":
         return [...advance(response, now), passed]
       case "completed":
         // RFC 6026 §8.4: a 2xx from another branch after a final still reaches the TU
-        if (response.status >= 300) return [send(createAck(invite, response), to)]
+        if (response.status >= 300) return [send(createFailureAck(invite, response), to)]
         return response.status >= 200 ? [passed] : []
       case "accepted":
         return response.status >= 200 && response.status < 300 ? [passed] : []
@@ -60,7 +60,7 @@ export function createClientInvite(
     state = "completed"
     if (reliable) state = "terminated"
     else alarms.set("D", now + timers.d)
-    return [send(createAck(invite, response), to)]
+    return [send(createFailureAck(invite, response), to)]
   }
 
   function expire(now: number): TransactionOutput[] {
@@ -78,7 +78,7 @@ export function createClientInvite(
 
   function timeout(): TransactionOutput {
     terminate()
-    return notify({ type: "timeout", request: invite })
+    return emit({ type: "timeout", request: invite })
   }
 
   function terminate(): void {

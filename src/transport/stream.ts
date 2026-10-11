@@ -18,8 +18,7 @@ const CR = 13
 const LF = 10
 const decoder = new TextDecoder()
 
-// RFC 3261 §18.3: Content-Length frames messages on streams;
-// RFC 3261 §7.5 and RFC 5626 §3.5.1: CR/LF runs before a start line are keepalives
+// RFC 3261 §18.3: Content-Length frames streams; RFC 5626 §3.5.1: leading CRLFs are keepalives
 export function createStreamFramer(): StreamFramer {
   let bytes = new Uint8Array(4096)
   let start = 0
@@ -45,8 +44,8 @@ export function createStreamFramer(): StreamFramer {
   function next(): StreamEvent | undefined {
     const keepalive = keepaliveRun()
     if (keepalive) return keepalive
-    const broken = total === undefined ? measure() : undefined
-    if (broken) return broken
+    const invalid = total === undefined ? measure() : undefined
+    if (invalid) return invalid
     if (total !== undefined && end - start >= total) return message(total)
     if (end - start > MAX_MESSAGE_SIZE) return failure(`Message exceeds ${MAX_MESSAGE_SIZE} bytes`)
     return undefined

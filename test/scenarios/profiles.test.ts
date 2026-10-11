@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isRequest, type TransportAddress } from "../../src"
+import { isRequest, type TransportAddress } from "../../src/core"
 import type { LinkConditions } from "../../src/simulation/network/conditions"
 import { type ProfileName, profiles } from "../../src/simulation/network/profiles"
 import { createSimulation } from "../../src/simulation/simulation"

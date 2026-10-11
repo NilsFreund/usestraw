@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { createResponse } from "../../src"
 import { parseAuthParams } from "../../src/auth/params"
+import { createResponse } from "../../src/core"
 import { createAuthenticator, createTrust } from "../../src/core/authenticator"
 import { createRandom } from "../../src/simulation/random"
 import { parsedRequest, register } from "../helpers"

@@ -1,5 +1,8 @@
-import type { TransportAddress } from "../../src"
-import type { Link, LinkHandlers } from "../../src/node/links"
+import type { TransportAddress } from "../../src/core"
+import { openAudio } from "../../src/node/audio"
+import type { PhoneSettings } from "../../src/phone/options"
+import { type Phone, type PhoneHandle, startPhone } from "../../src/phone/phone"
+import type { Link, LinkHandlers, Platform } from "../../src/phone/platform"
 import { createRandom } from "../../src/simulation/random"
 import { type Registrar, type RegistrarOptions, registrar } from "../registrar"
 
@@ -72,4 +75,17 @@ export function memoryNetwork(
     },
   }
   return network
+}
+
+export async function startOn(
+  network: MemoryNetwork,
+  settings: PhoneSettings,
+  platform: Partial<Platform> = {},
+): Promise<Phone & Pick<PhoneHandle, "ping">> {
+  const { phone, ping } = await startPhone(network.link, settings, {
+    connect: async () => network.link,
+    openAudio,
+    ...platform,
+  })
+  return Object.assign(phone, { ping })
 }

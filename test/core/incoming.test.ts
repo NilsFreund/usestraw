@@ -14,7 +14,7 @@ import {
   type SipRequest,
   type SipResponse,
   serializeMessage,
-} from "../../src"
+} from "../../src/core"
 import { createRandom } from "../../src/simulation/random"
 import { alice, aliceMedia, bob, bytes, sdp } from "../helpers"
 
@@ -70,11 +70,12 @@ interface RequestOptions {
   readonly fromTag?: string
   readonly body?: string
   readonly callId?: string
+  readonly extra?: readonly string[]
 }
 
 function request(method: string, options: RequestOptions = {}): string {
   const { seq = 1, branch = `z9hG4bK${method.toLowerCase()}`, toTag, body = "" } = options
-  const { fromTag = "b1", callId = "in1" } = options
+  const { fromTag = "b1", callId = "in1", extra = [] } = options
   return [
     `${method} sip:alice@192.0.2.10:5060 SIP/2.0`,
     `Via: SIP/2.0/UDP 192.0.2.20:5060;branch=${branch}`,
@@ -84,6 +85,7 @@ function request(method: string, options: RequestOptions = {}): string {
     `Call-ID: ${callId}`,
     `CSeq: ${seq} ${method}`,
     ...(body === "" ? [] : ["Content-Type: application/sdp"]),
+    ...extra,
     `Content-Length: ${body.length}`,
     "",
     body,
@@ -299,7 +301,7 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     const [bye] = requests(steps.at(-1)?.[1] ?? [])
     if (!bye) throw new Error("No BYE")
     expect(calls(ua.handle(reply(bye, 200), 33_100))).toStrictEqual([
-      { type: "call", call: "in1", state: "ended", ended: { by: "remote", reason: "timeout" } },
+      { type: "call", call: "in1", state: "ended", ended: { by: "remote", reason: "dropped" } },
     ])
   })
 
@@ -514,6 +516,25 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     const again = ua.handle(receive(request("CANCEL", { branch: "z9hG4bKi1" })), 650)
     expect(statuses(again)).toStrictEqual(["200 CANCEL"])
     expect(ua.handle(accept(), 700)).toStrictEqual([])
+  })
+
+  it.each([
+    [['Reason: SIP;cause=200;text="Call completed elsewhere"'], "answered-elsewhere"],
+    [['Reason: SIP ;cause=200 ;text="Call completed elsewhere"'], "answered-elsewhere"],
+    [["Reason: Q.850;cause=16, sip; Cause = 200"], "answered-elsewhere"],
+    [["Reason: Q.850;cause=16", "Reason: SIP;cause=200"], "answered-elsewhere"],
+    [["Reason: Q.850;cause=200"], "cancelled"],
+    [["Reason: SIP;cause=2000"], "cancelled"],
+    [["Reason: SIP;cause=487"], "cancelled"],
+    [['Reason: SIP;text="cause=200"'], "cancelled"],
+    [['Reason: SIP;text="busy, SIP;cause=200"'], "cancelled"],
+    [['Reason: SIP;text="never closed;cause=200'], "cancelled"],
+  ])("tells a call answered elsewhere from a cancelled one (RFC 3326): %j", (extra, reason) => {
+    const { ua } = ringing()
+    const cancel = request("CANCEL", { branch: "z9hG4bKi1", extra })
+    const outputs = ua.handle(receive(cancel), 500)
+    expect(statuses(outputs)).toStrictEqual(["200 CANCEL", "487 INVITE"])
+    expect(calls(outputs)).toMatchObject([{ ended: { by: "remote", reason } }])
   })
 
   it("answers a CANCEL after a rejection with 200 and nothing else", () => {

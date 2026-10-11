@@ -10,9 +10,16 @@ import { createMedia } from "./media"
 import { emit, respond, send } from "./outputs"
 import { reasonFor } from "./reasons"
 import { createReply } from "./replies"
-import { createAck, createCancel, createDialog, createInvite, inDialog } from "./requests"
-import { createSession, type Session } from "./session"
-import type { Call, CallContext, CallOutput } from "./types"
+import {
+  createCancel,
+  createDialog,
+  createDialogAck,
+  createInvite,
+  inDialog,
+  repeats,
+} from "./requests"
+import { createSession, INCOMPATIBLE, type Session } from "./session"
+import type { CallContext, CallOutput, CallState } from "./types"
 
 export interface OutgoingSetup {
   readonly call: string
@@ -29,9 +36,8 @@ interface Confirmed {
 
 const MAX_FORKS = 16
 const CANCELLED: CallEnd = { by: "local", reason: "cancelled" }
-const INCOMPATIBLE: CallEnd = { by: "local", reason: "incompatible" }
 
-export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call {
+export function createOutgoing(setup: OutgoingSetup, context: CallContext): CallState {
   const { call, uri, to } = setup
   const { identity, contact, credentials, trust, timers } = context
   const authenticator = createAuthenticator(credentials, identity.random, trust)
@@ -128,7 +134,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     if (confirmed?.tag === tag) return [send(confirmed.ack, to)]
     if (confirmed || state === "ended") return fork(reply, tag)
     const dialog = createDialog(invite, reply)
-    const ack = createAck(dialog, invite, identity)
+    const ack = createDialogAck(dialog, invite, identity)
     const session = createSession(
       { call, dialog, to, seq, media },
       { identity, contact, authenticator, timers },
@@ -148,7 +154,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     if (known) return [send(known, to)]
     if (forks.size >= MAX_FORKS) return []
     const other = createDialog(invite, reply)
-    const acknowledgement = createAck(other, invite, identity)
+    const acknowledgement = createDialogAck(other, invite, identity)
     forks.set(tag, acknowledgement)
     return [
       send(acknowledgement, to),
@@ -174,7 +180,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
   function timeout(request: SipRequest): CallOutput[] {
     if (confirmed) return confirmed.session.timeout(request)
     if (request.method !== "INVITE" || request.cseq.seq !== invite.cseq.seq) return []
-    return finish(cancelWanted ? CANCELLED : { by: "remote", reason: "timeout" })
+    return finish(cancelWanted ? CANCELLED : { by: "remote", reason: "dropped" })
   }
 
   function request(incoming: SipRequest, transaction: string, now: number): CallOutput[] {
@@ -195,9 +201,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     response,
     timeout,
     matches: (request) => confirmed?.session.matches(request) ?? false,
-    merges: (request) =>
-      request.from.params.get("tag") === from.params.get("tag") &&
-      request.cseq.seq === invite.cseq.seq,
+    merges: (request) => repeats(invite, request),
     request,
     acknowledge: (ack) => confirmed?.session.acknowledge(ack) ?? [],
     expire,

@@ -5,7 +5,7 @@ import {
   isPrivate,
   isUnspecified,
   parseRange,
-  sameHost,
+  sameIp,
 } from "../../src/sdp/address"
 
 function within(host: string, range: string): boolean {
@@ -56,7 +56,7 @@ describe("media addresses", () => {
     ["a::b::c", "A::B::C", true],
     ["Media.Example.com", "media.example.com", true],
   ])("compares %s and %s as %s", (a, b, same) => {
-    expect(sameHost(a, b)).toBe(same)
+    expect(sameIp(a, b)).toBe(same)
   })
 })
 
@@ -192,8 +192,8 @@ describe("ranges", () => {
   })
 
   it("compares bracketed, mapped and shorthand addresses by value, but not leading zeros", () => {
-    expect(sameHost("[::1]", "::1")).toBe(true)
-    expect(sameHost("::ffff:192.0.2.1", "192.0.2.1")).toBe(true)
-    expect(sameHost("010.0.0.1", "10.0.0.1")).toBe(false)
+    expect(sameIp("[::1]", "::1")).toBe(true)
+    expect(sameIp("::ffff:192.0.2.1", "192.0.2.1")).toBe(true)
+    expect(sameIp("010.0.0.1", "10.0.0.1")).toBe(false)
   })
 })

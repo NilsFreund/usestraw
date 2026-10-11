@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isRequest, type SipRequest } from "../../src"
+import { isRequest, type SipRequest } from "../../src/core"
 import { answer, checkInvite } from "../../src/core/uas"
 import { parsed } from "../helpers"
 

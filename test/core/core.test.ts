@@ -10,7 +10,7 @@ import {
   type SipRequest,
   serializeMessage,
   type TransportAddress,
-} from "../../src"
+} from "../../src/core"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes, fixture, parsed } from "../helpers"
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { CallHandle, CallStatus } from "../../src/node/calls"
-import { createIncoming } from "../../src/node/incoming"
+import type { CallHandle, CallStatus } from "../../src/phone/call"
+import { createInbox } from "../../src/phone/inbox"
 
 function ringing(id: string) {
   const call = { id, status: "ringing" as CallStatus }
@@ -9,7 +9,7 @@ function ringing(id: string) {
 
 describe("phone.incoming", () => {
   it("forgets calls that stopped ringing before anyone read them", async () => {
-    const incoming = createIncoming()
+    const incoming = createInbox()
     const first = ringing("first")
     incoming.push(first.handle)
     first.call.status = "ended"
@@ -17,5 +17,15 @@ describe("phone.incoming", () => {
     first.call.status = "ringing"
     const iterator = incoming[Symbol.asyncIterator]()
     expect(await iterator.next()).toMatchObject({ value: { id: "second" } })
+  })
+
+  it("skips a call that was answered from phone.calls before anyone read it", async () => {
+    const incoming = createInbox()
+    const answered = ringing("answered")
+    incoming.push(answered.handle)
+    answered.call.status = "answering"
+    const pending = incoming[Symbol.asyncIterator]().next()
+    incoming.close()
+    expect(await pending).toStrictEqual({ value: undefined, done: true })
   })
 })

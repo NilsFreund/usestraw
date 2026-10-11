@@ -1,19 +1,19 @@
 # Straw
 
-> Straw (npm: `usestraw`) makes and takes phone calls from Node over SIP. Each call's audio is a pair of Web Streams of 8 kHz 16-bit PCM. Zero dependencies, ESM only, Node 22.12+.
+> Straw (npm: `usestraw`) makes and takes phone calls from Node over SIP. Each call's audio is a pair of Web Streams of 8 kHz 16-bit PCM. Zero dependencies, ESM only, Node 22.12+, TypeScript 5.7+ for the types.
 
 Straw is a SIP user agent, not a server or proxy. It registers with any SIP provider or PBX over TLS or UDP. Version 0.1 is Node only, G.711 only, and has no SRTP, DTMF, hold or transfer.
 
 ## Core API
 
 ```ts
-import { connect, ConnectError, type Agent, type Call, type LiveCall, type RingingCall } from "usestraw"
+import { connect, ConnectError, type Agent, type Call, type LiveCall, type RingingCall } from "usestraw" // "usestraw/node" in jsdom or Electron with Node integration
 
 const phone = await connect(process.env.SIP_URL) // "tls://user:password@host[:port]" or "udp://…"
 const phone2 = await connect({ uri: "sip:+4930123@sip.example.com", password, server: "tls://edge.example.com" })
 
 for await (const call of phone.incoming) void call.accept(agent) // RingingCall → LiveCall | UnansweredCall
-const call = await phone.call("+49 30 1234567", { timeout: 30_000, signal, agent }) // LiveCall | UnansweredCall
+const call = await phone.call("+49 30 1234567", { timeout: 30_000, signal, agent }) // also "tel:+4930…", "bob", "sip:bob@host"; LiveCall | UnansweredCall
 if (call.ok) {
   call.audio.readable // ReadableStream<Int16Array>: 160 samples (20 ms) every 20 ms, silence included
   call.audio.writable // WritableStream<Int16Array>: any chunk size; close() resolves once played
@@ -26,9 +26,9 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 ```
 
 - An agent is a `ReadableWritablePair<Int16Array, Int16Array>`, usually a `TransformStream`. `new TransformStream()` echoes.
-- Phone fields: `status` ("connecting" | "online" | "reconnecting" | "offline"), `error`, `retryAt`, `calls`, `trace`. `subscribe(listener)` returns an unsubscribe function (works with `useSyncExternalStore`).
-- Call fields: `id`, `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `toJSON()`.
-- Call reasons: hangup, cancelled, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, timeout.
+- Phone fields: `status` ("connecting" | "online" | "reconnecting" | "closed"), `error`, `retryAt`, `calls`, `trace`. `subscribe(listener)` returns an unsubscribe function (works with `useSyncExternalStore`).
+- Call fields: `id` (opaque), `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "answering" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `subscribe(listener)`, `toJSON()`.
+- Call reasons: hangup, cancelled, answered-elsewhere, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, dropped. New reasons may come in minor versions: keep a default branch.
 - `connect()` rejects with `ConnectError`; switch on `error.reason`: wrong-password, password-missing, unsupported-auth, refused, unavailable, no-answer, network.
 - Options of `connect`: `password`, `authUser`, `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100), `acceptFrom` ("server" by default, "anyone" for direct IP calls, or IPs and CIDR ranges allowed besides the server, over UDP), `register` (false for an IP-authenticated trunk: connect only pings the server, then once a minute), `localPort` (fixed local UDP port for the trunk to call).
 
@@ -37,10 +37,10 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Inside `for await (const call of phone.incoming)`, use `void handle(call)`. Awaiting a whole call blocks the next caller.
 - One agent per call. Reusing one makes `accept` / `call` reject with a TypeError.
 - `phone.call()` resolves for busy, declined and unanswered calls too. Check `call.ok` before using `call.audio`.
-- Audio is 8000 Hz mono `Int16Array`, not Float32 or μ-law bytes. Resample for models that want 16 or 24 kHz.
+- Audio is mono `Int16Array` at `call.audio.sampleRate` (8000 today), not Float32 or μ-law bytes. Resample for models that want 16 or 24 kHz.
 - Writes resolve at once until 30 s are queued. Interrupt with `clear()`, not a new writer.
 - Writes and a pending `writer.close()` reject once the call ends: add `.catch()` to writes you don't await.
-- A call whose far end sends no audio for 60 s is hung up with `reason: "timeout"`.
+- A call whose far end sends no audio for 60 s is hung up with `reason: "dropped"`.
 - The phone reconnects on its own: `status` goes `"reconnecting"` and back to `"online"`; `phone.incoming` and running calls stay open meanwhile, and `call()` throws the `ConnectError` until it is back.
 - Readers that fall behind lose the oldest frames. Keep reading or cancel the stream.
 - `await using` needs Node 24 or TypeScript. On Node 22, call `phone.close()` yourself.
@@ -54,9 +54,9 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 
 - [README](https://github.com/NilsFreund/usestraw#readme): guide, errors, limits, security
 - [Examples](https://github.com/NilsFreund/usestraw/tree/main/examples): echo, outbound call, voicemail, a voice agent with barge-in
-- Types and JSDoc: `node_modules/usestraw/dist/index.d.ts`
+- Types and JSDoc: `node_modules/usestraw/dist/*.d.ts`, starting at `index.d.ts`
 
 ## Optional
 
-- [usestraw/core](https://github.com/NilsFreund/usestraw/blob/main/src/index.ts): the sans-I/O SIP core for custom transports and tests
+- [usestraw/core](https://github.com/NilsFreund/usestraw/blob/main/src/core.ts): the sans-I/O SIP core for custom transports and tests, experimental
 - [CHANGELOG](https://github.com/NilsFreund/usestraw/blob/main/CHANGELOG.md)

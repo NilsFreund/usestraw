@@ -2,7 +2,7 @@ import type { SipRequest, SipResponse } from "../message/types"
 import { isReliable, type TransportAddress } from "../transport/address"
 import { createAlarms } from "./alarms"
 import { acknowledges, serverKey } from "./keys"
-import { notify, send } from "./outputs"
+import { emit, send } from "./outputs"
 import { defaultTimers, type TimerSettings, transactionTimeout } from "./timers"
 import { createTrying } from "./trying"
 import type { ServerTransaction, TransactionOutput } from "./types"
@@ -86,7 +86,7 @@ export function createServerInvite(
 
   function unacknowledged(now: number): TransactionOutput {
     terminate()
-    return notify({ type: "unacknowledged", request: invite, response: current(now) })
+    return emit({ type: "unacknowledged", request: invite, response: current(now) })
   }
 
   function terminate(): void {

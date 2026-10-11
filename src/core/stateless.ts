@@ -2,8 +2,8 @@ import { createResponse } from "../message/response"
 import type { SipRequest, SipResponse } from "../message/types"
 import { toHex } from "../support/hex"
 import { hmacSha256 } from "../support/hmac"
+import { type Random, randomInt } from "../support/random"
 import { serverKey, serverKeys } from "../transaction/keys"
-import type { Random } from "./types"
 import type { Answer } from "./uas"
 
 export interface Stateless {
@@ -14,10 +14,9 @@ export interface Stateless {
 const encoder = new TextEncoder()
 const SIGNED = 512
 
-// To tags are a MAC of the transaction key, so a late ACK finds its answer without any state;
-// only a prefix is signed, so a huge branch cannot make a tag expensive
+// To tags are a MAC of the transaction key's first 512 bytes, so a late ACK needs no state
 export function createStateless(random: Random): Stateless {
-  const secret = Uint8Array.from({ length: 32 }, () => Math.floor(random() * 256))
+  const secret = Uint8Array.from({ length: 32 }, () => randomInt(random, 256))
   const tag = (key: string) =>
     toHex(hmacSha256(secret, encoder.encode(key).subarray(0, SIGNED)).subarray(0, 8))
 

@@ -9,12 +9,12 @@ import { createTag } from "../ids"
 import type { CallEnd, CallParty } from "../types"
 import { createMedia } from "./media"
 import { emit, respond } from "./outputs"
-import { reasonFor } from "./reasons"
+import { cancelReason, reasonFor } from "./reasons"
 import { repeatAnswer } from "./repeat"
 import { createReply, createRetryLater, INCOMPATIBLE_MEDIA } from "./replies"
-import { createServerDialog, inDialogOf } from "./requests"
+import { createServerDialog, inDialogOf, repeats } from "./requests"
 import { createSession, type Session } from "./session"
-import type { Call, CallContext, CallOutput } from "./types"
+import type { CallContext, CallOutput, CallState } from "./types"
 
 export interface IncomingSetup {
   readonly invite: SipRequest
@@ -27,8 +27,8 @@ const RING_REFRESH = 60_000
 // Nobody rings longer than a proxy's Timer C would let them, or than the INVITE's Expires asks (§13.3.1)
 const RING_LIMIT = 180_000
 
-export function createIncoming(setup: IncomingSetup, context: CallContext, now: number): Call {
-  const { invite, transaction, from: to } = setup
+export function createIncoming(setup: IncomingSetup, context: CallContext, now: number): CallState {
+  const { invite, transaction, from: source } = setup
   const { identity, contact, credentials, trust, timers } = context
   const call = invite.callId
   const tag = createTag(identity.random)
@@ -53,7 +53,7 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
   }
 
   function start(): CallOutput[] {
-    const parties = { from: party(invite.from), to: party(invite.to), source: to }
+    const parties = { from: party(invite.from), to: party(invite.to), source }
     return [
       respond(transaction, ringing),
       emit({ type: "call", call, state: "incoming", ...parties }),
@@ -72,7 +72,7 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
     const pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered }
     const authenticator = createAuthenticator(credentials, identity.random, trust)
     session = createSession(
-      { call, dialog, to, seq: 0, remoteSeq: invite.cseq.seq, media, pending },
+      { call, dialog, to: source, seq: 0, remoteSeq: invite.cseq.seq, media, pending },
       { identity, contact, authenticator, timers },
     )
     return [respond(transaction, ok)]
@@ -87,7 +87,8 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
   function cancel(request: SipRequest, other: string): CallOutput[] {
     const ok = respond(other, createReply(request, 200, { tag }))
     const ringingInvite = !session && serverKey({ ...request, method: "INVITE" }) === transaction
-    return ringingInvite ? [ok, ...reject(487, { by: "remote", reason: "cancelled" })] : [ok]
+    if (!ringingInvite) return [ok]
+    return [ok, ...reject(487, { by: "remote", reason: cancelReason(request) })]
   }
 
   // RFC 3261 §15.1.2: a BYE on the early dialog ends the pending INVITE with 487
@@ -125,9 +126,7 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
     response: (response) => session?.response(response) ?? [],
     timeout: (request) => session?.timeout(request) ?? [],
     matches: (request) => inDialogOf(dialog, request.to, request.from),
-    merges: (request) =>
-      request.from.params.get("tag") === invite.from.params.get("tag") &&
-      request.cseq.seq === invite.cseq.seq,
+    merges: (request) => repeats(invite, request),
     request,
     acknowledge: (ack) => session?.acknowledge(ack) ?? [],
     expire,

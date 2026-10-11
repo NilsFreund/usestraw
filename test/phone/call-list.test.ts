@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { connect, type LiveCall, type Phone } from "../../src/node"
-import { targetUri, userOf } from "../../src/node/calls"
-import { resolveOptions } from "../../src/node/options"
-import { connectPhone, startPhone } from "../../src/node/phone"
-import { sdp } from "../helpers"
-import { type Answer, type Carrier, startCarrier } from "./carrier"
-import { memoryNetwork } from "./memory"
+import { connect, type LiveCall, type Phone } from "../../src"
+import { nodePlatform } from "../../src/node/connect"
+import { targetUri, userOf } from "../../src/phone/call-list"
+import { resolveOptions } from "../../src/phone/options"
+import { connectPhone } from "../../src/phone/phone"
+import { pause, sdp, tone } from "../helpers"
+import { type Answer, type Carrier, startCarrier } from "../node/carrier"
+import { memoryNetwork, startOn } from "./memory"
 
 const cleanups: (() => Promise<void>)[] = []
 
@@ -28,14 +29,6 @@ async function setup(
   })
   cleanups.push(() => phone.close())
   return { carrier, phone }
-}
-
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-function tone(samples: number): Int16Array {
-  return Int16Array.from({ length: samples }, (_, index) =>
-    Math.round(8000 * Math.sin((2 * Math.PI * 440 * index) / 8000)),
-  )
 }
 
 const loud = (pcm: Int16Array) => pcm.some((value) => Math.abs(value) > 4000)
@@ -72,6 +65,7 @@ describe("phone.call", () => {
     })
     expect(call.audio.sampleRate).toBe(8000)
     expect(await hearsBack(call)).toBe(true)
+    await expect.poll(() => call.audio.played).toBeGreaterThan(0)
     expect(phone.calls).toStrictEqual([call])
     expect(await call.end()).toStrictEqual({ by: "us", reason: "hangup" })
     expect(call).toMatchObject({ status: "ended", ok: true, reason: "hangup" })
@@ -99,8 +93,7 @@ describe("phone.call", () => {
     })
     const call = await phone.call("sip:bob@example.com", { agent })
     expect(call.ok).toBe(true)
-    await pause(300)
-    expect(frames).toBeGreaterThan(5)
+    await expect.poll(() => frames).toBeGreaterThan(5)
     await call.end()
   })
 
@@ -108,12 +101,11 @@ describe("phone.call", () => {
     const { phone, carrier } = await setup("ring")
     const controller = new AbortController()
     const calling = phone.call("bob", { signal: controller.signal })
-    await pause(100)
+    await expect.poll(() => carrier.methods).toContain("INVITE")
     expect(phone.calls.map((call) => call.status)).toStrictEqual(["calling"])
     controller.abort(new Error("enough"))
     await expect(calling).rejects.toThrow("enough")
-    await pause(100)
-    expect(carrier.methods).toContain("CANCEL")
+    await expect.poll(() => carrier.methods).toContain("CANCEL")
     expect(phone.calls).toStrictEqual([])
   })
 
@@ -127,6 +119,7 @@ describe("phone.call", () => {
     await expect(phone.call("sip:bob@bad host")).rejects.toThrow(
       'Cannot call "sip:bob@bad host": use a number, a user name or sip:user@host',
     )
+    await expect(phone.call("tel:bob")).rejects.toThrow('Cannot call "tel:bob"')
     expect(phone.calls).toStrictEqual([])
     expect(seen).toStrictEqual([])
     await phone.close()
@@ -138,8 +131,7 @@ describe("phone.call", () => {
     const call = await phone.call("bob", { timeout: 150 })
     expect(call).toMatchObject({ ok: false, reason: "no-answer" })
     expect(await call.ended).toStrictEqual({ by: "us", reason: "no-answer" })
-    await pause(50)
-    expect(carrier.methods).toContain("CANCEL")
+    await expect.poll(() => carrier.methods).toContain("CANCEL")
   })
 
   it("never places a call aborted or closed before its audio was ready", async () => {
@@ -226,12 +218,15 @@ describe("phone.incoming", () => {
       })
       const statuses: string[] = []
       call.subscribe(() => statuses.push(call.status))
-      const answered = await call.accept(new TransformStream())
+      const accepting = call.accept(new TransformStream())
+      expect(call.status).toBe("answering")
+      expect(phone.calls.map((each) => each.status)).toStrictEqual(["answering"])
+      const answered = await accepting
       expect(answered.ok).toBe(true)
       await pause(200)
       carrier.hangup(id)
       expect(await call.ended).toStrictEqual({ by: "them", reason: "hangup" })
-      expect(statuses).toStrictEqual(["live", "ended"])
+      expect(statuses).toStrictEqual(["answering", "live", "ended"])
       break
     }
   })
@@ -245,17 +240,19 @@ describe("phone.incoming", () => {
       by: "us",
       reason: "declined",
     })
-    await pause(50)
-    expect(carrier.ended.get(first)).toMatchObject({
-      by: "remote",
-      reason: "declined",
-      status: 603,
-    })
+    await expect
+      .poll(() => carrier.ended.get(first))
+      .toMatchObject({
+        by: "remote",
+        reason: "declined",
+        status: 603,
+      })
     const second = await carrier.dial()
     const { value: busy } = await iterator.next()
     await busy?.end()
-    await pause(50)
-    expect(carrier.ended.get(second)).toMatchObject({ reason: "busy", status: 486 })
+    await expect
+      .poll(() => carrier.ended.get(second))
+      .toMatchObject({ reason: "busy", status: 486 })
   })
 
   it("keeps the first agent when accept is called twice, and refuses a busy agent", async () => {
@@ -273,8 +270,7 @@ describe("phone.incoming", () => {
       const second = call.accept()
       expect(second).toBe(first)
       await first
-      await pause(200)
-      expect(frames).toBeGreaterThan(3)
+      await expect.poll(() => frames).toBeGreaterThan(3)
       await expect(call.accept(agent)).resolves.toMatchObject({ ok: true })
       break
     }
@@ -300,18 +296,16 @@ describe("phone.incoming", () => {
       expect(call.status).toBe("ended")
       break
     }
-    await pause(50)
-    expect(carrier.ended.get(id)).toMatchObject({ by: "remote", reason: "hangup" })
+    await expect.poll(() => carrier.ended.get(id)).toMatchObject({ by: "remote", reason: "hangup" })
   })
 
   it("skips calls that stopped ringing before anyone looked, and accepting them changes nothing", async () => {
     const { phone, carrier } = await setup()
     const id = await carrier.dial()
-    await pause(100)
+    await expect.poll(() => phone.calls).toHaveLength(1)
     const [call] = phone.calls
     carrier.hangup(id)
-    await pause(100)
-    expect(call?.status).toBe("ended")
+    await expect.poll(() => call?.status).toBe("ended")
     if (call?.status === "ended") expect(call.reason).toBe("cancelled")
     const accepting = await (call as unknown as { accept(): Promise<unknown> }).accept()
     expect(accepting).toMatchObject({ ok: false, status: "ended" })
@@ -410,8 +404,7 @@ describe("phone.close", () => {
     const closing = phone.close({ drain: true })
     await pause(50)
     const late = await carrier.dial()
-    await pause(50)
-    expect(carrier.ended.get(late)).toMatchObject({ reason: "busy" })
+    await expect.poll(() => carrier.ended.get(late)).toMatchObject({ reason: "busy" })
     expect(call.status).toBe("live")
     await closing
     expect(await call.ended).toStrictEqual({ by: "them", reason: "hangup" })
@@ -440,7 +433,7 @@ describe("who may call", () => {
 
   async function ringsFor(acceptFrom: "server" | "anyone") {
     const network = memoryNetwork()
-    const phone = await startPhone(network.link, {
+    const phone = await startOn(network, {
       ...resolveOptions({ uri: "sip:alice@example.com", password: "secret", acceptFrom }),
       trace: false,
     })
@@ -466,7 +459,7 @@ describe("who may call", () => {
 describe("phone.call without a free audio port", () => {
   it("rejects and leaves no call behind", async () => {
     const network = memoryNetwork()
-    const phone = await startPhone(network.link, {
+    const phone = await startOn(network, {
       ...resolveOptions({
         uri: "sip:alice@example.com",
         password: "secret",
@@ -490,11 +483,11 @@ describe("phone.close when the far end stops answering", () => {
       server: `udp://127.0.0.1:${carrier.port}`,
       trace: false,
     })
-    const phone = await connectPhone({ ...settings, closeTimeout: 200 })
+    const { phone } = await connectPhone({ ...settings, closeTimeout: 200 }, nodePlatform(settings))
     const call = await phone.call("bob")
     carrier.deaf = true
     await phone.close()
-    expect(await call.ended).toStrictEqual({ by: "us", reason: "timeout" })
+    expect(await call.ended).toStrictEqual({ by: "us", reason: "dropped" })
     expect(phone.calls).toStrictEqual([])
   })
 })
@@ -510,8 +503,31 @@ describe("addressing", () => {
     [" +49 30 123", "sip:+4930123@example.com"],
     [" bob ", "sip:bob@example.com"],
     ["-", "sip:-@example.com"],
+    ["tel:+49-30-123-4567", "sip:+49301234567@example.com"],
+    ["TEL:110", "sip:110@example.com"],
+    ["tel: +4930123", "sip:+4930123@example.com"],
+    ["tel:%2B4930123", "sip:+4930123@example.com"],
+    ["tel:7042;phone-context=example.com", "sip:7042@example.com"],
+    ["tel:+4930123;isub=12", "sip:+4930123@example.com"],
+    ["+49 (0)30 1234567", "sip:+49301234567@example.com"],
+    ["tel:+44 (0)20 7946 0000", "sip:+442079460000@example.com"],
+    ["(030) 1234567", "sip:0301234567@example.com"],
+    ["02.123.45.67", "sip:021234567@example.com"],
   ])("dials %s as %s", (input, uri) => {
     expect(targetUri(input, "example.com")).toBe(uri)
+  })
+
+  it.each([
+    ["tel:bob", "use a number"],
+    ["tel:", "use a number"],
+    ["tel:*21#", "use a number"],
+    ["tel:%E0%A4%A", "use a number"],
+    ["tel:+4930123;ext=12", "extensions in tel: links are not supported"],
+    ["+", "use a number"],
+    ["+bob", "use a number"],
+    ["192.168.1.10", "use a number"],
+  ])("refuses %s", (input, message) => {
+    expect(() => targetUri(input, "example.com")).toThrow(message)
   })
 
   it.each([

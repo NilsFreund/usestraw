@@ -5,7 +5,7 @@ import {
   getHeader,
   type SipHeader,
   type SipRequest,
-} from "../../../src"
+} from "../../../src/core"
 import { createTrust } from "../../../src/core/authenticator"
 import { createRegistration } from "../../../src/core/registration/registration"
 import type { RegistrationOutput } from "../../../src/core/registration/types"

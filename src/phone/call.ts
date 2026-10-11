@@ -1,16 +1,46 @@
-import type { CallEnd, CallEvent, CallReason, CoreCommand } from "../core/types"
-import { splitSipUri } from "../message/fields/uri"
+import type { CallEnd, CallEvent, CoreCommand } from "../core/types"
 import type { CallMedia } from "../sdp/types"
-import { type CallAudio, openAudio } from "./audio"
 import { createListeners } from "./listeners"
-
-export type { CallReason }
+import type { CallAudio } from "./platform"
 
 /**
- * Incoming calls start as `"ringing"`, outgoing ones as `"calling"`. Both go `"live"` when answered
- * and end as `"ended"`.
+ * Why a call ended:
+ *
+ * - `"hangup"`: someone hung up a live call.
+ * - `"cancelled"`: the caller gave up before the answer.
+ * - `"answered-elsewhere"`: another of your devices took the call.
+ * - `"busy"`: 486 or 600.
+ * - `"declined"`: 603 or 607.
+ * - `"not-found"`: no such number or user (404, 410, 484, 604).
+ * - `"no-answer"`: nobody picked up in time (408, 480, or your `timeout`).
+ * - `"unavailable"`: any 5xx.
+ * - `"rejected"`: any other refusal (3xx, 4xx or 6xx).
+ * - `"unauthorized"`: the server refused our credentials for this call.
+ * - `"incompatible"`: no codec in common (488, 606).
+ * - `"dropped"`: the other side stopped responding or sent no audio for a minute, or the phone closed.
+ *
+ * New reasons may come in minor versions, so keep a default branch when you switch on them.
  */
-export type CallStatus = "ringing" | "calling" | "live" | "ended"
+export type CallReason =
+  | "hangup"
+  | "cancelled"
+  | "answered-elsewhere"
+  | "busy"
+  | "declined"
+  | "not-found"
+  | "no-answer"
+  | "unavailable"
+  | "rejected"
+  | "unauthorized"
+  | "incompatible"
+  | "dropped"
+
+/**
+ * Incoming calls start as `"ringing"` and are `"answering"` from `accept()` until the caller
+ * confirms; outgoing ones start as `"calling"`. Both go `"live"` when answered and end as
+ * `"ended"`. This list is complete: things like hold or mute will be fields, not statuses.
+ */
+export type CallStatus = "ringing" | "answering" | "calling" | "live" | "ended"
 
 /** How a call ended. */
 export interface CallEnded {
@@ -20,11 +50,11 @@ export interface CallEnded {
   readonly reason: CallReason
 }
 
-/** A live call's audio: 16-bit PCM at 8 kHz, both ways. An agent locks both streams. */
+/** A live call's audio: 16-bit mono PCM at `sampleRate`, both ways. An agent locks both streams. */
 export interface CallAudioStreams {
   /**
-   * What the other side says: 160 samples (20 ms) every 20 ms, silence included. Closes when the
-   * call ends. A reader that falls behind loses the oldest frames.
+   * What the other side says: a 20 ms frame (160 samples at 8 kHz) every 20 ms, silence included.
+   * Closes when the call ends. A reader that falls behind loses the oldest frames.
    */
   readonly readable: ReadableStream<Int16Array<ArrayBuffer>>
   /**
@@ -33,8 +63,8 @@ export interface CallAudioStreams {
    * and a pending `close()` reject with an `AbortError`.
    */
   readonly writable: WritableStream<Int16Array>
-  /** Always 8000. */
-  readonly sampleRate: 8000
+  /** Samples per second, 8000 for now. Check it before you resample. */
+  readonly sampleRate: number
   /** Milliseconds of written audio sent so far, not counting silence. */
   readonly played: number
   /** Drops written audio that hasn't played yet. Use it for barge-in. */
@@ -77,7 +107,7 @@ export interface CallSnapshot {
 
 /** Shared by every call state. */
 interface CallBase extends AsyncDisposable {
-  /** The SIP Call-ID. Stable, so it works as a React key. */
+  /** Unique and stable for the call's life, so it works as a React key. Treat it as opaque. */
   readonly id: string
   readonly direction: "incoming" | "outgoing"
   /** The caller's number or user name, e.g. `"+4930123456"`, or `"anonymous"`. */
@@ -101,9 +131,12 @@ interface CallBase extends AsyncDisposable {
   toJSON(): CallSnapshot
 }
 
-/** An incoming call that is ringing. */
+/**
+ * An incoming call that is ringing, or ended meanwhile: the caller can give up at any time. Once you
+ * accept it, go on with the call that `accept()` returns.
+ */
 export interface RingingCall extends CallBase {
-  readonly status: "ringing"
+  readonly status: "ringing" | "ended"
   /**
    * Answers the call. Talk through the agent, or through `audio` on the returned call. Resolves to
    * an {@link UnansweredCall} if the caller gave up first or no audio port was free. Rejects only
@@ -119,9 +152,14 @@ export interface RingingCall extends CallBase {
   accept(agent?: Agent): Promise<LiveCall | UnansweredCall>
 }
 
-/** An outgoing call that has not been answered yet. */
+/** An incoming call that was accepted and waits for the caller to confirm, or ended meanwhile. */
+export interface AnsweringCall extends CallBase {
+  readonly status: "answering" | "ended"
+}
+
+/** An outgoing call that has not been answered yet, or ended meanwhile. */
 export interface CallingCall extends CallBase {
-  readonly status: "calling"
+  readonly status: "calling" | "ended"
 }
 
 /** An answered call. Its `status` becomes `"ended"` after the hang-up. */
@@ -144,7 +182,7 @@ export interface UnansweredCall extends EndedCall {
 }
 
 /** A call in any state. Narrow it with `status` or `ok`; `await using` hangs it up. */
-export type Call = RingingCall | CallingCall | LiveCall | EndedCall
+export type Call = RingingCall | AnsweringCall | CallingCall | LiveCall | EndedCall
 
 export interface CallSetup {
   readonly id: string
@@ -152,8 +190,8 @@ export interface CallSetup {
   readonly from: string
   readonly to: string
   readonly callerName?: string
-  readonly host: string
   readonly agent?: Agent
+  readonly openAudio: (silent: () => void) => Promise<CallAudio>
   readonly run: (command: CoreCommand) => void
   readonly changed: () => void
 }
@@ -166,6 +204,13 @@ export interface CallHandle {
   place(command: CoreCommand): void
   giveUp(reason: CallReason): void
   drop(reason: CallReason): void
+}
+
+// Every state's fields in one object, so a call keeps its identity while its status changes
+interface CallObject extends CallBase {
+  readonly status: CallStatus
+  readonly audio?: CallAudioStreams | undefined
+  accept?(agent?: Agent): Promise<LiveCall | UnansweredCall>
 }
 
 const STATUSES: Readonly<Record<NonNullable<EndOptions["reason"]>, number>> = {
@@ -182,7 +227,7 @@ export function checkAgent(agent: Agent): void {
 }
 
 export function createCall(setup: CallSetup): CallHandle {
-  const { id, direction, from, to, callerName, host, run, changed } = setup
+  const { id, direction, from, to, callerName, openAudio, run, changed } = setup
   const listeners = createListeners()
   const settled = Promise.withResolvers<CallEnded>()
   const answer = Promise.withResolvers<LiveCall | UnansweredCall>()
@@ -193,6 +238,7 @@ export function createCall(setup: CallSetup): CallHandle {
   let override: CallReason | undefined
   let ending = false
   let audio: CallAudio | undefined
+  let streams: CallAudioStreams | undefined
   let opening: Promise<CallAudio> | undefined
   let accepting: Promise<LiveCall | UnansweredCall> | undefined
   let agent = setup.agent
@@ -203,11 +249,15 @@ export function createCall(setup: CallSetup): CallHandle {
     changed()
   }
 
+  // A platform that throws instead of rejecting must not leave the call hanging
   function open(): Promise<CallAudio> {
-    opening ??= openAudio(host, () => drop("timeout")).then((opened) => {
-      audio = opened
-      if (status === "ended") opened.close()
-      return opened
+    const opened = () =>
+      new Promise<CallAudio>((resolve) => resolve(openAudio(() => drop("dropped"))))
+    opening ??= opened().then((sound) => {
+      audio = sound
+      streams = view(sound)
+      if (status === "ended") sound.close()
+      return sound
     })
     return opening
   }
@@ -258,30 +308,36 @@ export function createCall(setup: CallSetup): CallHandle {
     answer.resolve(call as UnansweredCall)
   }
 
+  // Never rejects for a free agent, so `call.accept(agent)` without await cannot crash the process
   function accept(next?: Agent): Promise<LiveCall | UnansweredCall> {
-    if (next && accepting === undefined) {
+    if (accepting) return accepting
+    if (next) {
       try {
         checkAgent(next)
       } catch (error) {
         return Promise.reject(error)
       }
     }
-    accepting ??= answering(next)
+    if (status !== "ringing") {
+      if (next) release(next)
+      accepting = answer.promise
+      return accepting
+    }
+    agent = next
+    accepting = answering()
+    set("answering")
     return accepting
   }
 
-  // Never rejects, so `call.accept(agent)` without await cannot bring the process down
-  async function answering(next?: Agent): Promise<LiveCall | UnansweredCall> {
-    if (status !== "ringing") {
-      if (next) release(next)
-      return answer.promise
-    }
-    agent = next
-    const opened = await open().catch(() => undefined)
-    if (status !== "ringing") return answer.promise
+  async function answering(): Promise<LiveCall | UnansweredCall> {
+    finishAnswer(await open().catch(() => undefined))
+    return answer.promise
+  }
+
+  function finishAnswer(opened: CallAudio | undefined): void {
+    if (status !== "answering") return
     if (opened) run({ type: "accept", call: id, media: opened.local })
     else run({ type: "end", call: id, status: 503 })
-    return answer.promise
   }
 
   function end(options: EndOptions = {}): Promise<CallEnded> {
@@ -319,7 +375,7 @@ export function createCall(setup: CallSetup): CallHandle {
     }
   }
 
-  const call = {
+  const call: CallObject = {
     id,
     direction,
     from,
@@ -335,7 +391,7 @@ export function createCall(setup: CallSetup): CallHandle {
       return reason
     },
     get audio() {
-      return audio
+      return streams
     },
     ended: settled.promise,
     subscribe: listeners.subscribe,
@@ -346,22 +402,19 @@ export function createCall(setup: CallSetup): CallHandle {
     [Symbol.asyncDispose]: async () => {
       await end()
     },
-  } as unknown as Call
-
-  return { call, answered: answer.promise, receive, open, place, giveUp, drop }
-}
-
-// RFC 3966 style dialling: people write numbers with spaces, dashes and brackets
-export function targetUri(input: string, domain: string): string {
-  const text = input.trim()
-  if (/^sips?:/i.test(text)) return text
-  if (text.includes("@")) return `sip:${text}`
-  if (/^\+?[\d\s().\-/]+$/.test(text) && /\d/.test(text)) {
-    return `sip:${text.startsWith("+") ? "+" : ""}${text.replace(/\D/g, "")}@${domain}`
   }
-  return `sip:${text}@${domain}`
+
+  return { call: call as Call, answered: answer.promise, receive, open, place, giveUp, drop }
 }
 
-export function userOf(uri: string): string {
-  return splitSipUri(uri)?.user ?? uri.replace(/^[a-z]+:/i, "")
+function view(audio: CallAudio): CallAudioStreams {
+  return {
+    readable: audio.readable,
+    writable: audio.writable,
+    sampleRate: audio.sampleRate,
+    get played() {
+      return audio.played
+    },
+    clear: () => audio.clear(),
+  }
 }

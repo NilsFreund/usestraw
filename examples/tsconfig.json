@@ -2,7 +2,7 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "noPropertyAccessFromIndexSignature": false,
-    "paths": { "usestraw": ["../src/node/index.ts"] }
+    "paths": { "usestraw": ["../src/index.ts"] }
   },
   "include": ["."]
 }

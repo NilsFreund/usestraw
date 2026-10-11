@@ -8,7 +8,7 @@ import {
   parseMessage,
   type SipRequest,
   serializeMessage,
-} from "../../src"
+} from "../../src/core"
 import { reasonFor } from "../../src/core/calls/reasons"
 import { createRandom } from "../../src/simulation/random"
 import { alice, aliceMedia, bob, bytes, sdp } from "../helpers"
@@ -665,6 +665,7 @@ describe("calls in rarer situations", () => {
     const [, bye] = sentRequests(outputs)
     expect(bye?.method).toBe("BYE")
     if (!bye) throw new Error("No BYE")
+    expect(getHeader(bye, "Reason")).toBe('SIP;cause=488;text="Incompatible media"')
     expect(events(ua.handle(receive(reply(bye, 200)), 30))).toStrictEqual([
       { type: "call", call: "c1", state: "ended", ended: { by: "local", reason: "incompatible" } },
     ])
@@ -991,7 +992,7 @@ describe("calls through forking proxies and late answers", () => {
     const outputs: CoreOutput[] = []
     for (let now = 500; now <= 32_000; now += 500)
       outputs.push(...ua.handle({ type: "timeout" }, now))
-    expect(callEvents(outputs)).toMatchObject([{ state: "ended", ended: { reason: "timeout" } }])
+    expect(callEvents(outputs)).toMatchObject([{ state: "ended", ended: { reason: "dropped" } }])
     expect(methodsOf(ua.handle(receive(reply(invite, 200)), 32_100))).toStrictEqual(["ACK", "BYE"])
   })
 })

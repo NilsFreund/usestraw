@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isRequest } from "../../src"
+import { isRequest } from "../../src/core"
 import { createClientInvite } from "../../src/transaction/client-invite"
 import { bob } from "../helpers"
 import { kinds, request, response, run, sends, tcp, udp } from "./support"

@@ -1,5 +1,5 @@
-import type { Random } from "../core/types"
 import { fnv1a } from "../support/fnv"
+import { type Random, randomInt } from "../support/random"
 
 export function createRandom(seed: number): Random {
   let state = seed >>> 0
@@ -28,7 +28,7 @@ export function createStreams(seed: number): (label: string) => Random {
 }
 
 export function between(random: Random, min: number, max: number): number {
-  return min + Math.floor(random() * (max - min + 1))
+  return min + randomInt(random, max - min + 1)
 }
 
 export function chance(random: Random, probability: number): boolean {

@@ -3,13 +3,29 @@ import dns from "node:dns"
 import { once } from "node:events"
 import { isIP } from "node:net"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { CallMedia } from "../../src"
-import { type CallAudio, openAudio } from "../../src/node/audio"
+import type { CallMedia } from "../../src/core"
+import { openAudio } from "../../src/node/audio"
+import type { CallAudio } from "../../src/phone/platform"
 import { readRtp } from "../../src/rtp/packet"
+import { pause, tone } from "../helpers"
 
 const opened: CallAudio[] = []
 const host = "127.0.0.1"
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const turn = () => new Promise((resolve) => setImmediate(resolve))
+
+async function blockEvenPort(): Promise<{ port: number; blocker: Socket }> {
+  for (;;) {
+    const port = 16_384 + 2 * Math.floor(Math.random() * 4096)
+    const blocker = createSocket("udp4")
+    try {
+      blocker.bind(port, host)
+      await once(blocker, "listening")
+      return { port, blocker }
+    } catch {
+      blocker.close()
+    }
+  }
+}
 
 async function open(): Promise<CallAudio> {
   const audio = await openAudio(host, () => undefined)
@@ -26,12 +42,6 @@ function towards(audio: CallAudio, overrides: Partial<CallMedia> = {}): CallMedi
     direction: "sendrecv",
     ...overrides,
   }
-}
-
-function tone(samples: number): Int16Array {
-  return Int16Array.from({ length: samples }, (_, index) =>
-    Math.round(8000 * Math.sin((2 * Math.PI * 440 * index) / 8000)),
-  )
 }
 
 const loudness = (pcm: Int16Array) =>
@@ -80,9 +90,12 @@ describe("openAudio", () => {
     const [left, right] = await Promise.all([open(), open()])
     left.update(towards(right))
     const writer = left.writable.getWriter()
-    const started = performance.now()
-    await writer.write(tone(8000 * 29))
-    expect(performance.now() - started).toBeLessThan(100)
+    let written = false
+    void writer.write(tone(8000 * 29)).then(() => {
+      written = true
+    })
+    await turn()
+    expect(written).toBe(true)
     let done = false
     void writer.write(tone(8000 * 2)).then(() => {
       done = true
@@ -90,7 +103,7 @@ describe("openAudio", () => {
     await pause(100)
     expect(done).toBe(false)
     left.clear()
-    await pause(40)
+    await turn()
     expect(done).toBe(true)
   })
 
@@ -249,14 +262,12 @@ describe("openAudio", () => {
   })
 
   it("gives up when no even port is free, and reports other bind errors as they are", async () => {
-    const blocker = createSocket("udp4")
-    blocker.bind(16_384, host)
-    await once(blocker, "listening")
+    const { port, blocker } = await blockEvenPort()
     await expect(
       openAudio(
         host,
         () => undefined,
-        () => 0,
+        () => (port - 16_384) / 2 / 4096,
       ),
     ).rejects.toThrow("No free even port for RTP on 127.0.0.1")
     blocker.close()

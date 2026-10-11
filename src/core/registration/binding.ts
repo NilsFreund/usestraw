@@ -4,7 +4,7 @@ import type { NameAddr } from "../../message/fields/name-addr"
 import { splitSipUri } from "../../message/fields/uri"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
-import { isPrivate, sameHost as sameAddress } from "../../sdp/address"
+import { isPrivate, sameIp } from "../../sdp/address"
 import { isIntegerIn } from "../../support/integer"
 import type { TransportAddress } from "../../transport/address"
 import type { Random } from "../types"
@@ -18,8 +18,7 @@ const TRANSPORT_PARAMS = {
   WSS: ";transport=ws",
 }
 
-// RFC 3261 §10.2.1 and §26.2.2: sips for TLS, which proxies route back over our connection;
-// RFC 7118 §5.2: transport=ws for WebSocket
+// RFC 3261 §10.2.1 and §26.2.2: sips: over TLS; RFC 7118 §5.2: transport=ws over WebSocket
 export function createContact(address: TransportAddress, aor: string): NameAddr {
   const user = splitSipUri(aor)?.user
   const scheme = address.transport === "TLS" || address.transport === "WSS" ? "sips" : "sip"
@@ -31,9 +30,7 @@ export function createContact(address: TransportAddress, aor: string): NameAddr 
   }
 }
 
-// RFC 3581 §4: received and rport show where the registrar saw us; behind a NAT over UDP that is
-// the address calls have to come to. Like pjsua, never trade our address for a private one, nor
-// follow a private port change
+// RFC 3581 §4: received and rport show where calls must come to; like pjsua, never a private one
 export function publicAddress(
   response: SipResponse,
   current: TransportAddress,
@@ -43,7 +40,7 @@ export function publicAddress(
   const host = bareHost(via?.params.get("received") ?? "")
   const port = Number(via?.params.get("rport"))
   if (!isIp(host) || !isIntegerIn(port, 1, 65_535)) return undefined
-  const same = sameAddress(host, current.host)
+  const same = sameIp(host, current.host)
   if (same && port === current.port) return undefined
   if (isPrivate(host) && (same || !isPrivate(current.host))) return undefined
   return { ...current, host, port }
@@ -59,8 +56,7 @@ export function defaultRegistrar(aor: string): string | undefined {
   return parts && `${parts.scheme}:${parts.hostport}`
 }
 
-// RFC 3261 §10.2.4: our Contact's expires, else the Expires header, else what we asked for; a
-// registrar that rewrote our Contact gets the soonest expiry among its bindings, to stay safe
+// RFC 3261 §10.2.4: Contact expires, else Expires, else ours; a rewritten Contact takes the soonest
 export function grantedExpiry(response: SipResponse, contact: NameAddr, requested: number): number {
   const bindings = response.contact === "*" ? [] : response.contact
   const ours = bindings.find((binding) => sameBinding(binding.uri, contact.uri))

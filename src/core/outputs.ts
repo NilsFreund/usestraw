@@ -7,6 +7,6 @@ export function send(message: SipMessage, to: TransportAddress): CoreOutput {
   return { type: "send", data: encodeMessage(message), to }
 }
 
-export function event(coreEvent: CoreEvent): CoreOutput {
-  return { type: "event", event: coreEvent }
+export function emit(event: CoreEvent): CoreOutput {
+  return { type: "event", event }
 }

@@ -1,23 +1,12 @@
 import { createSocket, type Socket } from "node:dgram"
 import { once } from "node:events"
 import { isIP } from "node:net"
-import type { Random } from "../core/types"
+import { createClock } from "../phone/clock"
+import type { CallAudio } from "../phone/platform"
+import { secureRandom } from "../phone/random"
 import { createMediaEngine, type MediaInput } from "../rtp/engine"
 import { SAMPLES_PER_MS } from "../rtp/g711"
-import type { CallMedia, MediaAddress } from "../sdp/types"
-import { createClock } from "./clock"
-import { secureRandom } from "./random"
-
-export interface CallAudio {
-  readonly local: MediaAddress
-  readonly sampleRate: 8000
-  readonly played: number
-  readonly readable: ReadableStream<Int16Array<ArrayBuffer>>
-  readonly writable: WritableStream<Int16Array>
-  update(media: CallMedia): void
-  clear(): void
-  close(): void
-}
+import { type Random, randomInt } from "../support/random"
 
 const FIRST_PORT = 16_384
 const PORTS = 8192
@@ -25,8 +14,7 @@ const ATTEMPTS = 16
 const MAX_WAITING_FRAMES = 25
 const AHEAD_SAMPLES = 30_000 * SAMPLES_PER_MS
 
-// One UDP socket per call on an even port (RFC 3550 §11), PCM in and out as Web Streams; a slow
-// reader loses the oldest frames, a writer may run 30 s ahead, and clear() drops all of that at once
+// One UDP socket per call on an even port (RFC 3550 §11), its PCM as Web Streams
 export async function openAudio(
   host: string,
   silent: () => void,
@@ -98,6 +86,7 @@ export async function openAudio(
     const from = { host: info.address, port: info.port }
     run({ type: "packet", data: new Uint8Array(data), from })
   })
+  // UDP errors such as ICMP unreachable concern one packet, and the socket keeps working
   socket.on("error", () => undefined)
 
   const readable = new ReadableStream<Int16Array<ArrayBuffer>>(
@@ -154,7 +143,7 @@ export async function openAudio(
 
 async function bindEven(host: string, random: Random): Promise<Socket> {
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    const port = FIRST_PORT + 2 * Math.floor(random() * (PORTS / 2))
+    const port = FIRST_PORT + 2 * randomInt(random, PORTS / 2)
     const socket = createSocket(isIP(host) === 6 ? "udp6" : "udp4")
     try {
       socket.bind({ port, address: host, exclusive: true })

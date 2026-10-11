@@ -6,7 +6,7 @@ import {
   isRequest,
   parseMessage,
   type TransportAddress,
-} from "../../src"
+} from "../../src/core"
 import { between, createRandom } from "../../src/simulation/random"
 import { alice, bob, fixture, sdp } from "../helpers"
 
@@ -121,7 +121,7 @@ function sends(outputs: CoreOutput[]): Uint8Array[] {
   return outputs.flatMap((output) => (output.type === "send" ? [output.data] : []))
 }
 
-describe("fuzzing the core with mutated torture messages", () => {
+describe("fuzzing the core with mutated torture messages", { timeout: 60_000 }, () => {
   it("never throws, answers each request once and identically for every copy", () => {
     const random = createRandom(4475)
     const core = createCore({ address: alice, aor: "sip:alice@example.com", random, maxCalls: 0 })

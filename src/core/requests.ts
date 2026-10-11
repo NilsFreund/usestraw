@@ -2,6 +2,7 @@ import type { Contact } from "../message/fields/contact"
 import { formatHost } from "../message/fields/host"
 import type { NameAddr } from "../message/fields/name-addr"
 import type { Via } from "../message/fields/via"
+import { MAX_FORWARDS } from "../message/limits"
 import type { SipHeader, SipRequest } from "../message/types"
 import type { TransportAddress } from "../transport/address"
 import { createBranch, createCallId, createTag } from "./ids"
@@ -35,7 +36,7 @@ export function createRequest(
     method,
     uri,
     via: [createVia(identity.address, identity.random)],
-    maxForwards: 70,
+    maxForwards: MAX_FORWARDS,
     from,
     to,
     callId,

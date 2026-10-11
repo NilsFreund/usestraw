@@ -2,8 +2,7 @@ import type { SipMessage, SipRequest, SipResponse } from "../message/types"
 import type { CallMedia } from "../sdp/types"
 import type { TransportAddress } from "../transport/address"
 
-/** A number in `[0, 1)` like `Math.random`, but cryptographically secure. */
-export type Random = () => number
+export type { Random } from "../support/random"
 
 /** The account to answer digest challenges (RFC 7616, RFC 8760) with. */
 export interface Credentials {
@@ -78,20 +77,23 @@ export type RegistrationEvent =
  *
  * - `"hangup"`: someone hung up a live call.
  * - `"cancelled"`: the caller gave up before the answer.
+ * - `"answered-elsewhere"`: another of your devices took the call.
  * - `"busy"`: 486 or 600.
  * - `"declined"`: 603 or 607.
  * - `"not-found"`: no such number or user (404, 410, 484, 604).
  * - `"no-answer"`: nobody picked up in time (408, 480, or your `timeout`).
  * - `"unavailable"`: any 5xx.
- * - `"rejected"`: any other 4xx.
+ * - `"rejected"`: any other refusal (3xx, 4xx or 6xx).
  * - `"unauthorized"`: the server refused our credentials for this call.
  * - `"incompatible"`: no codec in common (488, 606).
- * - `"timeout"`: the other side stopped responding or sent no audio for a minute, or the phone went
- *   offline.
+ * - `"dropped"`: the other side stopped responding or sent no audio for a minute, or the phone closed.
+ *
+ * New reasons may come in minor versions, so keep a default branch when you switch on them.
  */
 export type CallReason =
   | "hangup"
   | "cancelled"
+  | "answered-elsewhere"
   | "busy"
   | "declined"
   | "not-found"
@@ -100,7 +102,7 @@ export type CallReason =
   | "rejected"
   | "unauthorized"
   | "incompatible"
-  | "timeout"
+  | "dropped"
 
 /** Who ended a call, why, and the SIP status if there was one. */
 export interface CallEnd {

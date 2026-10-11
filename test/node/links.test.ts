@@ -3,8 +3,9 @@ import dns from "node:dns"
 import { isIP } from "node:net"
 import { networkInterfaces } from "node:os"
 import { describe, expect, it, vi } from "vitest"
-import type { TransportAddress } from "../../src"
-import { type LinkHandlers, openLink, openTls, openUdp } from "../../src/node/links"
+import type { TransportAddress } from "../../src/core"
+import { openLink, openTls, openUdp } from "../../src/node/links"
+import type { LinkHandlers } from "../../src/phone/platform"
 import { certificate, localhost, silentServer, tlsRegistrar } from "./servers"
 
 function recorder() {
@@ -193,13 +194,12 @@ describe("openTls", () => {
     await server.close()
   })
 
-  it("connects to an IP address without SNI when verification is off", async () => {
-    const server = await tlsRegistrar()
-    const { address } = await localhost(server.port)
-    const link = await openTls(tls(server.port, address), { rejectUnauthorized: false })
+  it("connects to an IP address without SNI and checks the certificate for that IP", async () => {
+    const server = await tlsRegistrar({}, { host: "127.0.0.1" })
+    const link = await openTls(tls(server.port, "127.0.0.1"), { ca: certificate })
     await vi.waitFor(() => expect(server.sockets).toHaveLength(1))
     expect(server.sockets[0]?.servername).toBe(false)
-    expect(link.remote.host).toBe(address)
+    expect(link.remote.host).toBe("127.0.0.1")
     link.close()
     await server.close()
   })

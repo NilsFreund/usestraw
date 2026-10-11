@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "ESNext.Disposable", "DOM"],
+    "types": []
+  },
+  "include": ["src"],
+  "exclude": ["src/index.ts", "src/node"]
+}

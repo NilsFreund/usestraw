@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createResponse, type NameAddr, type TransportAddress } from "../../../src"
+import { createResponse, type NameAddr, type TransportAddress } from "../../../src/core"
 import {
   createContact,
   defaultRegistrar,

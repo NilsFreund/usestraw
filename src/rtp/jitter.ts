@@ -19,9 +19,7 @@ const RESYNC = 2000 * SAMPLES_PER_MS
 const MAX_PACKETS = 50
 const SILENT = 100
 
-// An adaptive playout buffer counted in samples: it fills 60 ms before it plays, conceals short gaps
-// with silence, jumps long ones, trims itself back when it holds more than 200 ms and refills after
-// running dry, so drifting clocks, stalls and pauses cost a little audio instead of the call
+/** An adaptive playout buffer in samples: clock drift, stalls and gaps cost audio, not the call. */
 export function createJitter(): Jitter {
   const chunks = new Map<number, Int16Array>()
   let source: number | undefined

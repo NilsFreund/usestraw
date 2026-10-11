@@ -16,6 +16,9 @@
         "noUnusedImports": "error",
         "noUnusedVariables": "error",
         "noUnusedFunctionParameters": "error"
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
       }
     }
   },
@@ -64,6 +67,24 @@
       }
     },
     {
+      "includes": ["src/phone/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Buffer": "Use Uint8Array so the phone runs in browsers too.",
+                  "process": "The phone runs in browsers too: take what it needs from the platform."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["src/node/**"],
       "linter": {
         "rules": {
@@ -72,6 +93,60 @@
           },
           "style": {
             "noRestrictedGlobals": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**", "!src/node/**", "!src/index.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/node/*", "**/node"],
+                    "message": "Only src/node and the entry files may import the Node platform."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/core/**",
+        "src/message/**",
+        "src/transaction/**",
+        "src/transport/**",
+        "src/auth/**",
+        "src/sdp/**",
+        "src/rtp/**",
+        "src/support/**",
+        "src/recorder/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/node/*", "**/node"],
+                    "message": "The protocol layers stay below src/phone and src/node."
+                  },
+                  {
+                    "group": ["**/phone/*", "**/phone"],
+                    "message": "The protocol layers stay below src/phone and src/node."
+                  }
+                ]
+              }
+            }
           }
         }
       }

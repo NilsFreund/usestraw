@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { serializeMessage } from "../../../src"
+import { serializeMessage } from "../../../src/core"
 import { createRegisterRequest, createRegistrant } from "../../../src/core/registration/request"
 import { createRandom } from "../../../src/simulation/random"
 import { alice, parsed } from "../../helpers"

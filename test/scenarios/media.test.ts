@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { CallMedia, MediaAddress } from "../../src"
+import type { CallMedia, MediaAddress } from "../../src/core"
 import { createMediaEngine, type MediaEngine } from "../../src/rtp/engine"
 import { decodeG711, encodeG711 } from "../../src/rtp/g711"
 import { writeRtp } from "../../src/rtp/packet"

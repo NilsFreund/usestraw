@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { CoreEvent } from "../../src"
+import type { CoreEvent } from "../../src/core"
 import { createSimulation } from "../../src/simulation/simulation"
 import { formatTrace } from "../../src/simulation/trace"
 import { alice, bob, options, userAgent } from "../helpers"

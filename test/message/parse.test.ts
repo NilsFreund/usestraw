@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseMessage } from "../../src"
+import { parseMessage } from "../../src/core"
 import { parsed, register } from "../helpers"
 
 describe("parseMessage", () => {

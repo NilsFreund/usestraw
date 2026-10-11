@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createResponse, isRequest } from "../../src"
+import { createResponse, isRequest } from "../../src/core"
 import { parsed, register } from "../helpers"
 
 const request = parsed(register)

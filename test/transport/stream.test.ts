@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { parseMessage } from "../../src"
+import { parseMessage } from "../../src/core"
 import { between, createRandom } from "../../src/simulation/random"
 import { createStreamFramer, type StreamEvent } from "../../src/transport/stream"
 import { bytes, fixture, register } from "../helpers"

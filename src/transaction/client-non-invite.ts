@@ -2,7 +2,7 @@ import type { SipRequest, SipResponse } from "../message/types"
 import { isReliable, type TransportAddress } from "../transport/address"
 import { createAlarms } from "./alarms"
 import { clientKey } from "./keys"
-import { notify, send } from "./outputs"
+import { emit, send } from "./outputs"
 import { defaultTimers, type TimerSettings, transactionTimeout } from "./timers"
 import type { ClientTransaction, TransactionOutput } from "./types"
 
@@ -32,7 +32,7 @@ export function createClientNonInvite(
     if (state === "completed" || state === "terminated") return []
     if (response.status < 200) state = "proceeding"
     else complete(now)
-    return [notify({ type: "response", response, from })]
+    return [emit({ type: "response", response, from })]
   }
 
   function complete(now: number): void {
@@ -57,7 +57,7 @@ export function createClientNonInvite(
 
   function timeout(): TransactionOutput {
     terminate()
-    return notify({ type: "timeout", request })
+    return emit({ type: "timeout", request })
   }
 
   function terminate(): void {

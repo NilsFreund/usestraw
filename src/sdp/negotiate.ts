@@ -64,7 +64,7 @@ export function answerOffer(
   let chosen: { readonly call: CallMedia; readonly index: number } | undefined
   const media = offer.media.map((line, index) => {
     const call = chosen ? undefined : remoteMedia(offer, line, local, want, prefer)
-    if (!call) return refuse(line)
+    if (!call) return refuseLine(line)
     chosen = { call, index }
     return accept(line, call, local)
   })
@@ -88,7 +88,7 @@ export function isPlayable(data: Uint8Array): boolean {
 }
 
 // RFC 3264 §6: a refused stream keeps its line with port 0 and one of the offered formats
-export function refuse(line: MediaDescription): MediaDescription {
+export function refuseLine(line: MediaDescription): MediaDescription {
   const { kind, protocol, formats } = line
   return {
     kind,

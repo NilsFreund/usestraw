@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createClock } from "../../src/node/clock"
+import { createClock } from "../../src/phone/clock"
 
 afterEach(() => vi.useRealTimers())
 

@@ -1,6 +1,7 @@
 import { formatNameAddr, type NameAddr, parseNameAddr } from "../../message/fields/name-addr"
 import { isRequestUri } from "../../message/fields/uri"
 import { getHeaders } from "../../message/headers"
+import { MAX_FORWARDS } from "../../message/limits"
 import { splitOutside } from "../../message/syntax"
 import type { SipHeader, SipRequest, SipResponse } from "../../message/types"
 import { ALLOW, createRequest, type Identity } from "../requests"
@@ -39,7 +40,7 @@ export function createCancel(invite: SipRequest): SipRequest {
     method: "CANCEL",
     uri: invite.uri,
     via: invite.via,
-    maxForwards: 70,
+    maxForwards: MAX_FORWARDS,
     from: invite.from,
     to: invite.to,
     callId: invite.callId,
@@ -84,6 +85,14 @@ function routesOf(message: SipRequest | SipResponse): NameAddr[] {
   return usable ? recorded : []
 }
 
+// RFC 3261 §8.2.2.2: a request with the INVITE's From tag and CSeq is that same INVITE again
+export function repeats(invite: SipRequest, request: SipRequest): boolean {
+  return (
+    request.from.params.get("tag") === invite.from.params.get("tag") &&
+    request.cseq.seq === invite.cseq.seq
+  )
+}
+
 // RFC 3261 §12.2.2: a message belongs to the dialog by its local and remote tag
 export function inDialogOf(dialog: Dialog, local: NameAddr, remote: NameAddr): boolean {
   return (
@@ -93,7 +102,11 @@ export function inDialogOf(dialog: Dialog, local: NameAddr, remote: NameAddr): b
 }
 
 // RFC 3261 §13.2.2.4: the ACK for a 2xx keeps the INVITE's CSeq number and credentials
-export function createAck(dialog: Dialog, invite: SipRequest, identity: Identity): SipRequest {
+export function createDialogAck(
+  dialog: Dialog,
+  invite: SipRequest,
+  identity: Identity,
+): SipRequest {
   const credentials = invite.headers.filter((header) => CREDENTIALS.test(header.name))
   return inDialog("ACK", dialog, invite.cseq.seq, identity, credentials)
 }

@@ -1,4 +1,4 @@
-const MAX_DELAY = 2 ** 31 - 1
+import { MAX_DELAY } from "../support/time"
 
 export interface Clock {
   now(): number

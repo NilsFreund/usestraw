@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createRecordedCore, defaultTimers, type RecordedStep, replay } from "../../src"
+import { createRecordedCore, defaultTimers, type RecordedStep, replay } from "../../src/core"
 import { decode } from "../../src/recorder/codec"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes } from "../helpers"

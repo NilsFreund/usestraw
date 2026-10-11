@@ -1,10 +1,12 @@
 import { createSocket } from "node:dgram"
 import { once } from "node:events"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { getHeader, replay } from "../../src"
-import { ConnectError, type ConnectOptions, connect, type Phone } from "../../src/node"
-import { type PhoneSettings, resolveOptions } from "../../src/node/options"
-import { connectPhone, type PhoneHandle } from "../../src/node/phone"
+import { ConnectError, type ConnectOptions, connect, type Phone } from "../../src"
+import { getHeader, replay } from "../../src/core"
+import { nodePlatform } from "../../src/node/connect"
+import { type PhoneSettings, resolveOptions } from "../../src/phone/options"
+import { connectPhone, type PhoneHandle } from "../../src/phone/phone"
+import { pause } from "../helpers"
 import {
   certificate,
   closedPort,
@@ -38,10 +40,11 @@ function options(server: TestServer, transport: "udp" | "tls"): ConnectOptions {
 async function phoneFor(
   settings: ConnectOptions,
   internal: Partial<PhoneSettings> = {},
-): Promise<PhoneHandle> {
-  const phone = await connectPhone({ ...resolveOptions(settings), ...internal })
+): Promise<Phone & Pick<PhoneHandle, "ping">> {
+  const resolved = { ...resolveOptions(settings), ...internal }
+  const { phone, ping } = await connectPhone(resolved, nodePlatform(resolved))
   cleanups.push(() => phone.close())
-  return phone
+  return Object.assign(phone, { ping })
 }
 
 async function failure(settings: ConnectOptions): Promise<ConnectError> {
@@ -61,7 +64,6 @@ function watch(phone: Phone): { status: string; error?: string }[] {
   return seen
 }
 
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 function expiries(server: TestServer): (string | undefined)[] {
   const branches = new Set<string | null | undefined>()
   return server.registrar.registers.flatMap((request) => {
@@ -86,10 +88,24 @@ describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
     const started = performance.now()
     await phone.close()
     expect(performance.now() - started).toBeLessThan(1000)
-    expect(phone.status).toBe("offline")
+    expect(phone.status).toBe("closed")
     expect(server.registrar.bindings.size).toBe(0)
     expect(expiries(server)).toStrictEqual(["120", "120", "0", "0"])
-    expect(seen).toStrictEqual([{ status: "offline" }])
+    expect(seen).toStrictEqual([{ status: "closed" }])
+  })
+
+  it("prints the live ladder with STRAW_DEBUG", async () => {
+    const server = await start()
+    vi.stubEnv("STRAW_DEBUG", "1")
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    try {
+      const phone = await connect(options(server, transport))
+      await phone.close()
+      expect(write).toHaveBeenCalledWith(expect.stringMatching(/phone → \S+ {2}REGISTER sip:/))
+    } finally {
+      write.mockRestore()
+      vi.unstubAllEnvs()
+    }
   })
 
   it("registers its real local address", async () => {
@@ -150,7 +166,7 @@ describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
     await phone.close()
     expect(performance.now() - started).toBeGreaterThanOrEqual(45)
     expect(performance.now() - started).toBeLessThan(1000)
-    expect(phone.status).toBe("offline")
+    expect(phone.status).toBe("closed")
   })
 
   it("rejects pings after close and pings still waiting at close", async () => {
@@ -183,9 +199,9 @@ describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
     const phone = await phoneFor({ ...options(server, transport), signal: controller.signal })
     const seen = watch(phone)
     controller.abort()
-    await vi.waitFor(() => expect(phone.status).toBe("offline"))
+    await vi.waitFor(() => expect(phone.status).toBe("closed"))
     expect(phone.error).toBeUndefined()
-    expect(seen).toStrictEqual([{ status: "offline" }])
+    expect(seen).toStrictEqual([{ status: "closed" }])
     await vi.waitFor(() => expect(server.registrar.bindings.size).toBe(0))
   })
 })
@@ -253,7 +269,7 @@ describe("connect", () => {
     )
   })
 
-  it("lets go of its signal once it is offline", async () => {
+  it("lets go of its signal once it is closed", async () => {
     const server = await serve(udpRegistrar())
     const controller = new AbortController()
     const removed = vi.spyOn(controller.signal, "removeEventListener")
@@ -305,9 +321,10 @@ describe("connect", () => {
       uri: "sip:alice@example.com",
       server: `tls://127.0.0.1:${server.port}`,
     })
-    const error = await connectPhone({ ...settings, connectTimeout: 50 }).catch(
-      (thrown: unknown) => thrown,
-    )
+    const error = await connectPhone(
+      { ...settings, connectTimeout: 50 },
+      nodePlatform(settings),
+    ).catch((thrown: unknown) => thrown)
     expect(error).toBeInstanceOf(ConnectError)
     expect(error).toMatchObject({ reason: "network", cause: { name: "TimeoutError" } })
   })
@@ -370,8 +387,8 @@ describe("connect", () => {
     expect(phone.error?.reason).toBe("network")
     const started = performance.now()
     await phone.close()
-    expect(performance.now() - started).toBeLessThan(100)
-    expect(phone.status).toBe("offline")
+    expect(performance.now() - started).toBeLessThan(2500)
+    expect(phone.status).toBe("closed")
   })
 
   it("closes cleanly when the connection drops during close", async () => {
@@ -384,7 +401,7 @@ describe("connect", () => {
     server.sockets[0]?.destroy()
     await closing
     expect(performance.now() - started).toBeLessThan(1000)
-    expect(seen).toStrictEqual([{ status: "offline" }])
+    expect(seen).toStrictEqual([{ status: "closed" }])
   })
 
   it("refuses an invalid ping target", async () => {

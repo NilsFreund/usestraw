@@ -1,12 +1,14 @@
+import { MAX_FORWARDS } from "../message/limits"
 import type { SipRequest, SipResponse } from "../message/types"
 import { topVia } from "./keys"
 
-export function createAck(invite: SipRequest, response: SipResponse): SipRequest {
+// RFC 3261 §17.1.1.3: the ACK for a final answer that is not 2xx belongs to the INVITE transaction
+export function createFailureAck(invite: SipRequest, response: SipResponse): SipRequest {
   return {
     method: "ACK",
     uri: invite.uri,
     via: [topVia(invite)],
-    maxForwards: 70,
+    maxForwards: MAX_FORWARDS,
     from: invite.from,
     to: response.to,
     callId: invite.callId,

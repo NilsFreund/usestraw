@@ -5,7 +5,6 @@ import { isUri, splitSipUri } from "../message/fields/uri"
 import { show } from "../message/syntax"
 import { isIntegerIn } from "../support/integer"
 import { defaultPort } from "../transport/address"
-import type { TlsSettings } from "./links"
 import { parseConnectionUrl } from "./url"
 
 /** TLS settings for a `tls://` server. */
@@ -63,6 +62,10 @@ export interface ConnectOptions extends ConnectUrlOptions {
    * domain of `uri`, over UDP, or TLS for `sips:`.
    */
   readonly server?: string | undefined
+}
+
+export interface TlsSettings {
+  readonly ca?: string
 }
 
 export interface Server {

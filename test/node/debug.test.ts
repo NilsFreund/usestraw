@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { RecordedStep } from "../../src"
+import type { RecordedStep } from "../../src/core"
 import { debugOutput } from "../../src/node/debug"
 import { bob, bytes } from "../helpers"
 

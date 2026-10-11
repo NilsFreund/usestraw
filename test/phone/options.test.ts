@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveOptions } from "../../src/node/options"
+import { resolveOptions } from "../../src/phone/options"
 
 const SECRET = "S3CRET"
 const resolve = (uri: string, server?: string) => resolveOptions({ uri, server })

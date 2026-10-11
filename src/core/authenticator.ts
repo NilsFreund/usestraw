@@ -38,7 +38,7 @@ export function createTrust(): Trust {
   }
 }
 
-interface Answer {
+interface RealmAnswer {
   readonly offer: Offer
   readonly weakest: number
   readonly cnonce: string
@@ -54,7 +54,7 @@ export function createAuthenticator(
   random: Random,
   trust?: Trust,
 ): Authenticator {
-  const answers = new Map<string, Answer>()
+  const answers = new Map<string, RealmAnswer>()
 
   // RFC 3261 §22.2–22.3: 401 carries WWW-Authenticate, 407 carries Proxy-Authenticate
   function challenge(response: SipResponse): AuthFailure | undefined {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type CallEnd, type CoreEvent, createCore, type Random, replay } from "../../src"
+import { type CallEnd, type CoreEvent, createCore, type Random, replay } from "../../src/core"
 import { createRecordedCore, type RecordedCore } from "../../src/recorder/recorder"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
 import { createSimulation } from "../../src/simulation/simulation"

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { ConnectError, connectError, type PhoneFailure } from "../../src/node/errors"
+import { ConnectError } from "../../src/phone/connect-error"
+import { type PhoneFailure, toConnectError } from "../../src/phone/failures"
 
 const context = { label: "tls://sip.example.com:5061", username: "alice" }
 
@@ -16,7 +17,7 @@ describe("ConnectError", () => {
     [{ reason: "timeout" }, "no-answer", undefined],
     [{ reason: "network" }, "network", undefined],
   ])("names %j in app words", (failure, reason, status) => {
-    const error = connectError(failure, context)
+    const error = toConnectError(failure, context)
     expect(error.reason).toBe(reason)
     expect(error.sip).toStrictEqual(status === undefined ? undefined : { status })
   })
@@ -76,7 +77,7 @@ describe("ConnectError", () => {
       "Network error with tls://sip.example.com:5061: the server closed the connection",
     ],
   ])("explains %j", (failure, message) => {
-    const error = connectError(failure, context)
+    const error = toConnectError(failure, context)
     expect(error).toBeInstanceOf(Error)
     expect(error.name).toBe("ConnectError")
     expect(error.message).toBe(message)
@@ -87,7 +88,7 @@ describe("ConnectError", () => {
     const cause = Object.assign(new Error("connect ECONNREFUSED 192.0.2.1:5061"), {
       code: "ECONNREFUSED",
     })
-    const error = connectError({ reason: "network" }, context, cause)
+    const error = toConnectError({ reason: "network" }, context, cause)
     expect(error.cause).toBe(cause)
     expect(error.message).toBe(
       "Network error with tls://sip.example.com:5061: connect ECONNREFUSED 192.0.2.1:5061",
@@ -101,7 +102,7 @@ describe("ConnectError", () => {
     "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
   ])("points to tls.ca for %s", (code) => {
     const cause = Object.assign(new Error("untrusted"), { code })
-    expect(connectError({ reason: "network" }, context, cause).message).toBe(
+    expect(toConnectError({ reason: "network" }, context, cause).message).toBe(
       "Network error with tls://sip.example.com:5061: untrusted (pass tls.ca if the server uses a private CA)",
     )
   })
@@ -109,8 +110,8 @@ describe("ConnectError", () => {
   it("escapes and cuts what the server sent", () => {
     const phrase = `For‮bidden\u009b${"x".repeat(2000)}`
     const offered = Array.from({ length: 50 }, (_, index) => ({ scheme: `S ${index}` }))
-    const rejected = connectError({ reason: "rejected", status: 403, phrase }, context)
-    const unsupported = connectError({ reason: "unsupported-challenge", offered }, context)
+    const rejected = toConnectError({ reason: "rejected", status: 403, phrase }, context)
+    const unsupported = toConnectError({ reason: "unsupported-challenge", offered }, context)
     expect(rejected.message).toMatch(/^[\x20-\x7e]+$/)
     expect(rejected.message.length).toBeLessThan(200)
     expect(rejected.message).toContain("For\\u202ebidden\\u009b")
@@ -124,13 +125,13 @@ describe("ConnectError", () => {
     [4, '"S0", "S1", "S2", …'],
   ])("lists at most three of %i offers", (count, list) => {
     const offered = Array.from({ length: count }, (_, index) => ({ scheme: `S${index}` }))
-    expect(connectError({ reason: "unsupported-challenge", offered }, context).message).toBe(
+    expect(toConnectError({ reason: "unsupported-challenge", offered }, context).message).toBe(
       `tls://sip.example.com:5061 asks for authentication Straw does not support: ${list}`,
     )
   })
 
   it("escapes the username", () => {
-    const error = connectError(
+    const error = toConnectError(
       { reason: "unauthorized", status: 403 },
       { ...context, username: "a‮b" },
     )

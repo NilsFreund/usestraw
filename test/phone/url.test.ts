@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseConnectionUrl } from "../../src/node/url"
+import { parseConnectionUrl } from "../../src/phone/url"
 
 const SECRET = "S3CRET"
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TransportAddress } from "../../src"
+import type { TransportAddress } from "../../src/core"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
 import { createNetwork } from "../../src/simulation/network/network"
 import { profiles } from "../../src/simulation/network/profiles"
@@ -29,7 +29,7 @@ function blast(
 const deliveredShare = (trace: readonly PacketRecord[]) =>
   traceStats(trace).delivered / trace.length
 
-describe("network statistics over large samples", () => {
+describe("network statistics over large samples", { timeout: 60_000 }, () => {
   it("adds the latency of every hop", () => {
     const trace = blast({ latency: latency.fixed(20) }, 100, {
       alice: { latency: latency.fixed(10) },

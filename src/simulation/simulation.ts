@@ -71,7 +71,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
   function command(node: SimulationNode, command: CoreCommand): void {
     const target = nodes.get(node.name)
     if (target !== node) throw new Error(`Unknown node ${node.name}`)
-    process(target, target.core.handle({ type: "command", command }, now))
+    deliver(target, target.core.handle({ type: "command", command }, now))
   }
 
   function at(time: number, action: () => void): void {
@@ -93,7 +93,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
       for (const node of nodes.values()) {
         const deadline = node.core.nextDeadline()
         if (deadline !== undefined && deadline <= now) {
-          process(node, node.core.handle({ type: "timeout" }, now))
+          deliver(node, node.core.handle({ type: "timeout" }, now))
         }
       }
     }
@@ -106,10 +106,10 @@ export function createSimulation(options: SimulationOptions): Simulation {
 
   function receive({ host, from, data }: Delivery): void {
     const node = nodes.get(host)
-    if (node) process(node, node.core.handle({ type: "receive", data, from }, now))
+    if (node) deliver(node, node.core.handle({ type: "receive", data, from }, now))
   }
 
-  function process(node: NodeState, outputs: CoreOutput[]): void {
+  function deliver(node: NodeState, outputs: CoreOutput[]): void {
     for (const output of outputs) {
       if (output.type === "event") node.events.push(output.event)
       else network.send(node.name, output.to, output.data, now)

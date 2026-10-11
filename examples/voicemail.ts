@@ -10,7 +10,11 @@ for await (const call of phone.incoming) void record(call)
 async function record(ringing: RingingCall): Promise<void> {
   const call = await ringing.accept()
   if (!call.ok) return
-  const beep = Int16Array.from({ length: 4000 }, (_, index) => 6000 * Math.sin(index * 0.5))
+  const { sampleRate } = call.audio
+  const beep = Int16Array.from(
+    { length: sampleRate / 2 },
+    (_, index) => 6000 * Math.sin(index * 0.5),
+  )
   void call.audio.writable
     .getWriter()
     .write(beep)
@@ -20,11 +24,11 @@ async function record(ringing: RingingCall): Promise<void> {
   for await (const frame of call.audio.readable) frames.push(frame)
   clearTimeout(limit)
   const file = `voicemail-${Date.now()}.wav`
-  await writeFile(file, wav(frames))
+  await writeFile(file, wav(frames, sampleRate))
   console.log(`${frames.length / 50} s from ${call.from} in ${file}`)
 }
 
-function wav(frames: Int16Array[]): Uint8Array {
+function wav(frames: Int16Array[], sampleRate: number): Uint8Array {
   const size = frames.reduce((sum, frame) => sum + frame.byteLength, 0)
   const bytes = new Uint8Array(44 + size)
   const view = new DataView(bytes.buffer)
@@ -35,8 +39,8 @@ function wav(frames: Int16Array[]): Uint8Array {
   view.setUint32(16, 16, true)
   view.setUint16(20, 1, true)
   view.setUint16(22, 1, true)
-  view.setUint32(24, 8000, true)
-  view.setUint32(28, 16_000, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
   view.setUint16(32, 2, true)
   view.setUint16(34, 16, true)
   text(36, "data")

@@ -31,7 +31,7 @@ import {
   checkSource,
   parseAcceptFrom,
 } from "./checks"
-import { event, send } from "./outputs"
+import { emit, send } from "./outputs"
 import { defaultRegistrar } from "./registration/binding"
 import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
@@ -40,17 +40,20 @@ import { createResponder } from "./responder"
 import type { CoreCommand, CoreInput, CoreOutput, Credentials, Random } from "./types"
 import { type Answer, answerWith, checkInvite } from "./uas"
 
-const LOOP: Answer = answerWith(482, "Loop Detected")
-const BUSY: Answer = answerWith(486, "Busy Here")
-const INCOMPATIBLE: Answer = answerWith(488, "Not Acceptable Here", [INCOMPATIBLE_MEDIA])
-const FULL: Answer = answerWith(503, "Service Unavailable", [{ name: "Retry-After", value: "5" }])
+const LOOP: Answer = answerWith(482)
+const BUSY: Answer = answerWith(486)
+const UNPLAYABLE: Answer = answerWith(488, [INCOMPATIBLE_MEDIA])
+const FULL: Answer = answerWith(503, [{ name: "Retry-After", value: "5" }])
 
-// A far end can make us build a message too big for any parser, or aim a reply at port 0; such
-// messages are dropped like lost packets
+// Output too big for any parser, or aimed at port 0, is dropped like a lost packet
 const fits = (output: CoreOutput) =>
   output.type !== "send" || (output.data.length <= MAX_MESSAGE_SIZE && output.to.port > 0)
 
-/** Options for {@link createCore}. */
+/**
+ * Options for {@link createCore}.
+ *
+ * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
+ */
 export interface CoreOptions {
   /** Where this phone receives SIP, as the far end sees it. */
   readonly address: TransportAddress
@@ -76,6 +79,8 @@ export interface CoreOptions {
 /**
  * SIP as a pure state machine, with no sockets or clocks. Pass every input with the current time,
  * do what it returns, and send a `timeout` input once `nextDeadline()` has passed.
+ *
+ * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
 export interface Core {
   /**
@@ -105,6 +110,7 @@ export interface Core {
  * ```
  * @throws {TypeError} for an invalid address, address of record, credentials or `acceptFrom`
  * @throws {RangeError} for timers, `maxCalls` or lengths out of range
+ * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
 export function createCore(options: CoreOptions): Core {
   const { address, aor, random, maxCalls = 100, acceptFrom } = options
@@ -154,8 +160,7 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  // Strangers only get through inside a call, whose unguessable ids they have to match. A CANCEL
-  // is not inside the call and takes the INVITE's way, so it never comes from a stranger
+  // Strangers only get in with requests inside a call, whose ids they must guess, and never CANCEL
   function accepts(request: SipRequest, from: TransportAddress): boolean {
     if (accepted === undefined || accepted.some((range) => inRange(from.host, range))) {
       return true
@@ -166,12 +171,12 @@ export function createCore(options: CoreOptions): Core {
   function receive(data: Uint8Array, from: TransportAddress, now: number): CoreOutput[] {
     checkSource(from)
     const result = parseMessage(data)
-    if (!result.ok) return [event({ type: "invalid", error: result.error, from })]
+    if (!result.ok) return [emit({ type: "invalid", error: result.error, from })]
     const { message } = result
     if (!isRequest(message)) return translate(transactions.receive(message, from, now), now)
     if (!accepts(message, from)) {
       const error = `${message.method} from ${formatHost(from.host)}, not an accepted host`
-      return [event({ type: "invalid", error, from })]
+      return [emit({ type: "invalid", error, from })]
     }
     const via = message.via.map((entry, index) =>
       index === 0 ? withReceived(entry, from.host, from.port) : entry,
@@ -188,7 +193,7 @@ export function createCore(options: CoreOptions): Core {
     if (invite.to.params.has("tag") || transactions.hasInvite(invite)) return undefined
     const refusal = checkInvite(invite)
     if (refusal) return refusal
-    if (invite.body.length > 0 && !isPlayable(invite.body)) return INCOMPATIBLE
+    if (invite.body.length > 0 && !isPlayable(invite.body)) return UNPLAYABLE
     if (calls.collides(invite)) return LOOP
     if (calls.active() >= maxCalls) return BUSY
     return calls.tracked() >= capacity ? FULL : undefined
@@ -266,7 +271,7 @@ export function createCore(options: CoreOptions): Core {
         return translateRegistration(registration.receive(happened, now), now)
       }
       const handled = forCalls(happened, now)
-      return handled ? translateCalls(handled, now) : [event(happened)]
+      return handled ? translateCalls(handled, now) : [emit(happened)]
     })
   }
 
@@ -290,7 +295,7 @@ export function createCore(options: CoreOptions): Core {
 
   function translateCalls(outputs: CallOutput[], now: number): CoreOutput[] {
     return outputs.flatMap((output) => {
-      if (output.type === "event") return [event(output.event)]
+      if (output.type === "event") return [emit(output.event)]
       if (output.type === "abandon") {
         transactions.abandon(output.request)
         return []
@@ -307,7 +312,7 @@ export function createCore(options: CoreOptions): Core {
     return outputs.flatMap((output) =>
       output.type === "send"
         ? translate(transactions.send(output.request, output.to, now), now)
-        : [event(output.event)],
+        : [emit(output.event)],
     )
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createResponse } from "../../../src"
+import { createResponse } from "../../../src/core"
 import { isRetryable, retryDelay } from "../../../src/core/registration/retry"
 import type { RegistrationFailure } from "../../../src/core/types"
 import { parsedRequest, register } from "../../helpers"

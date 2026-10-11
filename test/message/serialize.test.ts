@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createResponse, isRequest, serializeMessage } from "../../src"
+import { createResponse, isRequest, serializeMessage } from "../../src/core"
 import { parsed, register } from "../helpers"
 
 describe("serializeMessage", () => {

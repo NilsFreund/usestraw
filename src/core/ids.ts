@@ -1,13 +1,10 @@
-import type { Random } from "./types"
+import { type Random, randomInt } from "../support/random"
 
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 export function randomToken(random: Random, length: number): string {
   let token = ""
-  const last = ALPHABET.length - 1
-  for (let i = 0; i < length; i++) {
-    token += ALPHABET.charAt(Math.min(last, Math.floor(random() * ALPHABET.length)))
-  }
+  for (let i = 0; i < length; i++) token += ALPHABET.charAt(randomInt(random, ALPHABET.length))
   return token
 }
 

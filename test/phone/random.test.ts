@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { secureRandom } from "../../src/node/random"
+import { secureRandom } from "../../src/phone/random"
 
 describe("secureRandom", () => {
   it("draws distinct numbers from [0, 1)", () => {

@@ -6,7 +6,7 @@ import {
   getHeader,
   type Random,
   type TransportAddress,
-} from "../../src"
+} from "../../src/core"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
 import { natTypes } from "../../src/simulation/network/nat/types"
 import { outage } from "../../src/simulation/scenarios"

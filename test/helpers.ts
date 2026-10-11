@@ -10,7 +10,7 @@ import {
   type SipMessage,
   type SipRequest,
   type TransportAddress,
-} from "../src"
+} from "../src/core"
 
 export function fixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(new URL(`fixtures/rfc4475/${name}.dat`, import.meta.url)))
@@ -107,3 +107,12 @@ export function sdp(options: SdpOptions = {}): string {
 }
 
 export const aliceMedia = { host: "192.0.2.10", port: 40_000 } as const
+
+export const pause = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+export function tone(samples: number): Int16Array {
+  return Int16Array.from({ length: samples }, (_, index) =>
+    Math.round(8000 * Math.sin((2 * Math.PI * 440 * index) / 8000)),
+  )
+}

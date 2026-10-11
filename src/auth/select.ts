@@ -1,8 +1,7 @@
 import { parseChallenge } from "./challenge"
 import { type Offer, resolveOffer } from "./offer"
 
-// RFC 8760 §2.4: answer one realm; local policy takes its strongest offer instead of the topmost,
-// and only realms in `floors`, none weaker than the realm's floor
+// RFC 8760 §2.4: one realm, its strongest offer, and never below the floor the registration set
 export function selectOffer(
   values: readonly string[],
   floors?: ReadonlyMap<string, number>,

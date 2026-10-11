@@ -7,8 +7,9 @@ import {
   isRequest,
   parseMessage,
   type TransportAddress,
-} from "../../src"
-import { type CallAudio, openAudio } from "../../src/node/audio"
+} from "../../src/core"
+import { openAudio } from "../../src/node/audio"
+import type { CallAudio } from "../../src/phone/platform"
 import { createRandom } from "../../src/simulation/random"
 import { registrar } from "../registrar"
 

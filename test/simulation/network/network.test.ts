@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TransportAddress } from "../../../src"
+import type { TransportAddress } from "../../../src/core"
 import { latency, loss } from "../../../src/simulation/network/conditions"
 import { type NatType, natTypes } from "../../../src/simulation/network/nat/types"
 import { createNetwork, type Network } from "../../../src/simulation/network/network"

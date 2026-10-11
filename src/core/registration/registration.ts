@@ -97,14 +97,14 @@ export function createRegistration(
     failures = 0
     if (attempt.expires === 0) {
       bound = undefined
-      return [notify({ type: "registration", state: "unregistered" })]
+      return [emit({ type: "registration", state: "unregistered" })]
     }
     const granted = grantedExpiry(response, registrant.contact, attempt.expires)
     if (granted === 0) return fail(attempt, { reason: "not-bound" }, now)
     const answered = authenticator.answered()
     if (answered.length > 0) trust.learn(answered)
     bound = { to: attempt.to, registrar: attempt.registrar, expires: attempt.expires }
-    const registered = notify({ type: "registration", state: "registered", expires: granted })
+    const registered = emit({ type: "registration", state: "registered", expires: granted })
     if (attempt.stale && !listsBinding(response, registrant.contact)) {
       return [registered, ...send({ ...bound })]
     }
@@ -133,7 +133,7 @@ export function createRegistration(
     }
     if (expires === 0 || !isRetryable(failure)) {
       if (expires === 0) bound = undefined
-      return [notify({ type: "registration", state: "failed", failure })]
+      return [emit({ type: "registration", state: "failed", failure })]
     }
     failures += 1
     const retryIn = retryDelay(failures, random, response)
@@ -141,7 +141,7 @@ export function createRegistration(
       at: now + retryIn,
       attempt: { to, registrar, expires, ...(stale ? { stale } : {}) },
     }
-    return [notify({ type: "registration", state: "failed", failure, retryIn })]
+    return [emit({ type: "registration", state: "failed", failure, retryIn })]
   }
 
   // Without a registration, answers to OPTIONS show where calls have to come to
@@ -170,6 +170,6 @@ export function createRegistration(
   }
 }
 
-function notify(event: RegistrationEvent): RegistrationOutput {
+function emit(event: RegistrationEvent): RegistrationOutput {
   return { type: "event", event }
 }

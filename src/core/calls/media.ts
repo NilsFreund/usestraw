@@ -1,8 +1,14 @@
-import { answerOffer, createOffer, payloadTypeOf, readAnswer, refuse } from "../../sdp/negotiate"
+import {
+  answerOffer,
+  createOffer,
+  payloadTypeOf,
+  readAnswer,
+  refuseLine,
+} from "../../sdp/negotiate"
 import { parseSdp } from "../../sdp/parse"
 import type { CallMedia, MediaAddress, MediaDescription } from "../../sdp/types"
 import { writeMedia, writeSdp } from "../../sdp/write"
-import type { Random } from "../types"
+import { type Random, randomInt } from "../../support/random"
 
 export interface Media {
   readonly current: CallMedia | undefined
@@ -13,10 +19,9 @@ export interface Media {
 
 const DTMF = [101, ...Array.from({ length: 32 }, (_, index) => 96 + index)]
 
-// RFC 3264 §8: our origin keeps its id, its version moves only when our description changes, and every
-// offer keeps the session's lines in place with the payload types both sides already use
+// RFC 3264 §8: our o= keeps its id, a new version only on change, and every line keeps its place
 export function createMedia(local: MediaAddress, random: Random): Media {
-  const id = String(Math.floor(random() * 2 ** 31))
+  const id = String(randomInt(random, 2 ** 31))
   let version = 0
   let last: string | undefined
   let lines: readonly MediaDescription[] = []
@@ -45,7 +50,9 @@ export function createMedia(local: MediaAddress, random: Random): Media {
       const prefer = current?.codec
       const ours = createOffer(local, { ...(prefer ? { prefer } : {}), ...(dtmf ? { dtmf } : {}) })
       const media =
-        lines.length === 0 ? [ours] : lines.map((line, at) => (at === index ? ours : refuse(line)))
+        lines.length === 0
+          ? [ours]
+          : lines.map((line, at) => (at === index ? ours : refuseLine(line)))
       return describe(media)
     },
     answer: (data) => {

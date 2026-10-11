@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { createAck } from "../../src/transaction/ack"
+import { createFailureAck } from "../../src/transaction/ack"
 import { request, response } from "./support"
 
-describe("createAck (RFC 3261 §17.1.1.3)", () => {
+describe("createFailureAck (RFC 3261 §17.1.1.3)", () => {
   const invite = request("INVITE", "z9hG4bKinvite", [
     "Route: <sip:proxy.example.com;lr>",
     "Subject: lunch",
@@ -10,7 +10,7 @@ describe("createAck (RFC 3261 §17.1.1.3)", () => {
 
   it("acknowledges a failure within the INVITE transaction", () => {
     const failure = response(invite, 486, "busy")
-    expect(createAck(invite, failure)).toEqual({
+    expect(createFailureAck(invite, failure)).toEqual({
       method: "ACK",
       uri: invite.uri,
       via: invite.via,
@@ -27,6 +27,6 @@ describe("createAck (RFC 3261 §17.1.1.3)", () => {
 
   it("keeps only the top Via", () => {
     const proxied = { ...invite, via: [...invite.via, ...invite.via] }
-    expect(createAck(proxied, response(invite, 486)).via).toHaveLength(1)
+    expect(createFailureAck(proxied, response(invite, 486)).via).toHaveLength(1)
   })
 })

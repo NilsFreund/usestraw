@@ -1,4 +1,4 @@
-import { isCallId } from "../message/fields/call-id"
+import { isCallId, isStrictCallId } from "../message/fields/call-id"
 import { isIp } from "../message/fields/host"
 import { isRequestUri, isUri, splitSipUri } from "../message/fields/uri"
 import { hasLineBreak, isText, show } from "../message/syntax"
@@ -36,12 +36,8 @@ function checkLength(value: string, what: string): void {
   }
 }
 
-// RFC 3261 §25.1: callid = word [ "@" word ]
-const WORD = String.raw`[\w\-.!%*+\`'~()<>:\\"/[\]?{}]+`
-const CALL_ID = new RegExp(`^${WORD}(?:@${WORD})?$`)
-
 export function checkCallId(callId: string): void {
-  if (!isText(callId) || callId.length > 256 || !CALL_ID.test(callId)) {
+  if (!isStrictCallId(callId) || callId.length > 256) {
     throw new TypeError(`Invalid Call-ID ${show(callId)}`)
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TransportAddress } from "../../src"
+import type { TransportAddress } from "../../src/core"
 import { latency } from "../../src/simulation/network/conditions"
 import type { Fate } from "../../src/simulation/network/types"
 import { degrade, flapping, handover, outage, partition } from "../../src/simulation/scenarios"

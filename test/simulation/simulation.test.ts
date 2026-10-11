@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Random, TransportAddress } from "../../src"
+import type { Random, TransportAddress } from "../../src/core"
 import { latency, loss } from "../../src/simulation/network/conditions"
 import { outage } from "../../src/simulation/scenarios"
 import { createSimulation, type SimulationOptions } from "../../src/simulation/simulation"

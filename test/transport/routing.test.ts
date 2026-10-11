@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { TransportAddress } from "../../src"
-import { createResponse, isRequest } from "../../src"
+import type { TransportAddress } from "../../src/core"
+import { createResponse, isRequest } from "../../src/core"
 import { parseVia } from "../../src/message/fields/via"
 import { parsed, register } from "../helpers"
 

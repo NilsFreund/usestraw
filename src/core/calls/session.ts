@@ -45,12 +45,12 @@ interface Pending {
 }
 
 const HANGUP: CallEnd = { by: "local", reason: "hangup" }
-const INCOMPATIBLE: CallEnd = { by: "local", reason: "incompatible" }
+export const INCOMPATIBLE: CallEnd = { by: "local", reason: "incompatible" }
 // RFC 3326: the BYE says why, so a carrier's trace shows a media mismatch and not a hang-up
 const INCOMPATIBLE_REASON = { name: "Reason", value: 'SIP;cause=488;text="Incompatible media"' }
 const REMOTE_HANGUP: CallEnd = { by: "remote", reason: "hangup" }
 
-// The confirmed dialog of a call in either direction: hangups, re-INVITEs and the ACK for our 2xx
+/** The confirmed dialog of a call in either direction: hangups, re-INVITEs, the ACK for our 2xx. */
 export function createSession(setup: SessionSetup, context: SessionContext): Session {
   const { call, to, media } = setup
   const { identity, contact, authenticator, timers } = context
@@ -68,7 +68,7 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
 
   function hangUp(): CallOutput[] {
     seq += 1
-    const reason = closing === INCOMPATIBLE ? [INCOMPATIBLE_REASON] : []
+    const reason = closing.reason === "incompatible" ? [INCOMPATIBLE_REASON] : []
     const request = inDialog("BYE", dialog, seq, identity, reason)
     bye = branchOf(request)
     const headers = [...request.headers, ...authenticator.authorize(request)]
@@ -137,8 +137,7 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
     return [emit({ type: "call", call, state: "live", media: after })]
   }
 
-  // RFC 3264 §4: when our 2xx carried the offer, the ACK carries the answer; a call that never got one
-  // hangs up, a live one keeps its media
+  // RFC 3264 §4: an offer in our 2xx is answered in the ACK; a new call without one hangs up
   function acknowledge(ack: SipRequest): CallOutput[] {
     if (!pending || ack.cseq.seq !== pending.repeat.seq || !inDialogOf(dialog, ack.to, ack.from)) {
       return []
@@ -161,7 +160,7 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
     pending = undefined
     if (state === "live") {
       state = "ending"
-      closing = { by: "remote", reason: "timeout" }
+      closing = { by: "remote", reason: "dropped" }
     }
     return hangUp()
   }

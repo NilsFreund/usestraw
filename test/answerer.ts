@@ -1,4 +1,4 @@
-import type { Core, CoreCommand, CoreOutput, MediaAddress } from "../src"
+import type { Core, CoreCommand, CoreOutput, MediaAddress } from "../src/core"
 import { earliest } from "../src/support/time"
 
 export interface AnswererOptions {

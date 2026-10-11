@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { ConnectError, connect } from "../../src/node"
+import { ConnectError, connect } from "../../src"
 
 vi.mock("node:dns/promises", () => ({
   lookup: (host: string) =>

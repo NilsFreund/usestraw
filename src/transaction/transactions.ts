@@ -5,7 +5,7 @@ import { acceptsResponse, replyAddress } from "../transport/routing"
 import { createClientInvite } from "./client-invite"
 import { createClientNonInvite } from "./client-non-invite"
 import { clientKey, serverKey, serverKeys, topVia } from "./keys"
-import { notify, send } from "./outputs"
+import { emit, send } from "./outputs"
 import { createServerInvite } from "./server-invite"
 import { createServerNonInvite } from "./server-non-invite"
 import { defaultTimers, type TimerSettings, validateTimers } from "./timers"
@@ -55,7 +55,7 @@ export function createTransactions(options: TransactionOptions): Transactions {
     const transaction = acceptsResponse(message, local)
       ? clients.get(clientKey(message))
       : undefined
-    if (!transaction) return [notify({ type: "stray", response: message, from })]
+    if (!transaction) return [emit({ type: "stray", response: message, from })]
     return settle(transaction, transaction.receive(message, from, now))
   }
 
@@ -68,11 +68,11 @@ export function createTransactions(options: TransactionOptions): Transactions {
     const existing = find(request)
     const acceptedAck = request.method === "ACK" && existing?.state === "accepted"
     if (existing && !acceptedAck) return settle(existing, existing.receive(request, to, now))
-    if (request.method === "ACK") return [notify({ type: "request", request, from })]
+    if (request.method === "ACK") return [emit({ type: "request", request, from })]
     const create = request.method === "INVITE" ? createServerInvite : createServerNonInvite
     const transaction = create(request, to, timers)
     servers.set(transaction.key, transaction)
-    const event = notify({ type: "request", request, from, transaction: transaction.key })
+    const event = emit({ type: "request", request, from, transaction: transaction.key })
     return [...settle(transaction, transaction.start(now)), event]
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TransportAddress } from "../../../src"
+import type { TransportAddress } from "../../../src/core"
 import { createHosts } from "../../../src/simulation/network/hosts"
 import { createNaming } from "../../../src/simulation/network/naming"
 import { createNats } from "../../../src/simulation/network/nats"

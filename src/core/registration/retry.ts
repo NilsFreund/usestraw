@@ -1,6 +1,7 @@
 import { parseDeltaSeconds } from "../../message/fields/delta-seconds"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
+import { backoff } from "../../support/backoff"
 import type { Random, RegistrationFailure } from "../types"
 
 const BASE = 30_000
@@ -12,12 +13,10 @@ export function isRetryable(failure: RegistrationFailure): boolean {
   return failure.reason === "rejected" && RETRYABLE.has(failure.status)
 }
 
-// RFC 5626 §4.5: min(max-time, base-time * 2^failures), randomized between 50% and 100%;
-// Retry-After may only make the wait longer
+// RFC 5626 §4.5: exponential backoff, and Retry-After may only make the wait longer
 export function retryDelay(failures: number, random: Random, response?: SipResponse): number {
-  const ceiling = Math.min(MAX, BASE * 2 ** failures)
-  const backoff = Math.round(ceiling * (0.5 + random() / 2))
+  const wait = backoff(failures, BASE, MAX, random)
   const seconds =
     response && parseDeltaSeconds(getHeader(response, "Retry-After")?.match(/^\d+/)?.[0])
-  return Math.max(backoff, Math.min(MAX, (seconds ?? 0) * 1000))
+  return Math.max(wait, Math.min(MAX, (seconds ?? 0) * 1000))
 }

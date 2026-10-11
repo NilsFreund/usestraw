@@ -6,6 +6,6 @@ export function send(message: SipMessage, to: TransportAddress): TransactionOutp
   return { type: "send", message, to }
 }
 
-export function notify(event: TransactionEvent): TransactionOutput {
+export function emit(event: TransactionEvent): TransactionOutput {
   return { type: "event", event }
 }

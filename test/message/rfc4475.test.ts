@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getHeader, isRequest, parseMessage, serializeMessage } from "../../src"
+import { getHeader, isRequest, parseMessage, serializeMessage } from "../../src/core"
 import { fixture, parsed } from "../helpers"
 
 const valid = [

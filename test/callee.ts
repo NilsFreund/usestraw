@@ -1,3 +1,6 @@
+import { computeAuthorization } from "../src/auth/digest"
+import { resolveOffer } from "../src/auth/offer"
+import { parseAuthParams } from "../src/auth/params"
 import {
   type Core,
   type CoreOutput,
@@ -10,10 +13,7 @@ import {
   type SipResponse,
   serializeMessage,
   type TransportAddress,
-} from "../src"
-import { computeAuthorization } from "../src/auth/digest"
-import { resolveOffer } from "../src/auth/offer"
-import { parseAuthParams } from "../src/auth/params"
+} from "../src/core"
 import { createRequest } from "../src/core/requests"
 import { topVia } from "../src/transaction/keys"
 import { replyAddress } from "../src/transport/routing"

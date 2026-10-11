@@ -21,7 +21,7 @@ export interface CallContext {
   readonly timers: TimerSettings
 }
 
-export interface Call {
+export interface CallState {
   readonly ended: boolean
   readonly deadline: number | undefined
   start(): CallOutput[]

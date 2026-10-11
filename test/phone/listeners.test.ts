@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createListeners } from "../../src/node/listeners"
+import { createListeners } from "../../src/phone/listeners"
 
 afterEach(() => vi.restoreAllMocks())
 

@@ -1,6 +1,6 @@
 import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
-import { createResponse, isRequest, type SipMessage, type SipRequest } from "../../src"
+import { createResponse, isRequest, type SipMessage, type SipRequest } from "../../src/core"
 import { validateMessage } from "../../src/message/validate"
 import { parsed, register } from "../helpers"
 

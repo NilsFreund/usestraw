@@ -7,7 +7,7 @@ import {
   getHeaders,
   type Random,
   replay,
-} from "../../src"
+} from "../../src/core"
 import { createRecordedCore, type RecordedCore } from "../../src/recorder/recorder"
 import { type LinkConditions, latency, loss } from "../../src/simulation/network/conditions"
 import { createSimulation } from "../../src/simulation/simulation"
@@ -159,7 +159,7 @@ describe("outgoing calls", () => {
     dial()
     simulation.run(40_000)
     expect(states(ua.events)).toStrictEqual(["ended"])
-    expect(ended(ua.events)).toStrictEqual({ by: "remote", reason: "timeout" })
+    expect(ended(ua.events)).toStrictEqual({ by: "remote", reason: "dropped" })
   })
 
   it("answers a proxy challenge and connects", () => {

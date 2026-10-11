@@ -5,7 +5,7 @@ import {
   type SipRequest,
   type SipResponse,
   type TransportAddress,
-} from "../../src"
+} from "../../src/core"
 import type { Transaction, TransactionOutput } from "../../src/transaction/types"
 import { bob, parsed } from "../helpers"
 

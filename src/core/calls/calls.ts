@@ -1,11 +1,12 @@
 import type { SipRequest, SipResponse } from "../../message/types"
 import type { MediaAddress } from "../../sdp/types"
+import { earliest } from "../../support/time"
 import { transactionTimeout } from "../../transaction/timers"
 import { createIncoming, type IncomingSetup } from "./incoming"
 import { createOutgoing, type OutgoingSetup } from "./outgoing"
 import { respond } from "./outputs"
 import { createReply } from "./replies"
-import type { Call, CallContext, CallOutput } from "./types"
+import type { CallContext, CallOutput, CallState } from "./types"
 
 export interface Calls {
   owns(call: string): boolean
@@ -26,7 +27,7 @@ export interface Calls {
 }
 
 interface Entry {
-  readonly call: Call
+  readonly call: CallState
   removeAt?: number
 }
 
@@ -41,12 +42,12 @@ export function createCalls(context: CallContext): Calls {
     return outputs
   }
 
-  function on(id: string, now: number, act: (call: Call) => CallOutput[]): CallOutput[] {
+  function on(id: string, now: number, act: (call: CallState) => CallOutput[]): CallOutput[] {
     const entry = calls.get(id)
     return entry ? track(id, act(entry.call), now) : []
   }
 
-  function add(id: string, call: Call, now: number): CallOutput[] {
+  function add(id: string, call: CallState, now: number): CallOutput[] {
     calls.set(id, { call })
     return track(id, call.start(), now)
   }
@@ -84,14 +85,7 @@ export function createCalls(context: CallContext): Calls {
       }
       return outputs
     },
-    nextDeadline: () => {
-      let next: number | undefined
-      for (const { call, removeAt } of calls.values()) {
-        for (const at of [call.deadline, removeAt]) {
-          if (at !== undefined && (next === undefined || at < next)) next = at
-        }
-      }
-      return next
-    },
+    nextDeadline: () =>
+      earliest([...calls.values()].flatMap(({ call, removeAt }) => [call.deadline, removeAt])),
   }
 }

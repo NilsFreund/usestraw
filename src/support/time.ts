@@ -1,3 +1,6 @@
+// The longest delay setTimeout takes; anything longer fires at once
+export const MAX_DELAY: number = 2 ** 31 - 1
+
 export function earliest(times: Iterable<number | undefined>): number | undefined {
   let next = Number.POSITIVE_INFINITY
   for (const time of times) next = Math.min(next, time ?? Number.POSITIVE_INFINITY)

@@ -5,7 +5,7 @@ import {
   ladder,
   type RecordedStep,
   type SipRequest,
-} from "../../src"
+} from "../../src/core"
 import { formatStep } from "../../src/recorder/ladder"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes } from "../helpers"

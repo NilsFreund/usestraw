@@ -1,7 +1,8 @@
-import type { Random } from "../core/types"
-import { isPrivate, sameHost } from "../sdp/address"
+import { isPrivate, sameIp } from "../sdp/address"
 import { STATIC_CODECS } from "../sdp/negotiate"
 import type { CallMedia, Codec, MediaAddress } from "../sdp/types"
+import { type Random, randomInt } from "../support/random"
+import { earliest } from "../support/time"
 import { decodeG711, encodeG711, SAMPLES_PER_MS } from "./g711"
 import { createJitter } from "./jitter"
 import { type RtpPacket, readRtp, writeRtp } from "./packet"
@@ -39,13 +40,12 @@ interface Candidate {
   readonly count: number
 }
 
-// The media of one call: G.711 over RTP sent at the far end's ptime with silence when the app has
-// nothing to say, and a steady 20 ms frame of what we hear, silence included
+/** One call's G.711 over RTP: sent at the far end's ptime, heard as a steady 20 ms frame. */
 export function createMediaEngine(random: Random): MediaEngine {
   const jitter = createJitter()
-  const ssrc = randomNumber(random, 2 ** 32)
-  const base = randomNumber(random, 2 ** 32)
-  let sequence = randomNumber(random, 2 ** 16)
+  const ssrc = randomInt(random, 2 ** 32)
+  const base = randomInt(random, 2 ** 32)
+  let sequence = randomInt(random, 2 ** 16)
   let media: CallMedia | undefined
   let latched: MediaAddress | undefined
   let candidate: Candidate | undefined
@@ -94,9 +94,7 @@ export function createMediaEngine(random: Random): MediaEngine {
     playAt ??= now
   }
 
-  // RFC 3550 §A.1 and the RTP Bleed lesson: the signalled address always wins, and another one
-  // is learnt only from a NATed (private) signalled address in the 2 s after the first packet, or
-  // from another port of the signalled host
+  // RFC 3550 §A.1 and RTP Bleed: the signalled address wins; others are learnt early and behind NAT
   function receive(data: Uint8Array, from: MediaAddress, now: number): void {
     if (!media || from.port === 0) return
     const packet = readRtp(data)
@@ -123,7 +121,7 @@ export function createMediaEngine(random: Random): MediaEngine {
     remote: MediaAddress,
     now: number,
   ): boolean {
-    const nearby = sameHost(from.host, remote.host)
+    const nearby = sameIp(from.host, remote.host)
     if (!nearby && !isPrivate(remote.host)) return false
     learnUntil ??= now + LEARN
     if (now > learnUntil) return false
@@ -171,8 +169,7 @@ export function createMediaEngine(random: Random): MediaEngine {
     return frame
   }
 
-  // RFC 3550 §5.1 and RFC 3551 §4.1: the timestamp follows the clock across pauses, and the first
-  // packet after one carries the marker
+  // RFC 3550 §5.1 and RFC 3551 §4.1: timestamps follow the clock, and a pause ends with a marker
   function send(now: number): MediaOutput[] {
     const outputs: MediaOutput[] = []
     if (!media || sendAt === undefined) return outputs
@@ -201,10 +198,7 @@ export function createMediaEngine(random: Random): MediaEngine {
       return played
     },
     handle,
-    nextDeadline: () => {
-      const times = [sendAt, playAt].filter((at) => at !== undefined)
-      return times.length === 0 ? undefined : Math.min(...times)
-    },
+    nextDeadline: () => earliest([sendAt, playAt]),
   }
 }
 
@@ -218,9 +212,5 @@ function continues(candidate: Candidate, from: MediaAddress, packet: RtpPacket):
 }
 
 function same(a: MediaAddress, b: MediaAddress): boolean {
-  return a.port === b.port && sameHost(a.host, b.host)
-}
-
-function randomNumber(random: Random, range: number): number {
-  return Math.min(range - 1, Math.floor(random() * range))
+  return a.port === b.port && sameIp(a.host, b.host)
 }

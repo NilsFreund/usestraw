@@ -15,6 +15,7 @@ export function clientKey(message: SipMessage): string {
   return `${topVia(message).params.get("branch") ?? ""}|${message.cseq.method}`
 }
 
+// RFC 3261 §17.2.3: a modern branch names the transaction; RFC 2543 requests match on their fields
 export function serverKey(request: SipRequest): string {
   const via = topVia(request)
   const branch = via.params.get("branch") ?? ""

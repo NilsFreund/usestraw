@@ -4,28 +4,10 @@ import { lookup } from "node:dns/promises"
 import { once } from "node:events"
 import { type AddressInfo, isIP } from "node:net"
 import { connect } from "node:tls"
+import type { Server, TlsSettings } from "../phone/options"
+import type { Link, LinkHandlers } from "../phone/platform"
 import type { TransportAddress } from "../transport/address"
 import { createStreamFramer } from "../transport/stream"
-import type { Server } from "./options"
-
-export interface LinkHandlers {
-  receive(data: Uint8Array, from: TransportAddress): void
-  close(error?: Error): void
-}
-
-export interface Link {
-  readonly local: TransportAddress
-  readonly remote: TransportAddress
-  readonly peers: readonly string[]
-  start(handlers: LinkHandlers): void
-  send(data: Uint8Array, to: TransportAddress): void
-  close(): void
-}
-
-export interface TlsSettings {
-  readonly ca?: string
-  readonly rejectUnauthorized?: boolean
-}
 
 export interface LinkSettings {
   readonly tls?: TlsSettings | undefined
@@ -81,8 +63,10 @@ export async function openUdp(peer: Peer, port = 0): Promise<Link> {
       port: info.port,
     })
   })
+  // UDP errors such as ICMP unreachable concern one packet, and the socket keeps working
   socket.on("error", () => undefined)
   const send = (data: Uint8Array, to: TransportAddress) => {
+    // A packet that cannot go out is lost like any other UDP packet
     try {
       socket.send(data, to.port, to.host)
     } catch {}
@@ -112,13 +96,12 @@ export async function openTls(
   options: TlsSettings = {},
   signal?: AbortSignal,
 ): Promise<Link> {
-  const { rejectUnauthorized = true, ca } = options
+  const { ca } = options
   const socket = connect({
     host: server.host,
     port: server.port,
     lookup: (host, settings, done) => dnsLookup(host, { ...settings, order: "ipv4first" }, done),
     ...(isIP(server.host) ? {} : { servername: server.host }),
-    rejectUnauthorized,
     ...(ca === undefined ? {} : { ca }),
   })
   try {

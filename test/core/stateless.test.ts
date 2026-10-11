@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { SipRequest } from "../../src"
+import type { SipRequest } from "../../src/core"
 import { createStateless } from "../../src/core/stateless"
 import { createRandom } from "../../src/simulation/random"
 import { serverKey } from "../../src/transaction/keys"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { createResponse, type SipRequest } from "../../src"
+import { createResponse, type SipRequest } from "../../src/core"
 import { createOptionsRequest } from "../../src/core/requests"
-import { createPings } from "../../src/node/pings"
+import { createPings } from "../../src/phone/pings"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob } from "../helpers"
 

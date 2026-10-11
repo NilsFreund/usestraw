@@ -44,7 +44,7 @@ export function isPrivate(host: string): boolean {
 }
 
 // Hosts compare by value: case, brackets and the shorthand of IPv6 do not make another address
-export function sameHost(a: string, b: string): boolean {
+export function sameIp(a: string, b: string): boolean {
   return (hostBits(a) ?? a.toLowerCase()) === (hostBits(b) ?? b.toLowerCase())
 }
 
@@ -61,6 +61,10 @@ export function parseRange(range: string): Range | undefined {
 export function inRange(host: string, range: Range): boolean {
   const bits = hostBits(host)
   return bits?.length === range.bits.length && bits.startsWith(range.bits.slice(0, range.prefix))
+}
+
+export function isIpv4(host: string): boolean {
+  return ipv4Bits(host) !== undefined
 }
 
 function hostBits(host: string): string | undefined {

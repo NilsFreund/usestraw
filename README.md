@@ -23,7 +23,7 @@ Replace the `TransformStream` with your voice agent and it answers the phone.
 - Audio is 8 kHz PCM as `Int16Array` Web Streams. Any `TransformStream` can be an agent.
 - `fetch`-style calls, `AbortSignal`, `for await`, `await using`, and `subscribe` for React.
 - `STRAW_DEBUG=1` prints a live SIP ladder, and every phone keeps a replayable recording.
-- Zero dependencies, 34 kB min+gzip, 100% test coverage. Tested with real calls through Kamailio and FreeSWITCH.
+- Zero dependencies, 37 kB min+gzip, 100% test coverage. Tested with real calls through Kamailio and FreeSWITCH.
 
 > [!NOTE]
 > 0.1 runs in Node only; the browser softphone is next. Check [the limits](#limits) first.
@@ -34,7 +34,7 @@ Replace the `TransformStream` with your voice agent and it answers the phone.
 npm install usestraw
 ```
 
-You need Node 22.12+ and a SIP account, from a provider or your own PBX (Asterisk, FreeSWITCH). Pass it as one URL:
+You need Node 22.12+ (TypeScript 5.7+ for the types) and a SIP account, from a provider or your own PBX (Asterisk, FreeSWITCH). Pass it as one URL:
 
 ```sh
 export SIP_URL="tls://alice:secret@sip.example.com"
@@ -84,7 +84,7 @@ if (!call.ok) {
 }
 ```
 
-Like `fetch`, `call()` resolves for busy and unanswered calls too, so check `ok`. It rejects for a bad address, a closed phone, an aborted `signal`, or no free audio port. Numbers can look like `"+49 30 123 45-67"` or `"(030) 1234567"`; user names and `sip:` addresses work too.
+Like `fetch`, `call()` resolves for busy and unanswered calls too, so check `ok`. It rejects for a bad address, a closed phone, an aborted `signal`, or no free audio port. Numbers can look like `"+49 30 123 45-67"`, `"+49 (0)30 1234567"` or `"tel:+49301234567"`; user names and `sip:` addresses work too. A `tel:` link with an extension (`;ext=`) is refused, since SIP has no place for it.
 
 ## Voice agents
 
@@ -140,7 +140,7 @@ process.once("SIGTERM", () => {
 })
 ```
 
-With `drain`, new callers get busy and running calls finish before the phone unregisters. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run, and a call that sends no audio for a minute is hung up with `reason: "timeout"` (not while on hold). On Node 24 or in TypeScript, `await using` closes a phone or hangs up a call at the end of the scope.
+With `drain`, new callers get busy and running calls finish before the phone unregisters; calls you already accepted count as running. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run, and a call that sends no audio for a minute is hung up with `reason: "dropped"` (not while on hold). On Node 24 or in TypeScript, `await using` closes a phone or hangs up a call at the end of the scope.
 
 ## Trunks
 
@@ -177,7 +177,7 @@ A `password` answers digest challenges on outgoing calls. Over UDP a listed addr
 
 Once online, the phone re-registers on its own and keeps its connection alive. When the server or the network fails, `status` is `"reconnecting"`, with `error` and `retryAt` set, until it is back. Running calls keep going through a reconnect when the server keeps them; one the server dropped meanwhile ends after a minute without audio.
 
-Ended calls have a `reason` too: `hangup`, `cancelled`, `busy`, `declined`, `not-found`, `no-answer`, `unavailable`, `rejected`, `unauthorized`, `incompatible` or `timeout`.
+Ended calls have a `reason` too: `hangup`, `cancelled`, `answered-elsewhere`, `busy`, `declined`, `not-found`, `no-answer`, `unavailable`, `rejected`, `unauthorized`, `incompatible` or `dropped`. New reasons may come in minor versions, so keep a `default` branch when you switch on either kind.
 
 ## Debugging
 
@@ -189,7 +189,7 @@ $ STRAW_DEBUG=1 node examples/call.ts "+49 30 1234567"
     0.004  203.0.113.10:5060 → phone  SIP/2.0 401 Unauthorized
     0.004  phone → 203.0.113.10:5060  REGISTER sip:example.com SIP/2.0
     0.007  203.0.113.10:5060 → phone  SIP/2.0 200 OK
-    0.007  ● online for 3600 s
+    0.007  ● online for 600 s
     0.008  phone → 203.0.113.10:5060  INVITE sip:+49301234567@example.com SIP/2.0
     0.011  203.0.113.10:5060 → phone  SIP/2.0 180 Ringing
     0.011  ● call ringing 180
@@ -218,20 +218,20 @@ Replays need the usestraw version that made the trace, and a trace that grew pas
 | | |
 | --- | --- |
 | `connect(url, options?)` | Registers (or pings, with `register: false`) and resolves once online. Options: `password`, `authUser`, `tls.ca`, `signal`, `trace`, `maxCalls`, `acceptFrom`, `register`, `localPort`. |
-| `phone.status` | `"connecting"`, `"online"`, `"reconnecting"` or `"offline"`, plus `error` and `retryAt`. |
+| `phone.status` | `"connecting"`, `"online"`, `"reconnecting"` or `"closed"`, plus `error` and `retryAt`. |
 | `phone.incoming` | Ringing calls, for `for await`. |
 | `phone.call(to, options?)` | Calls out. Options: `agent`, `timeout`, `signal`. |
 | `phone.calls` | Calls that haven't ended. |
 | `phone.subscribe(listener)` | Fires when any of the above changes. |
-| `phone.close(options?)` | Hangs up and goes offline. Options: `drain`, `signal`. |
+| `phone.close(options?)` | Hangs up and closes. Options: `drain`, `signal`. |
 | `phone.trace` | The recording. |
 | `call.accept(agent?)` | Answers a ringing call. |
 | `call.end(options?)` | Declines, cancels or hangs up. |
 | `call.audio` | `readable`, `writable`, `played`, `clear()`, `sampleRate`. |
-| `call.status`, `ok`, `reason`, `ended` | State and outcome. |
+| `call.status`, `ok`, `reason`, `ended` | State and outcome. `status` goes `"ringing"` → `"answering"` → `"live"` → `"ended"`, or `"calling"` → `"live"` → `"ended"`. |
 | `call.id`, `direction`, `from`, `to`, `callerName` | Who called whom. |
 
-The JSDoc has the details. `usestraw/core` exports the protocol without I/O, for custom transports and tests: `createCore`, `parseMessage`, `serializeMessage`, `createRecordedCore`, `replay`, `ladder`.
+The JSDoc has the details. `usestraw/core` exports the protocol without I/O, for custom transports and tests: `createCore`, `parseMessage`, `serializeMessage`, `createRecordedCore`, `replay`, `ladder`. It is experimental and may change in minor versions while the browser softphone takes shape; `ladder` and `replay` stay as they are.
 
 ## How it works
 
@@ -239,9 +239,11 @@ SIP runs in a pure state machine with no sockets or clocks. The Node layer feeds
 
 Standards: RFC 3261 and 6026 (SIP), 7616 and 8760 (digest auth), 3264 and 8866 (SDP), 3550 and 3551 (RTP), G.711 μ-law and A-law.
 
+Digest auth needs MD5 and SHA-256 inside that synchronous core, and WebCrypto is async and has no MD5. So Straw carries its own small implementations, tested against the published test vectors and `node:crypto`.
+
 ## Limits
 
-- Node only. Browser and Electron are next.
+- Node only. Browser and Electron are next. Until then, a browser bundle gets a placeholder whose `connect()` rejects; jsdom tests and Electron with Node integration import `usestraw/node`.
 - G.711 only (8 kHz narrowband), no Opus.
 - No SRTP. TLS protects signaling, but audio travels unencrypted, as on most SIP trunks.
 - No STUN or ICE. Behind NAT, Straw keeps the mapping open and registers its public address, but your provider has to send audio back to where it comes from (symmetric RTP: on Asterisk `rtp_symmetric=yes`, on Twilio Elastic SIP Trunking switch it on). Most do.

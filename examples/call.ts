@@ -9,7 +9,7 @@ const call = await phone.call(to, { timeout: 30_000 })
 if (call.ok) {
   const writer = call.audio.writable.getWriter()
   try {
-    await writer.write(melody([523, 659, 784, 1047]))
+    await writer.write(melody([523, 659, 784, 1047], call.audio.sampleRate))
     await writer.close()
   } catch {
     console.log("They hung up early")
@@ -22,9 +22,10 @@ if (call.ok) {
 
 await phone.close()
 
-function melody(notes: number[]): Int16Array {
-  return Int16Array.from({ length: notes.length * 2000 }, (_, index) => {
-    const hz = notes[Math.floor(index / 2000)] ?? 0
-    return 6000 * Math.sin((2 * Math.PI * hz * index) / 8000)
+function melody(notes: number[], sampleRate: number): Int16Array {
+  const note = sampleRate / 4
+  return Int16Array.from({ length: notes.length * note }, (_, index) => {
+    const hz = notes[Math.floor(index / note)] ?? 0
+    return 6000 * Math.sin((2 * Math.PI * hz * index) / sampleRate)
   })
 }

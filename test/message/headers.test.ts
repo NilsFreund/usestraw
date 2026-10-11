@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getHeader, getHeaders } from "../../src"
+import { getHeader, getHeaders } from "../../src/core"
 import { parsed, register } from "../helpers"
 
 describe("getHeader", () => {

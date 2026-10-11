@@ -30,14 +30,19 @@ export interface RecordedCore extends Core {
 }
 
 const LIMIT = 512 * 1024
+const MAX_SIZE = 2 ** 31 - 1
 
-/** Creates a core that records every input, random draw and output, for {@link replay}. */
+/**
+ * Creates a core that records every input, random draw and output, for {@link replay}.
+ *
+ * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
+ */
 export function createRecordedCore(
   options: CoreOptions,
   settings: RecorderOptions = {},
 ): RecordedCore {
   const { limit = LIMIT, onStep } = settings
-  if (!isIntegerIn(limit, 1024, 2 ** 31 - 1)) throw new RangeError(`Invalid limit ${show(limit)}`)
+  if (!isIntegerIn(limit, 1024, MAX_SIZE)) throw new RangeError(`Invalid limit ${show(limit)}`)
   let draws: number[] = []
   const random: Random = () => {
     const value = options.random()
@@ -86,6 +91,7 @@ export function createRecordedCore(
       truncated = true
     } else keep(line)
     if (!onStep) return
+    // A debug printer that throws must not take the call down with it
     try {
       onStep(decode(line) as RecordedStep)
     } catch {}

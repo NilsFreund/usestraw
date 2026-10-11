@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { TransportAddress } from "../../../src"
+import type { TransportAddress } from "../../../src/core"
 import { latency } from "../../../src/simulation/network/conditions"
 import {
   createForwarding,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type CoreOutput, parseMessage, type SipRequest } from "../../src"
+import { type CoreOutput, parseMessage, type SipRequest } from "../../src/core"
 import { createResponder } from "../../src/core/responder"
 import { createRandom } from "../../src/simulation/random"
 import { bob, parsedRequest } from "../helpers"
