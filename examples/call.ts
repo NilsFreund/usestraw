@@ -4,6 +4,8 @@ const to = process.argv[2]
 if (!to) throw new Error("Usage: node examples/call.ts <number>")
 
 const phone = await connect(process.env.SIP_URL)
+process.once("SIGINT", () => void phone.close())
+
 const call = await phone.call(to, { timeout: 30_000 })
 
 if (call.ok) {
@@ -12,7 +14,7 @@ if (call.ok) {
     await writer.write(melody([523, 659, 784, 1047], call.audio.sampleRate))
     await writer.close()
   } catch {
-    console.log("They hung up early")
+    console.log("The call ended early")
   }
   await call.end()
   console.log(`${call.to} heard ${call.audio.played} ms of music`)

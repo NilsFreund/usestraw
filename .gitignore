@@ -6,3 +6,5 @@ coverage
 ROADMAP.md
 RESEARCH.md
 *.tgz
+.env
+*.wav

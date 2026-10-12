@@ -12,6 +12,6 @@ In this repo, run `bun run build` first, because the examples import `usestraw` 
 | | |
 | --- | --- |
 | [`echo.ts`](echo.ts) | Plays callers back to themselves. Drains on Ctrl+C. |
-| [`call.ts`](call.ts) | `node examples/call.ts "+49 30 1234567"` plays a short tune, or prints why nobody answered. |
+| [`call.ts`](call.ts) | `node examples/call.ts "+44 20 7946 0123"` plays a short tune, or prints why nobody answered. Ctrl+C hangs up. |
 | [`voicemail.ts`](voicemail.ts) | Beeps, records up to a minute, saves a WAV. |
 | [`parrot.ts`](parrot.ts) | A voice agent without the AI: repeats you when you pause, stops when you interrupt. |

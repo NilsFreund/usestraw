@@ -61,7 +61,7 @@ export interface ConnectUrlOptions {
 
 /** `connect()` options without a URL. */
 export interface ConnectOptions extends ConnectUrlOptions {
-  /** Your SIP address, e.g. `"sip:+4930123456@sip.example.com"`. */
+  /** Your SIP address, e.g. `"sip:+442079460456@sip.example.com"`. */
   readonly uri: string
   /**
    * `tls://host[:port]` (port 5061 by default) or `udp://host[:port]` (5060). Defaults to the

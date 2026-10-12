@@ -108,7 +108,7 @@ export interface CallBase extends AsyncDisposable {
   /** Unique and stable for the call's life, so it works as a React key. Treat it as opaque. */
   readonly id: string
   readonly direction: "incoming" | "outgoing"
-  /** The caller's number or user name, e.g. `"+4930123456"`, or `"anonymous"`. */
+  /** The caller's number or user name, e.g. `"+442079460456"`, or `"anonymous"`. */
   readonly from: string
   /** The number or user name that was called. */
   readonly to: string
@@ -244,19 +244,19 @@ export interface Phone extends AsyncDisposable {
    */
   readonly incoming: AsyncIterable<RingingCall>
   /**
-   * Calls a number, user name or SIP address. Numbers like `"+49 30 123 45-67"` and `tel:` links
+   * Calls a number, user name or SIP address. Numbers like `"+44 20 7946-0123"` and `tel:` links
    * work. Like `fetch`, it resolves for busy and unanswered calls too, so check `ok`.
    *
    * @example
    * ```ts
-   * const call = await phone.call("+49 30 1234567", { timeout: 30_000 })
+   * const call = await phone.call("+44 20 7946 0123", { timeout: 30_000 })
    * if (!call.ok) console.log(call.reason)
    * ```
    * @throws {TypeError} for an address it cannot call, or an agent already in use
    * @throws {RangeError} for a timeout that is not a positive integer
    * @throws {DOMException} `InvalidStateError` once the phone is closing, or `NotAllowedError`
    *   where a microphone is needed and denied
-   * @throws {ConnectError} while the phone reconnects
+   * @throws {ConnectError} while the connection to the server is lost
    * @throws the signal's reason when it aborts first, or a socket error when no audio port is free
    */
   call(to: string, options?: CallOptions): Promise<LiveCall | UnansweredCall>

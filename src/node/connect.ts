@@ -34,7 +34,7 @@ export function connect(url: string | undefined, options?: ConnectUrlOptions): P
  * @example
  * ```ts
  * const phone = await connect({
- *   uri: "sip:+4930123456@sip.example.com",
+ *   uri: "sip:+442079460456@sip.example.com",
  *   password: process.env.SIP_PASSWORD,
  *   server: "tls://edge.example.com",
  * })

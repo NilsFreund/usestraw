@@ -10,10 +10,10 @@ Straw is a SIP user agent, not a server or proxy. It registers with any SIP prov
 import { connect, ConnectError, type Agent, type Call, type LiveCall, type RingingCall } from "usestraw" // "usestraw/node" in jsdom tests or Electron's main process
 
 const phone = await connect(process.env.SIP_URL) // "tls://user:password@host[:port]" or "udp://…"
-const phone2 = await connect({ uri: "sip:+4930123@sip.example.com", password, server: "tls://edge.example.com" })
+const phone2 = await connect({ uri: "sip:+442079460456@sip.example.com", password, server: "tls://edge.example.com" })
 
 for await (const call of phone.incoming) void call.accept(createAgent()) // RingingCall → LiveCall | UnansweredCall
-const call = await phone.call("+49 30 1234567", { timeout: 30_000, signal, agent: createAgent() }) // also "tel:+4930…", "bob", "sip:bob@host"; LiveCall | UnansweredCall
+const call = await phone.call("+44 20 7946 0123", { timeout: 30_000, signal, agent: createAgent() }) // also "tel:+44…", "bob", "sip:bob@host"; LiveCall | UnansweredCall
 if (call.ok) {
   call.audio.readable // ReadableStream<Int16Array>: 160 samples (20 ms) every 20 ms, silence included
   call.audio.writable // WritableStream<Int16Array>: any chunk size; close() resolves once played
@@ -26,7 +26,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 ```
 
 - An agent is a `ReadableWritablePair<Int16Array, Int16Array>`, usually a `TransformStream`; `createAgent()` above is your own function that makes a new one per call. `new TransformStream()` echoes.
-- Phone fields: `status` ("connecting" | "online" | "reconnecting" | "closed"), `error`, `retryAt`, `calls`, `trace`. `subscribe(listener)` returns an unsubscribe function; `toJSON()` is a frozen snapshot without the trace that stays the same object until something changes, so `useSyncExternalStore(phone.subscribe, () => phone.toJSON())` works, and the same holds for calls.
+- Phone fields: `status` ("online" | "reconnecting" | "closed"; the type also has "connecting", which never shows once `connect()` resolved), `error`, `retryAt`, `calls`, `trace`. `subscribe(listener)` returns an unsubscribe function; `toJSON()` is a frozen snapshot without the trace that stays the same object until something changes, so `useSyncExternalStore(phone.subscribe, () => phone.toJSON())` works, and the same holds for calls.
 - Call fields: `id` (opaque), `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "answering" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `subscribe(listener)`, `toJSON()`.
 - Call reasons: hangup, cancelled, answered-elsewhere, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, dropped. New reasons may come in minor versions: keep a default branch.
 - `connect()` rejects with `ConnectError`; switch on `error.reason`: wrong-password, password-missing, unsupported-auth, refused, unavailable, no-answer, network.
@@ -41,9 +41,9 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Writes resolve at once until 30 s are queued. Interrupt with `clear()`, not a new writer.
 - Writes and a pending `writer.close()` reject once the call ends: add `.catch()` to writes you don't await.
 - A call whose far end sends no audio for 60 s is hung up with `reason: "dropped"`.
-- The phone reconnects on its own: `status` goes `"reconnecting"` and back to `"online"`; `phone.incoming` and running calls stay open meanwhile, and `call()` throws the `ConnectError` until it is back.
+- The phone reconnects on its own: `status` goes `"reconnecting"` and back to `"online"`; `phone.incoming` and running calls stay open meanwhile, and `call()` throws the `ConnectError` while the connection itself is lost.
 - Readers that fall behind lose the oldest frames. Keep reading or cancel the stream.
-- `await using` needs Node 24 or TypeScript. On Node 22, call `phone.close()` yourself.
+- `await using` runs on Node 24. On Node 22 only a compiler that lowers it handles it (TypeScript with a target below ESNext), not type stripping; otherwise call `phone.close()` yourself.
 
 ## Debugging
 
@@ -52,7 +52,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 
 ## Docs
 
-- [README](https://github.com/NilsFreund/usestraw#readme): guide, errors, limits, security
+- [Guide](https://github.com/NilsFreund/usestraw/blob/main/GUIDE.md): connecting, trunks, errors, debugging, limits, Asterisk settings, security
 - [Examples](https://github.com/NilsFreund/usestraw/tree/main/examples): echo, outbound call, voicemail, a voice agent with barge-in
 - Types and JSDoc: `node_modules/usestraw/dist/*.d.ts`, starting at `index.d.ts`
 

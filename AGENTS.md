@@ -36,5 +36,6 @@ The pre-commit hook runs biome, the typecheck and all tests.
 - Small files, small functions, plain names.
 - Public API: data over verbs, app words over SIP words (`"busy"`, not `486`), Web standards. It has to fit a browser softphone later.
 - Errors say what went wrong and what to do. Never include passwords.
+- The README stays a short pitch. Details go in `GUIDE.md`, options in the JSDoc, API pitfalls in `llms.txt`.
 - Never commit credentials, real hostnames or phone numbers. Tests use `example.com` and documentation addresses.
 - Commit messages: one Conventional Commits line.

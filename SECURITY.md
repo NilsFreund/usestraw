@@ -7,3 +7,5 @@ Include steps to reproduce and what an attacker could do. A `phone.trace` or pac
 Expect a first answer within a week. Until 1.0, only the latest release gets fixes.
 
 In scope: hostile SIP or SDP (crashes, hangs, memory growth), leaked passwords or digest responses, injected or stolen call audio (RTP Bleed), TLS without verification, and secrets in errors, logs or traces.
+
+`test/fixtures/tls/localhost.key` is a throwaway self-signed key for the TLS tests, not a leaked secret.
