@@ -10,7 +10,6 @@ export type StreamEvent =
   | { readonly type: "error"; readonly error: string }
 
 export interface StreamFramer {
-  readonly buffered: number
   push(chunk: Uint8Array): StreamEvent[]
 }
 
@@ -77,8 +76,9 @@ export function createStreamFramer(): StreamFramer {
     })
     const [length] = lengths
     if (length === undefined) return failure("Missing Content-Length on a stream")
-    if (lengths.some((value) => value !== length))
+    if (lengths.some((value) => value !== length)) {
       return failure("Conflicting Content-Length headers")
+    }
     if (!/^\d+$/.test(length)) return failure(`Invalid Content-Length ${show(length)}`)
     const size = bodyStart + Number(length)
     if (size > MAX_MESSAGE_SIZE) return failure(`Message exceeds ${MAX_MESSAGE_SIZE} bytes`)
@@ -108,9 +108,6 @@ export function createStreamFramer(): StreamFramer {
   }
 
   return {
-    get buffered() {
-      return end - start
-    },
     push,
   }
 }

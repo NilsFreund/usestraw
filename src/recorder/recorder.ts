@@ -1,10 +1,10 @@
 import { version } from "../../package.json"
-import { parseAcceptFrom } from "../core/checks"
-import { type Core, type CoreOptions, createCore } from "../core/core"
-import type { CoreInput, CoreOutput, Random } from "../core/types"
+import { MAX_CALLS, parseAcceptFrom } from "../core/checks"
+import { createCore } from "../core/core"
+import type { Core, CoreInput, CoreOptions, CoreOutput, Random } from "../core/types"
 import { show } from "../message/syntax"
-import { inRange } from "../sdp/address"
 import { isIntegerIn } from "../support/integer"
+import { inRange } from "../support/ip"
 import { resolveTimers } from "../transaction/timers"
 import { decode, encode, maskSecrets } from "./codec"
 
@@ -18,7 +18,7 @@ export interface RecordedStep {
   readonly thrown?: string
 }
 
-/** Options for {@link createRecordedCore}. */
+/** Options for `createRecordedCore()`. */
 export interface RecorderOptions {
   /** Maximum size in bytes; the oldest steps go first. Defaults to 512 KB. */
   readonly limit?: number | undefined
@@ -35,7 +35,7 @@ const LIMIT = 512 * 1024
 const MAX_SIZE = 2 ** 31 - 1
 
 /**
- * Creates a core that records every input, random draw and output, for {@link replay}.
+ * Creates a core that records every input, random draw and output, for `replay()`.
  *
  * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
@@ -140,7 +140,7 @@ export function createRecordedCore(
 }
 
 function describe(options: CoreOptions): object {
-  const { address, aor, credentials, timers, maxCalls = 100, acceptFrom } = options
+  const { address, aor, credentials, timers, maxCalls = MAX_CALLS, acceptFrom } = options
   const login = credentials && {
     username: credentials.username,
     ...(credentials.realm === undefined ? {} : { realm: credentials.realm }),

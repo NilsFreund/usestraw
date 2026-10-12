@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import { createTrust } from "../../src/core/authenticator"
-import { createCalls } from "../../src/core/calls/calls"
 import { createIncoming } from "../../src/core/calls/incoming"
 import { createOutgoing } from "../../src/core/calls/outgoing"
 import { repeatAnswer } from "../../src/core/calls/repeat"
@@ -103,13 +102,6 @@ describe("createRetryLater (RFC 3261 §14.2)", () => {
 })
 
 describe("call paths the core never takes", () => {
-  it("answers a request for a call it does not know with 481", () => {
-    const outputs = createCalls(context).request(bye, "t1", 0)
-    expect(outputs).toMatchObject([
-      { type: "respond", transaction: "t1", response: { status: 481 } },
-    ])
-  })
-
   it("answers a request to an outgoing call that has no dialog yet with 481", () => {
     const call = createOutgoing(
       { call: "c1", uri: "sip:bob@example.com", to: bob, media: aliceMedia },

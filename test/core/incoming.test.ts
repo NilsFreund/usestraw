@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   type CoreCommand,
-  type CoreEvent,
   type CoreOutput,
   createCore,
   createResponse,
@@ -17,17 +16,11 @@ import {
 } from "../../src/core"
 import { createRandom } from "../../src/simulation/random"
 import { alice, aliceMedia, bob, bytes, sdp } from "../helpers"
+import { events, negotiated, receive } from "./support"
 
 const local = aliceMedia
 const remote = sdp()
 const hold = sdp({ direction: "sendonly", version: 2 })
-const negotiated = {
-  remote: { host: "192.0.2.20", port: 4000 },
-  codec: "PCMU",
-  payloadType: 0,
-  ptime: 20,
-  direction: "sendrecv",
-} as const
 const text = (data: Uint8Array | undefined) => new TextDecoder().decode(data)
 
 interface InviteOptions {
@@ -91,7 +84,6 @@ function request(method: string, options: RequestOptions = {}): string {
   ].join("\r\n")
 }
 
-const receive = (text: string) => ({ type: "receive", data: bytes(text), from: bob }) as const
 const timeout = { type: "timeout" } as const
 const command = (value: CoreCommand) => ({ type: "command", command: value }) as const
 const accept = (call = "in1", media: MediaAddress = local) =>
@@ -122,8 +114,6 @@ const responses = (outputs: CoreOutput[]): SipResponse[] =>
 const requests = (outputs: CoreOutput[]): SipRequest[] => messages(outputs).filter(isRequest)
 const statuses = (outputs: CoreOutput[]): string[] =>
   responses(outputs).map((response) => `${response.status} ${response.cseq.method}`)
-const events = (outputs: CoreOutput[]): CoreEvent[] =>
-  outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
 const calls = (outputs: CoreOutput[]) => events(outputs).filter((event) => event.type === "call")
 
 function reply(to: SipRequest, status: number, headers: { name: string; value: string }[] = []) {

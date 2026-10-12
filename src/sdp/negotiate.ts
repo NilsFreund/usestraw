@@ -1,5 +1,6 @@
+import { SAMPLE_RATE, STATIC_CODECS } from "../rtp/g711"
 import { isIntegerIn } from "../support/integer"
-import { familyOf, isUnspecified } from "./address"
+import { familyOf, isUnspecified } from "../support/ip"
 import { parseSdp } from "./parse"
 import type {
   CallMedia,
@@ -12,7 +13,6 @@ import type {
 } from "./types"
 
 export interface OfferOptions {
-  readonly want?: MediaDirection
   readonly prefer?: Codec
 }
 
@@ -22,16 +22,12 @@ export interface Negotiated {
   readonly call: CallMedia
 }
 
-const CODECS: readonly [number, Codec][] = [
-  [0, "PCMU"],
-  [8, "PCMA"],
-]
-export const STATIC_CODECS: ReadonlyMap<number, Codec> = new Map(CODECS)
+const CODECS = [...STATIC_CODECS]
 const PROTOCOLS: ReadonlySet<string> = new Set(["RTP/AVP", "RTP/AVPF"])
 const PTIME = 20
 
 export function createOffer(local: MediaAddress, options: OfferOptions = {}): MediaDescription {
-  const { want = "sendrecv", prefer } = options
+  const { prefer } = options
   const codecs = [
     ...CODECS.filter(([, name]) => name === prefer),
     ...CODECS.filter(([, name]) => name !== prefer),
@@ -41,9 +37,11 @@ export function createOffer(local: MediaAddress, options: OfferOptions = {}): Me
     port: local.port,
     protocol: "RTP/AVP",
     formats: codecs.map(([type]) => String(type)),
-    rtpmap: new Map<number, RtpMap>(codecs.map(([type, name]) => [type, { name, rate: 8000 }])),
+    rtpmap: new Map<number, RtpMap>(
+      codecs.map(([type, name]) => [type, { name, rate: SAMPLE_RATE }]),
+    ),
     ptime: PTIME,
-    direction: want,
+    direction: "sendrecv",
   }
 }
 
@@ -53,13 +51,13 @@ export function answerOffer(
   local: MediaAddress,
   options: OfferOptions = {},
 ): Negotiated | undefined {
-  const { want = "sendrecv", prefer } = options
+  const { prefer } = options
   let chosen: { readonly call: CallMedia; readonly index: number } | undefined
   const media = offer.media.map((line, index) => {
-    const call = chosen ? undefined : remoteMedia(offer, line, local, want, prefer)
+    const call = chosen ? undefined : remoteMedia(offer, line, local, prefer)
     if (!call) return refuseLine(line)
     chosen = { call, index }
-    return accept(line, call, local)
+    return answerLine(line, call, local)
   })
   return chosen && { media, ...chosen }
 }
@@ -69,10 +67,9 @@ export function readAnswer(
   answer: SessionDescription,
   index: number,
   local: MediaAddress,
-  want: MediaDirection = "sendrecv",
 ): CallMedia | undefined {
   const line = answer.media[index]
-  return line && remoteMedia(answer, line, local, want)
+  return line && remoteMedia(answer, line, local)
 }
 
 export function isPlayable(data: Uint8Array): boolean {
@@ -100,7 +97,6 @@ function remoteMedia(
   sdp: SessionDescription,
   line: MediaDescription,
   local?: MediaAddress,
-  want: MediaDirection = "sendrecv",
   prefer?: Codec,
 ): CallMedia | undefined {
   const connection = line.connection ?? sdp.connection
@@ -117,25 +113,29 @@ function remoteMedia(
   if (!choice) return undefined
   const offered = line.direction ?? sdp.direction ?? "sendrecv"
   // RFC 3264 §8.4: a connection address of 0.0.0.0 is the old way of saying "do not send to me"
-  const theirs = isUnspecified(connection.address) ? meet(offered, "sendonly") : offered
+  const theirs = isUnspecified(connection.address) ? deaf(offered) : offered
   return {
     remote: { host: connection.address, port: line.port },
     codec: choice.codec,
     payloadType: choice.type,
     ptime: line.ptime !== undefined && isIntegerIn(line.ptime, 10, 120) ? line.ptime : PTIME,
-    direction: meet(reverse(theirs), want),
+    direction: reverse(theirs),
   }
 }
 
 // RFC 4733 events are not answered until Straw can hear them, so carriers keep tones in the audio
-function accept(line: MediaDescription, call: CallMedia, local: MediaAddress): MediaDescription {
+function answerLine(
+  line: MediaDescription,
+  call: CallMedia,
+  local: MediaAddress,
+): MediaDescription {
   const { payloadType, codec, direction } = call
   return {
     kind: "audio",
     port: local.port,
     protocol: line.protocol,
     formats: [String(payloadType)],
-    rtpmap: new Map([[payloadType, { name: codec, rate: 8000 }]]),
+    rtpmap: new Map([[payloadType, { name: codec, rate: SAMPLE_RATE }]]),
     ptime: PTIME,
     direction,
   }
@@ -145,7 +145,7 @@ function codecOf(line: MediaDescription, type: number): Codec | undefined {
   const map = line.rtpmap.get(type)
   if (!map) return STATIC_CODECS.get(type)
   const name = map.name.toUpperCase()
-  const mono = map.rate === 8000 && (map.channels ?? 1) === 1
+  const mono = map.rate === SAMPLE_RATE && (map.channels ?? 1) === 1
   return mono && (name === "PCMU" || name === "PCMA") ? name : undefined
 }
 
@@ -155,18 +155,7 @@ function reverse(direction: MediaDirection): MediaDirection {
   return direction
 }
 
-function meet(a: MediaDirection, b: MediaDirection): MediaDirection {
-  const send = sends(a) && sends(b)
-  const receive = receives(a) && receives(b)
-  if (send && receive) return "sendrecv"
-  if (send) return "sendonly"
-  return receive ? "recvonly" : "inactive"
-}
-
-function sends(direction: MediaDirection): boolean {
-  return direction === "sendrecv" || direction === "sendonly"
-}
-
-function receives(direction: MediaDirection): boolean {
-  return direction === "sendrecv" || direction === "recvonly"
+// What a side still does once it receives nothing
+function deaf(direction: MediaDirection): MediaDirection {
+  return direction === "sendrecv" || direction === "sendonly" ? "sendonly" : "inactive"
 }

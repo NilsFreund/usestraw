@@ -1,8 +1,10 @@
+import { bareHost } from "../../support/ip"
 import { atMost, MAX_VIAS } from "../limits"
 import { fail, isToken, show, splitOutside, TOKEN_CHARS } from "../syntax"
-import { bareHost, HOST_PATTERN, isHost, isPort, sameHost } from "./host"
+import { HOST_PATTERN, isHost, isPort, sameHost } from "./host"
 import { formatParams, isParams, type Params, parseParams } from "./params"
 
+/** RFC 3261 §20.42: one Via hop, with transport, sent-by host and port, and parameters. */
 export interface Via {
   /** Any transport a hop wrote, such as `"UDP"`, `"TLS"` or `"WSS"`. The parser upper-cases it. */
   readonly transport: string

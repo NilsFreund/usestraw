@@ -26,7 +26,7 @@ const sdp = { name: "Accept", value: "application/sdp" }
 
 describe("answer (RFC 3261 §8.2)", () => {
   it("accepts OPTIONS with 200 and Allow", () => {
-    expect(answer(request("OPTIONS"))).toEqual({ status: 200, reason: "OK", headers: [allow, sdp] })
+    expect(answer(request("OPTIONS"))).toEqual({ status: 200, phrase: "OK", headers: [allow, sdp] })
   })
 
   it("accepts sips URIs", () => {
@@ -46,7 +46,7 @@ describe("answer (RFC 3261 §8.2)", () => {
   ])("rejects the known method %s with 405 and Allow (§8.2.1)", (method) => {
     expect(answer(request(method))).toEqual({
       status: 405,
-      reason: "Method Not Allowed",
+      phrase: "Method Not Allowed",
       headers: [allow],
     })
   })
@@ -54,7 +54,7 @@ describe("answer (RFC 3261 §8.2)", () => {
   it.each(["X-CUSTOM", "invite", "FOO"])("rejects the unknown method %s with 501", (method) => {
     expect(answer(request(method))).toEqual({
       status: 501,
-      reason: "Not Implemented",
+      phrase: "Not Implemented",
       headers: [],
     })
   })
@@ -62,7 +62,7 @@ describe("answer (RFC 3261 §8.2)", () => {
   it("rejects a BYE outside any dialog with 481 (§15.1.2)", () => {
     expect(answer(request("BYE"))).toEqual({
       status: 481,
-      reason: "Call/Transaction Does Not Exist",
+      phrase: "Call/Transaction Does Not Exist",
       headers: [],
     })
   })
@@ -72,7 +72,7 @@ describe("answer (RFC 3261 §8.2)", () => {
     (method) => {
       expect(answer(request(method))).toEqual({
         status: 481,
-        reason: "Call/Transaction Does Not Exist",
+        phrase: "Call/Transaction Does Not Exist",
         headers: [],
       })
     },
@@ -81,7 +81,7 @@ describe("answer (RFC 3261 §8.2)", () => {
   it("rejects unsupported URI schemes with 416", () => {
     expect(answer(request("OPTIONS", "tel:+4930123456"))).toEqual({
       status: 416,
-      reason: "Unsupported URI Scheme",
+      phrase: "Unsupported URI Scheme",
       headers: [],
     })
   })
@@ -90,7 +90,7 @@ describe("answer (RFC 3261 §8.2)", () => {
     const options = { ...request("OPTIONS"), body: new Uint8Array([1]) }
     expect(answer(options)).toEqual({
       status: 415,
-      reason: "Unsupported Media Type",
+      phrase: "Unsupported Media Type",
       headers: [{ name: "Accept", value: "" }],
     })
   })
@@ -99,7 +99,7 @@ describe("answer (RFC 3261 §8.2)", () => {
     const required = ["Require: 100rel, timer", "Require: replaces"]
     expect(answer(request("OPTIONS", undefined, required))).toEqual({
       status: 420,
-      reason: "Bad Extension",
+      phrase: "Bad Extension",
       headers: [{ name: "Unsupported", value: "100rel, timer, replaces" }],
     })
   })
@@ -108,7 +108,7 @@ describe("answer (RFC 3261 §8.2)", () => {
     const required = ['Require: timer, "evil" <x>']
     expect(answer(request("OPTIONS", undefined, required))).toEqual({
       status: 400,
-      reason: "Bad Request",
+      phrase: "Bad Request",
       headers: [],
     })
   })
@@ -140,7 +140,7 @@ describe("checkInvite (RFC 3261 §8.2.2–8.2.3)", () => {
     (type) => {
       expect(checkInvite(offer(type))).toEqual({
         status: 415,
-        reason: "Unsupported Media Type",
+        phrase: "Unsupported Media Type",
         headers: [sdp],
       })
     },
@@ -150,7 +150,7 @@ describe("checkInvite (RFC 3261 §8.2.2–8.2.3)", () => {
     expect(checkInvite({ ...offer("text/plain"), uri: "tel:+4930123456" })?.status).toBe(416)
     expect(checkInvite(request("INVITE", undefined, ["Require: 100rel"]))).toEqual({
       status: 420,
-      reason: "Bad Extension",
+      phrase: "Bad Extension",
       headers: [{ name: "Unsupported", value: "100rel" }],
     })
     expect(checkInvite(request("INVITE", undefined, ['Require: "x"']))?.status).toBe(400)

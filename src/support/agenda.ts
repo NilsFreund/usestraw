@@ -1,5 +1,4 @@
 export interface Agenda<T> {
-  readonly size: number
   push(at: number, item: T): void
   next(): number | undefined
   peek(): T | undefined
@@ -58,9 +57,6 @@ export function createAgenda<T>(): Agenda<T> {
   }
 
   return {
-    get size() {
-      return heap.length
-    },
     push,
     next: () => heap[0]?.at,
     peek: () => heap[0]?.item,

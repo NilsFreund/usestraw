@@ -1,8 +1,10 @@
 import type { SipMessage, SipRequest, SipResponse } from "../message/types"
 import type { CallMedia } from "../sdp/types"
+import type { Random } from "../support/random"
+import type { TimerSettings } from "../transaction/timers"
 import type { TransportAddress } from "../transport/address"
 
-export type { Random } from "../support/random"
+export type { Random }
 
 /** The account to answer digest challenges (RFC 7616, RFC 8760) with. */
 export interface Credentials {
@@ -55,11 +57,13 @@ export interface AuthChallenge {
   readonly algorithm?: string
 }
 
+/** Why a digest challenge went unanswered or the server refused the answer. */
 export type AuthFailure =
   | { readonly reason: "no-credentials" }
   | { readonly reason: "unsupported-challenge"; readonly offered: readonly AuthChallenge[] }
   | { readonly reason: "unauthorized"; readonly status: number }
 
+/** Why a registration failed: no answer, a refusal, a binding the server didn't keep, or auth. */
 export type RegistrationFailure =
   | { readonly reason: "timeout" }
   | {
@@ -122,6 +126,7 @@ export interface CallEnd {
   readonly status?: number
 }
 
+/** A caller or callee as the From or To header names them. */
 export interface CallParty {
   readonly uri: string
   readonly name?: string
@@ -191,3 +196,47 @@ export type CoreEvent =
 export type CoreOutput =
   | { readonly type: "send"; readonly data: Uint8Array; readonly to: TransportAddress }
   | { readonly type: "event"; readonly event: CoreEvent }
+
+/**
+ * Options for `createCore()`.
+ *
+ * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
+ */
+export interface CoreOptions {
+  /** Where this phone receives SIP, as the far end sees it. */
+  readonly address: TransportAddress
+  /** The address of record, e.g. `"sip:alice@example.com"`. */
+  readonly aor: string
+  /** Source of tags, branches and nonces. Must be cryptographically secure. */
+  readonly random: Random
+  readonly credentials?: Credentials | undefined
+  /**
+   * RFC 3261 timers, for tests and unusual networks. Unset ones use `defaultTimers`, with T2
+   * and Timer D raised to fit T1.
+   */
+  readonly timers?: Partial<Record<keyof TimerSettings, number | undefined>> | undefined
+  /** Turns incoming calls away as busy (486) while this many calls run. Defaults to 100. */
+  readonly maxCalls?: number | undefined
+  /**
+   * IP addresses and CIDR ranges that may start calls and other requests, such as the server's;
+   * anyone when unset. Requests inside a call only need to match the call.
+   */
+  readonly acceptFrom?: readonly string[] | undefined
+}
+
+/**
+ * SIP as a pure state machine, with no sockets or clocks. Pass every input with the current time,
+ * do what it returns, and send a `timeout` input once `nextDeadline()` has passed.
+ *
+ * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
+ */
+export interface Core {
+  /**
+   * Runs one input at time `now` (milliseconds, any monotonic clock) and returns what to do.
+   *
+   * @throws {TypeError | RangeError} for an invalid command or time, never for network input
+   */
+  handle(input: CoreInput, now: number): CoreOutput[]
+  /** When the core next wants a `timeout` input, on the clock of `now`; `undefined` if never. */
+  nextDeadline(): number | undefined
+}

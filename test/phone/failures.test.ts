@@ -165,6 +165,17 @@ describe("ConnectError", () => {
     expect(toConnectError(gone, context).message).not.toContain("password")
   })
 
+  it("explains a network failure with a reason that is not an Error", () => {
+    expect(toConnectError({ reason: "network" }, context, "socket hang up").message).toBe(
+      "Network error with tls://sip.example.com:5061: socket hang up",
+    )
+    for (const nothing of [null, ""]) {
+      expect(toConnectError({ reason: "network" }, context, nothing).message).toBe(
+        "Network error with tls://sip.example.com:5061: the server closed the connection",
+      )
+    }
+  })
+
   it("escapes the username", () => {
     const error = toConnectError(
       { reason: "unauthorized", status: 403 },

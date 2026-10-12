@@ -1,4 +1,5 @@
-import type { CallHandle, RingingCall } from "./call"
+import type { CallHandle } from "./call"
+import type { RingingCall } from "./types"
 
 export interface Inbox extends AsyncIterable<RingingCall> {
   push(handle: CallHandle): void

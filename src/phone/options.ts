@@ -13,7 +13,7 @@ export interface TlsOptions {
   readonly ca?: string | undefined
 }
 
-/** Options for {@link connect}. */
+/** Options for `connect()`. */
 export interface ConnectUrlOptions {
   /** The SIP password, if it's not in the URL. */
   readonly password?: string | undefined
@@ -29,7 +29,7 @@ export interface ConnectUrlOptions {
   /** Aborts connecting. Once connected, aborting closes the phone. */
   readonly signal?: AbortSignal | undefined
   /**
-   * Records the latest 512 KB of SIP traffic in {@link Phone.trace}.
+   * Records the latest 512 KB of SIP traffic in `phone.trace`.
    *
    * @default true
    */
@@ -59,7 +59,7 @@ export interface ConnectUrlOptions {
   readonly localPort?: number | undefined
 }
 
-/** {@link connect} options without a URL. */
+/** `connect()` options without a URL. */
 export interface ConnectOptions extends ConnectUrlOptions {
   /** Your SIP address, e.g. `"sip:+4930123456@sip.example.com"`. */
   readonly uri: string

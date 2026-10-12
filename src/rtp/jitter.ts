@@ -97,11 +97,11 @@ export function createJitter(): Jitter {
         cursor = timestamp
         continue
       }
-      const start = Math.max(0, -gap)
+      const skipped = Math.max(0, -gap)
       const length =
-        gap > 0 ? Math.min(gap, samples - filled) : Math.min(pcm.length - start, samples - filled)
-      if (gap <= 0) frame.set(pcm.subarray(start, start + length), filled)
-      if (gap <= 0 && start + length >= pcm.length) chunks.delete(timestamp)
+        gap > 0 ? Math.min(gap, samples - filled) : Math.min(pcm.length - skipped, samples - filled)
+      if (gap <= 0) frame.set(pcm.subarray(skipped, skipped + length), filled)
+      if (gap <= 0 && skipped + length >= pcm.length) chunks.delete(timestamp)
       filled += length
       cursor = (at + length) >>> 0
     }

@@ -1,8 +1,11 @@
-import { bareHost, isIp } from "../message/fields/host"
-
 export type Family = "IP4" | "IP6"
 
-const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+const IPV4_PATTERN = "\\d{1,3}(?:\\.\\d{1,3}){3}"
+export const IPV6_PATTERN = "[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*"
+const ZONE = "(?:%[\\w.~-]+)?"
+// The shape of an IP as SIP writes it, with an IPv6 zone and brackets allowed; the values come later
+const IP = new RegExp(`^(?:${IPV4_PATTERN}|${IPV6_PATTERN}${ZONE}|\\[${IPV6_PATTERN}${ZONE}\\])$`)
+const IPV4 = new RegExp(`^${IPV4_PATTERN}$`)
 const GROUP = /^[0-9a-f]{1,4}$/i
 const PREFIX = /^(?:0|[1-9]\d{0,2})$/
 const MAPPED = `${"0".repeat(80)}${"1".repeat(16)}`
@@ -24,7 +27,9 @@ const PRIVATE = [
   "fc00::/7",
   "fe80::/10",
   "::1",
-].map((range) => parseRange(range) as Range)
+]
+  .map(parseRange)
+  .filter((range) => range !== undefined)
 
 // RTP goes to one unicast address, so names, zones, multicast and broadcast cannot carry a call
 export function familyOf(host: string): Family | undefined {
@@ -37,6 +42,16 @@ export function familyOf(host: string): Family | undefined {
 // RFC 3264 §8.4: 0.0.0.0 and :: in any spelling mean "do not send to me", once the host is known to be an IP
 export function isUnspecified(host: string): boolean {
   return /^[0.:]+$/.test(host)
+}
+
+export function isIp(host: string): boolean {
+  return typeof host === "string" && IP.test(host)
+}
+
+export function bareHost(host: string): string {
+  const unbracketed = host.startsWith("[") ? host.slice(1, -1) : host
+  const zone = unbracketed.indexOf("%")
+  return zone === -1 ? unbracketed : unbracketed.slice(0, zone)
 }
 
 export function isPrivate(host: string): boolean {
@@ -97,7 +112,10 @@ function groupBits(half: string, last: boolean): string | undefined {
 }
 
 function ipv4Bits(address: string): string | undefined {
-  const octets = IPV4.exec(address)?.slice(1)
-  if (!octets?.every((octet) => Number(octet) <= 255 && !/^0\d/.test(octet))) return undefined
-  return octets.map((octet) => Number(octet).toString(2).padStart(8, "0")).join("")
+  const octets = address.split(".")
+  const valid =
+    IPV4.test(address) && octets.every((octet) => Number(octet) <= 255 && !/^0\d/.test(octet))
+  return valid
+    ? octets.map((octet) => Number(octet).toString(2).padStart(8, "0")).join("")
+    : undefined
 }

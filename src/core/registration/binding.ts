@@ -1,11 +1,11 @@
 import { parseDeltaSeconds } from "../../message/fields/delta-seconds"
-import { bareHost, formatHost, isIp } from "../../message/fields/host"
+import { formatHost } from "../../message/fields/host"
 import type { NameAddr } from "../../message/fields/name-addr"
 import { splitSipUri } from "../../message/fields/uri"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
-import { familyOf, isPrivate, isUnspecified, sameIp } from "../../sdp/address"
 import { isIntegerIn } from "../../support/integer"
+import { bareHost, familyOf, isIp, isPrivate, isUnspecified, sameIp } from "../../support/ip"
 import type { TransportAddress } from "../../transport/address"
 import type { Random } from "../types"
 

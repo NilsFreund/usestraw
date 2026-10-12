@@ -79,8 +79,9 @@ export function createRegistration(
     const next = queued
     pending = undefined
     queued = undefined
-    if (input.type === "timeout")
+    if (input.type === "timeout") {
       return next ? dispatch(next) : fail(attempt, { reason: "timeout" }, now)
+    }
     const { response } = input
     if (response.status === 401 || response.status === 407) {
       const failure = authenticator.challenge(response)

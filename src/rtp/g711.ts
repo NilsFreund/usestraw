@@ -1,6 +1,12 @@
 import type { Codec } from "../sdp/types"
 
-export const SAMPLES_PER_MS = 8
+export const SAMPLE_RATE = 8000
+export const SAMPLES_PER_MS: number = SAMPLE_RATE / 1000
+// RFC 3551 §6: the static payload types of G.711, μ-law first as it is the most common
+export const STATIC_CODECS: ReadonlyMap<number, Codec> = new Map([
+  [0, "PCMU"],
+  [8, "PCMA"],
+])
 
 const BIAS = 0x84
 const CLIP = 32_635

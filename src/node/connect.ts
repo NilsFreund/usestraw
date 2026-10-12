@@ -4,8 +4,9 @@ import {
   type PhoneSettings,
   resolveOptions,
 } from "../phone/options"
-import { connectPhone, type Phone } from "../phone/phone"
+import { connectPhone } from "../phone/phone"
 import type { Platform } from "../phone/platform"
+import type { Phone } from "../phone/types"
 import { openAudio } from "./audio"
 import { debugOutput } from "./debug"
 import { openLink } from "./links"

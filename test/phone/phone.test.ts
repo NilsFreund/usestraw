@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { getHeader, replay } from "../../src/core"
 import { openAudio } from "../../src/node/audio"
-import type { RingingCall } from "../../src/phone/call"
 import { ConnectError } from "../../src/phone/connect-error"
 import { toConnectError } from "../../src/phone/failures"
 import { type ConnectOptions, type PhoneSettings, resolveOptions } from "../../src/phone/options"
-import { type Phone, startPhone } from "../../src/phone/phone"
+import { startPhone } from "../../src/phone/phone"
 import type { Link } from "../../src/phone/platform"
+import type { Phone, RingingCall } from "../../src/phone/types"
 import { type MemoryNetwork, memoryNetwork, startOn } from "./memory"
 
 const account = { uri: "sip:alice@example.com", password: "secret" }
@@ -322,6 +322,28 @@ describe("phone status", () => {
       calls: [],
     })
     expect(Object.isFrozen(phone.toJSON().error)).toBe(true)
+    await closeNow(phone)
+  })
+
+  it("gives up on a reconnect that hangs for connectTimeout", async () => {
+    const network = memoryNetwork({}, { stream: true })
+    const signals: AbortSignal[] = []
+    const hang = (signal: AbortSignal) => {
+      signals.push(signal)
+      return new Promise<Link>((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason))
+      })
+    }
+    const settings = {
+      ...resolveOptions({ ...account, server: "tls://example.com" }),
+      connectTimeout: 50,
+    }
+    const phone = await startOn(network, settings, { connect: hang })
+    network.drop()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(signals).toHaveLength(1)
+    await vi.waitFor(() => expect(phone.error?.message).toMatch(/timeout/), { timeout: 2000 })
+    expect(phone.status).toBe("reconnecting")
     await closeNow(phone)
   })
 

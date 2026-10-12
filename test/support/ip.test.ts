@@ -6,7 +6,7 @@ import {
   isUnspecified,
   parseRange,
   sameIp,
-} from "../../src/sdp/address"
+} from "../../src/support/ip"
 
 function within(host: string, range: string): boolean {
   const parsed = parseRange(range)

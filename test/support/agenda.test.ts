@@ -4,7 +4,6 @@ import { createAgenda } from "../../src/support/agenda"
 describe("createAgenda", () => {
   it("starts empty", () => {
     const agenda = createAgenda<string>()
-    expect(agenda.size).toBe(0)
     expect(agenda.next()).toBeUndefined()
     expect(agenda.take(Number.POSITIVE_INFINITY)).toBeUndefined()
   })
@@ -15,11 +14,9 @@ describe("createAgenda", () => {
     agenda.push(10, "a")
     agenda.push(10, "b")
     agenda.push(5, "first")
-    expect(agenda.size).toBe(4)
     expect(agenda.next()).toBe(5)
     const taken = [agenda.take(99), agenda.take(99), agenda.take(99), agenda.take(99)]
     expect(taken).toEqual(["first", "a", "b", "c"])
-    expect(agenda.size).toBe(0)
   })
 
   it("peeks at the next item without taking it", () => {
@@ -28,7 +25,6 @@ describe("createAgenda", () => {
     agenda.push(20, "b")
     agenda.push(10, "a")
     expect(agenda.peek()).toBe("a")
-    expect(agenda.size).toBe(2)
   })
 
   it("only hands out items that are due", () => {

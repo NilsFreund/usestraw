@@ -2,6 +2,7 @@ import { fail, hasLineBreak, isText, isToken, quote, readQuoted, show } from "..
 import { formatParams, isParams, type Params, parseParams } from "./params"
 import { isUri } from "./uri"
 
+/** A URI with an optional display name and header parameters, as in From, To and Contact. */
 export interface NameAddr {
   readonly displayName?: string | undefined
   readonly uri: string

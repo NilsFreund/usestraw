@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  type CoreEvent,
   type CoreOutput,
   createCore,
   getHeader,
@@ -11,17 +10,11 @@ import {
 } from "../../src/core"
 import { reasonFor } from "../../src/core/calls/reasons"
 import { createRandom } from "../../src/simulation/random"
-import { alice, aliceMedia, bob, bytes, sdp } from "../helpers"
+import { alice, aliceMedia, bob, sdp } from "../helpers"
+import { events, negotiated, receive } from "./support"
 
 const answer = sdp({ formats: [0, 101] })
 const media = aliceMedia
-const negotiated = {
-  remote: { host: "192.0.2.20", port: 4000 },
-  codec: "PCMU",
-  payloadType: 0,
-  ptime: 20,
-  direction: "sendrecv",
-} as const
 
 const call = (id = "c1") =>
   ({
@@ -29,7 +22,6 @@ const call = (id = "c1") =>
     command: { type: "call", call: id, uri: "sip:bob@example.com", to: bob, media },
   }) as const
 const end = (id = "c1") => ({ type: "command", command: { type: "end", call: id } }) as const
-const receive = (text: string) => ({ type: "receive", data: bytes(text), from: bob }) as const
 
 function phone() {
   return createCore({ address: alice, aor: "sip:alice@example.com", random: createRandom(1) })
@@ -50,9 +42,6 @@ function sentResponses(outputs: CoreOutput[]): number[] {
     return parsed.ok && !isRequest(parsed.message) ? [parsed.message.status] : []
   })
 }
-
-const events = (outputs: CoreOutput[]): CoreEvent[] =>
-  outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
 
 function reply(
   invite: SipRequest,
@@ -165,7 +154,7 @@ describe("calls in the core", () => {
       expect(() => ua.handle({ type: "command", command }, 0)).toThrow(error)
     }
     ua.handle(call(), 0)
-    expect(() => ua.handle(call(), 0)).toThrow('Call "c1" already exists')
+    expect(() => ua.handle(call(), 0)).toThrow(new TypeError('Call "c1" already exists'))
     expect(() => ua.handle({ type: "command", command: { type: "end", call: "a b" } }, 0)).toThrow(
       'Invalid call "a b"',
     )

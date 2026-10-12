@@ -5,7 +5,7 @@ import { createResponse } from "../../message/response"
 import type { SipHeader, SipRequest, SipResponse } from "../../message/types"
 import { type Random, randomInt } from "../../support/random"
 import { ALLOW } from "../requests"
-import { SDP } from "./requests"
+import { SDP_CONTENT } from "./requests"
 
 export interface ReplyFields {
   readonly tag?: string
@@ -33,7 +33,7 @@ export function createReply(
     : []
   const response = createResponse(request, status, phraseFor(status), {
     ...(tag === undefined ? {} : { toTag: tag }),
-    headers: [...routes, ...headers, ...(contact ? [ALLOW] : []), ...(sdp ? [SDP] : [])],
+    headers: [...routes, ...headers, ...(contact ? [ALLOW] : []), ...(sdp ? [SDP_CONTENT] : [])],
   })
   return { ...response, contact: contact ? [contact] : [], ...(sdp ? { body: sdp } : {}) }
 }

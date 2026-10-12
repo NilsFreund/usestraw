@@ -14,6 +14,9 @@
  * @module
  */
 export { connect } from "./node/connect"
+export { ConnectError, type ConnectErrorOptions, type ConnectReason } from "./phone/connect-error"
+export type { ConnectOptions, ConnectUrlOptions, TlsOptions } from "./phone/options"
+export type { PhoneStatus } from "./phone/status"
 export type {
   Agent,
   AnsweringCall,
@@ -21,21 +24,16 @@ export type {
   CallAudioStreams,
   CallEnded,
   CallingCall,
+  CallOptions,
   CallReason,
   CallSnapshot,
   CallStatus,
+  CloseOptions,
   EndedCall,
   EndOptions,
   LiveCall,
-  RingingCall,
-  UnansweredCall,
-} from "./phone/call"
-export { ConnectError, type ConnectErrorOptions, type ConnectReason } from "./phone/connect-error"
-export type { ConnectOptions, ConnectUrlOptions, TlsOptions } from "./phone/options"
-export type {
-  CallOptions,
-  CloseOptions,
   Phone,
   PhoneSnapshot,
-  PhoneStatus,
-} from "./phone/phone"
+  RingingCall,
+  UnansweredCall,
+} from "./phone/types"

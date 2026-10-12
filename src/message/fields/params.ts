@@ -1,6 +1,7 @@
 import { atMost, MAX_PARAMS } from "../limits"
 import { fail, hasRawControl, isToken, QUOTED_STRING, show, splitOutside } from "../syntax"
 
+/** Header or URI parameters by lowercase name; `null` for a parameter without a value. */
 export type Params = ReadonlyMap<string, string | null>
 
 const VALUE = new RegExp(

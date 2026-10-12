@@ -1,14 +1,8 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest"
 import type { CoreCommand, CallReason as CoreReason } from "../../src/core"
 import { openAudio } from "../../src/node/audio"
-import {
-  type Agent,
-  type CallReason,
-  type CallSetup,
-  createCall,
-  type LiveCall,
-  type RingingCall,
-} from "../../src/phone/call"
+import { type CallSetup, createCall } from "../../src/phone/call"
+import type { Agent, CallReason, LiveCall, RingingCall } from "../../src/phone/types"
 
 const media = {
   remote: { host: "127.0.0.1", port: 9000 },

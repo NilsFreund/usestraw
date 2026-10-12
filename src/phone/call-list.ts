@@ -2,24 +2,22 @@ import { createCallId } from "../core/ids"
 import type { CallEvent, CoreCommand } from "../core/types"
 import { isRequestUri, splitSipUri } from "../message/fields/uri"
 import { show } from "../message/syntax"
-import { isIpv4 } from "../sdp/address"
 import { isIntegerIn } from "../support/integer"
+import { isIpv4 } from "../support/ip"
 import { MAX_DELAY } from "../support/time"
 import type { TransportAddress } from "../transport/address"
-import {
-  type Call,
-  type CallHandle,
-  type CallSetup,
-  checkAgent,
-  createCall,
-  type LiveCall,
-  type RingingCall,
-  type UnansweredCall,
-} from "./call"
+import { type CallHandle, type CallSetup, checkAgent, createCall } from "./call"
 import { createInbox } from "./inbox"
-import type { CallOptions, CloseOptions } from "./phone"
 import type { CallAudio } from "./platform"
 import { secureRandom } from "./random"
+import type {
+  Call,
+  CallOptions,
+  CloseOptions,
+  LiveCall,
+  RingingCall,
+  UnansweredCall,
+} from "./types"
 
 export interface CallListSetup {
   readonly aor: string
@@ -42,7 +40,7 @@ export interface CallList {
   check(to: string, options: CallOptions): string
   place(uri: string, options: CallOptions): Promise<LiveCall | UnansweredCall>
   turnAway(): void
-  hangUp(options: CloseOptions, timeout: number): Promise<void>
+  endAll(options: CloseOptions, timeout: number): Promise<void>
   dropAll(timeout: number): Promise<void>
   close(): void
 }
@@ -138,7 +136,7 @@ export function createCallList(setup: CallListSetup): CallList {
   }
 
   // Ringing calls are turned down; answered ones, and those being answered, may finish with drain
-  async function hangUp(options: CloseOptions, timeout: number): Promise<void> {
+  async function endAll(options: CloseOptions, timeout: number): Promise<void> {
     turnAway()
     inbox.close()
     const ending = running()
@@ -180,7 +178,7 @@ export function createCallList(setup: CallListSetup): CallList {
     check,
     place,
     turnAway,
-    hangUp,
+    endAll,
     dropAll,
     close,
   }

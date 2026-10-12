@@ -5,7 +5,7 @@ import { createClock } from "../phone/clock"
 import type { CallAudio } from "../phone/platform"
 import { secureRandom } from "../phone/random"
 import { createMediaEngine, type MediaInput } from "../rtp/engine"
-import { SAMPLES_PER_MS } from "../rtp/g711"
+import { SAMPLE_RATE, SAMPLES_PER_MS } from "../rtp/g711"
 import { type Random, randomInt } from "../support/random"
 
 const FIRST_PORT = 16_384
@@ -111,8 +111,9 @@ export async function openAudio(
       writes = controller
     },
     write: (pcm) => {
-      if (!(pcm instanceof Int16Array))
+      if (!(pcm instanceof Int16Array)) {
         throw new TypeError("Audio must be an Int16Array of 8 kHz PCM")
+      }
       run({ type: "audio", pcm: new Int16Array(pcm) })
       if (!open || engine.queued <= AHEAD_SAMPLES) return undefined
       return new Promise<void>((resolve) => {
@@ -129,7 +130,7 @@ export async function openAudio(
 
   return {
     local: { host, port: socket.address().port },
-    sampleRate: 8000,
+    sampleRate: SAMPLE_RATE,
     get played() {
       return engine.played / SAMPLES_PER_MS
     },
@@ -151,7 +152,7 @@ async function bindEven(host: string, random: Random): Promise<Socket> {
       return socket
     } catch (error) {
       socket.close()
-      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error
+      if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error
     }
   }
   throw new Error(`No free even port for RTP on ${host}`)

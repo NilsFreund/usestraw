@@ -21,8 +21,8 @@ export function createStateless(random: Random): Stateless {
     toHex(hmacSha256(secret, encoder.encode(key).subarray(0, SIGNED)).subarray(0, 8))
 
   return {
-    reply: (request, { status, reason, headers }) =>
-      createResponse(request, status, reason, { toTag: tag(serverKey(request)), headers }),
+    reply: (request, { status, phrase, headers }) =>
+      createResponse(request, status, phrase, { toTag: tag(serverKey(request)), headers }),
     acknowledges: (ack) => serverKeys(ack).some((key) => tag(key) === ack.to.params.get("tag")),
   }
 }

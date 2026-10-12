@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { Phone } from "./phone/phone"
+import type { Phone } from "./phone/types"
 
 export { ConnectError } from "./phone/connect-error"
 

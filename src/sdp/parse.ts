@@ -43,9 +43,9 @@ export function parseSdp(data: Uint8Array): SessionDescription | undefined {
       if (family === undefined || address === undefined) continue
       if (current) current.connection = { family, address }
       else session.connection = { family, address }
-    } else if (type === "a" && DIRECTIONS.has(value)) {
-      if (current) current.direction = value as MediaDirection
-      else session.direction = value as MediaDirection
+    } else if (type === "a" && isDirection(value)) {
+      if (current) current.direction = value
+      else session.direction = value
     } else if (type === "a" && current) attribute(value, current)
   }
   if (session.origin === undefined || media.length === 0) return undefined
@@ -83,4 +83,8 @@ function attribute(value: string, media: Draft): void {
       channels === undefined ? map : { ...map, channels: Number(channels) },
     )
   } else if (name === "ptime" && /^\d{1,3}$/.test(rest)) media.ptime = Number(rest)
+}
+
+function isDirection(value: string): value is MediaDirection {
+  return DIRECTIONS.has(value)
 }

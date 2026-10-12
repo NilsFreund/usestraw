@@ -5,17 +5,14 @@ import { parseMessage } from "../message/parse"
 import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
 import { isRequest, type SipRequest, type SipResponse } from "../message/types"
-import { familyOf, inRange, isPrivate } from "../sdp/address"
-import { isPlayable } from "../sdp/negotiate"
-import type { MediaAddress } from "../sdp/types"
 import { checkTime, earliest } from "../support/time"
-import { resolveTimers, type TimerSettings } from "../transaction/timers"
+import { resolveTimers } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
 import type { TransactionEvent, TransactionOutput } from "../transaction/types"
 import type { TransportAddress } from "../transport/address"
+import { createAdmission } from "./admission"
 import { createTrust } from "./authenticator"
 import { createCalls } from "./calls/calls"
-import { INCOMPATIBLE_MEDIA } from "./calls/replies"
 import type { CallOutput } from "./calls/types"
 import {
   checkAddress,
@@ -30,69 +27,21 @@ import {
   checkRejection,
   checkRequestUri,
   checkSource,
+  MAX_CALLS,
   parseAcceptFrom,
 } from "./checks"
 import { emit, send } from "./outputs"
-import { defaultRegistrar, publicHost } from "./registration/binding"
+import { createOutside } from "./outside"
+import { defaultRegistrar } from "./registration/binding"
 import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
 import { createResponder } from "./responder"
-import type { CoreCommand, CoreInput, CoreOutput, Credentials, Random } from "./types"
-import { type Answer, answerWith, checkInvite } from "./uas"
-
-const LOOP: Answer = answerWith(482)
-const BUSY: Answer = answerWith(486)
-const UNPLAYABLE: Answer = answerWith(488, [INCOMPATIBLE_MEDIA])
-const FULL: Answer = answerWith(503, [{ name: "Retry-After", value: "5" }])
+import type { Core, CoreCommand, CoreInput, CoreOptions, CoreOutput } from "./types"
 
 // Output too big for any parser, or aimed at port 0, is dropped like a lost packet
 const fits = (output: CoreOutput) =>
   output.type !== "send" || (output.data.length <= MAX_MESSAGE_SIZE && output.to.port > 0)
-
-/**
- * Options for {@link createCore}.
- *
- * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
- */
-export interface CoreOptions {
-  /** Where this phone receives SIP, as the far end sees it. */
-  readonly address: TransportAddress
-  /** The address of record, e.g. `"sip:alice@example.com"`. */
-  readonly aor: string
-  /** Source of tags, branches and nonces. Must be cryptographically secure. */
-  readonly random: Random
-  readonly credentials?: Credentials | undefined
-  /**
-   * RFC 3261 timers, for tests and unusual networks. Unset ones use {@link defaultTimers}, with T2
-   * and Timer D raised to fit T1.
-   */
-  readonly timers?: Partial<Record<keyof TimerSettings, number | undefined>> | undefined
-  /** Turns incoming calls away as busy (486) while this many calls run. Defaults to 100. */
-  readonly maxCalls?: number | undefined
-  /**
-   * IP addresses and CIDR ranges that may start calls and other requests, such as the server's;
-   * anyone when unset. Requests inside a call only need to match the call.
-   */
-  readonly acceptFrom?: readonly string[] | undefined
-}
-
-/**
- * SIP as a pure state machine, with no sockets or clocks. Pass every input with the current time,
- * do what it returns, and send a `timeout` input once `nextDeadline()` has passed.
- *
- * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
- */
-export interface Core {
-  /**
-   * Runs one input at time `now` (milliseconds, any monotonic clock) and returns what to do.
-   *
-   * @throws {TypeError | RangeError} for an invalid command or time, never for network input
-   */
-  handle(input: CoreInput, now: number): CoreOutput[]
-  /** When the core next wants a `timeout` input, on the clock of `now`; `undefined` if never. */
-  nextDeadline(): number | undefined
-}
 
 /**
  * Creates a sans-I/O SIP user agent with registration, calls, SDP offer/answer and digest auth.
@@ -114,7 +63,7 @@ export interface Core {
  * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
 export function createCore(options: CoreOptions): Core {
-  const { aor, random, maxCalls = 100, acceptFrom } = options
+  const { aor, random, maxCalls = MAX_CALLS, acceptFrom } = options
   let { address } = options
   checkAddress(address)
   checkAor(aor)
@@ -122,8 +71,6 @@ export function createCore(options: CoreOptions): Core {
   if (credentials) checkCredentials(credentials)
   checkMaxCalls(maxCalls)
   const accepted = acceptFrom === undefined ? undefined : parseAcceptFrom(acceptFrom)
-  // Ended calls linger for 64·T1, so a flood of short calls is capped before it costs memory
-  const capacity = Math.max(64, 4 * maxCalls)
   const timers = resolveTimers(options.timers)
   const transactions = createTransactions({ local: address, timers })
   const identity = {
@@ -145,7 +92,8 @@ export function createCore(options: CoreOptions): Core {
     trust,
     timers,
   })
-  let outside: string | undefined
+  const { accepts, admit } = createAdmission({ accepted, maxCalls, calls, transactions })
+  const outside = createOutside()
 
   function handle(input: CoreInput, now: number): CoreOutput[] {
     checkTime(now)
@@ -169,14 +117,6 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  // Strangers only get in with requests inside a call, whose ids they must guess, and never CANCEL
-  function accepts(request: SipRequest, from: TransportAddress): boolean {
-    if (accepted === undefined || accepted.some((range) => inRange(from.host, range))) {
-      return true
-    }
-    return request.method !== "CANCEL" && calls.matches(request)
-  }
-
   function receive(data: Uint8Array, from: TransportAddress, now: number): CoreOutput[] {
     checkSource(from)
     const result = parseMessage(data)
@@ -195,17 +135,6 @@ export function createCore(options: CoreOptions): Core {
     if (refusal) return responder.respond(request, from, refusal)
     if (!isForCalls(request)) return responder.respond(request, from)
     return translate(transactions.receive(request, from, now), now)
-  }
-
-  // RFC 3261 §8.2.2.2: a Call-ID stays taken while its call lives, and its own INVITE coming back is merged
-  function admit(invite: SipRequest): Answer | undefined {
-    if (invite.to.params.has("tag") || transactions.hasInvite(invite)) return undefined
-    const refusal = checkInvite(invite)
-    if (refusal) return refusal
-    if (invite.body.length > 0 && !isPlayable(invite.body)) return UNPLAYABLE
-    if (calls.collides(invite)) return LOOP
-    if (calls.active() >= maxCalls) return BUSY
-    return calls.tracked() >= capacity ? FULL : undefined
   }
 
   function isForCalls(request: SipRequest): boolean {
@@ -246,7 +175,7 @@ export function createCore(options: CoreOptions): Core {
         return translateRegistration(registration.unregister(), now)
       case "move":
         checkAddress(command.address)
-        if (command.address.host !== address.host) outside = undefined
+        if (command.address.host !== address.host) outside.forget()
         address = command.address
         transactions.move(address)
         registration.move(address)
@@ -256,13 +185,13 @@ export function createCore(options: CoreOptions): Core {
         checkCallId(call)
         checkRequestUri(uri)
         checkAddress(to)
-        const media = advertised(checkMedia(command.media, address.host))
-        if (calls.owns(call)) throw new Error(`Call ${show(call)} already exists`)
+        const media = outside.advertised(checkMedia(command.media, address.host))
+        if (calls.owns(call)) throw new TypeError(`Call ${show(call)} already exists`)
         return translateCalls(calls.start({ call, uri, to, media }, now), now)
       }
       case "accept": {
         checkCall(command.call)
-        const media = advertised(checkMedia(command.media, address.host))
+        const media = outside.advertised(checkMedia(command.media, address.host))
         return translateCalls(calls.accept(command.call, media, now), now)
       }
       case "end": {
@@ -276,17 +205,11 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
-  // Behind a NAT that keeps ports, as on a cloud VM, audio must come to the address the server saw
-  function advertised(media: MediaAddress): MediaAddress {
-    if (outside === undefined || !isPrivate(media.host)) return media
-    return familyOf(outside) === familyOf(media.host) ? { ...media, host: outside } : media
-  }
-
   // Answers from the server show where it saw us, which audio and a trunk's Contact need
   function learn(response: SipResponse): void {
     const { method } = response.cseq
     if (method === "REGISTER" || method === "OPTIONS") {
-      outside = publicHost(response, address) ?? outside
+      outside.learn(response, address)
     }
     if (method === "OPTIONS") registration.observe(response)
   }
@@ -317,7 +240,7 @@ export function createCore(options: CoreOptions): Core {
     const { request, transaction, from } = happened
     if (!transaction) return calls.acknowledge(request, now)
     if (request.method === "INVITE" && !request.to.params.has("tag")) {
-      return calls.receive({ invite: request, transaction, from }, now)
+      return calls.ring({ invite: request, transaction, from }, now)
     }
     return calls.request(request, transaction, now)
   }

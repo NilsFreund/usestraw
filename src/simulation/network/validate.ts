@@ -50,8 +50,9 @@ function validateLoss(loss: Loss): void {
 }
 
 function probability(name: string, value: number): void {
-  if (!(value >= 0 && value <= 1))
+  if (!(value >= 0 && value <= 1)) {
     throw new RangeError(`${name} must be within [0, 1], got ${value}`)
+  }
 }
 
 function positive(name: string, value: number): void {

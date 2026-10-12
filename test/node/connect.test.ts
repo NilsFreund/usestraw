@@ -1,5 +1,5 @@
 import { createSocket } from "node:dgram"
-import { once } from "node:events"
+import { getEventListeners, once } from "node:events"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConnectError, type ConnectOptions, connect, type Phone } from "../../src"
 import { getHeader, replay } from "../../src/core"
@@ -275,10 +275,10 @@ describe("connect", () => {
   it("lets go of its signal once it is closed", async () => {
     const server = await serve(udpRegistrar())
     const controller = new AbortController()
-    const removed = vi.spyOn(controller.signal, "removeEventListener")
     const phone = await phoneFor({ ...options(server, "udp"), signal: controller.signal })
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(1)
     await phone.close()
-    expect(removed).toHaveBeenCalledWith("abort", expect.any(Function))
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
   })
 
   it("refuses invalid options", async () => {
@@ -386,6 +386,7 @@ describe("connect", () => {
       () => {
         expect(server.registrar.bindings.size).toBe(1)
         expect(server.registrar.bindings.has(before ?? "")).toBe(false)
+        expect(phone.status).toBe("online")
       },
       { timeout: 8000 },
     )
@@ -393,7 +394,6 @@ describe("connect", () => {
     expect([...server.registrar.bindings.keys()]).toStrictEqual([
       expect.stringMatching(new RegExp(`^sips:alice@.+:${port}$`)),
     ])
-    expect(phone.status).toBe("online")
   }, 15_000)
 
   it("keeps trying while the server is gone, and stops when closed", async () => {

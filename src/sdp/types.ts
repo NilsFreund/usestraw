@@ -1,12 +1,16 @@
+/** RFC 3264 §5.1: which way audio flows on a media line. */
 export type MediaDirection = "sendrecv" | "sendonly" | "recvonly" | "inactive"
 
+/** G.711 μ-law or A-law. */
 export type Codec = "PCMU" | "PCMA"
 
+/** Where RTP goes: an IP address and port. */
 export interface MediaAddress {
   readonly host: string
   readonly port: number
 }
 
+/** What a call's SDP agreed on: where to send, which codec and payload type, ptime and direction. */
 export interface CallMedia {
   readonly remote: MediaAddress
   readonly codec: Codec

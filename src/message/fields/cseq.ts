@@ -1,6 +1,7 @@
 import { isIntegerIn } from "../../support/integer"
 import { fail, isToken, show } from "../syntax"
 
+/** RFC 3261 §20.16: the CSeq header, a sequence number and the request's method. */
 export interface CSeq {
   readonly seq: number
   readonly method: string

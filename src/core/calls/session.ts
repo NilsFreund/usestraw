@@ -88,7 +88,7 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
   // Only the branch tells the answer to our BYE apart from one to a BYE for another fork
   function response(reply: SipResponse): CallOutput[] {
     if (branchOf(reply) !== bye || reply.status < 200 || state !== "ending") return []
-    // A challenge inside a call may come from the far end, which must never get our password hash
+    // Any final answer ends it: a challenge may come from the far end, which must never get our password hash
     return finish(closing)
   }
 
@@ -122,8 +122,9 @@ export function createSession(setup: SessionSetup, context: SessionContext): Ses
     const offered = invite.body.length === 0
     const before = media.current
     const sdp = offered ? media.offer() : media.answer(invite.body)
-    if (!sdp)
+    if (!sdp) {
       return [respond(transaction, createReply(invite, 488, { headers: [INCOMPATIBLE_MEDIA] }))]
+    }
     const ok = createReply(invite, 200, { contact, sdp })
     pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered, initial: false }
     // RFC 3261 §12.2.2: a 2xx to a target refresh moves the remote target to the new Contact

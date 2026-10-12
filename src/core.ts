@@ -12,7 +12,7 @@
  *
  * @module
  */
-export { type Core, type CoreOptions, createCore } from "./core/core"
+export { createCore } from "./core/core"
 export type {
   AuthChallenge,
   AuthFailure,
@@ -20,9 +20,11 @@ export type {
   CallEvent,
   CallParty,
   CallReason,
+  Core,
   CoreCommand,
   CoreEvent,
   CoreInput,
+  CoreOptions,
   CoreOutput,
   Credentials,
   LocalMedia,

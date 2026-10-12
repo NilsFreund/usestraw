@@ -13,7 +13,7 @@ async function record(ringing: RingingCall): Promise<void> {
   const { sampleRate } = call.audio
   const beep = Int16Array.from(
     { length: sampleRate / 2 },
-    (_, index) => 6000 * Math.sin(index * 0.5),
+    (_, index) => 6000 * Math.sin((2 * Math.PI * 660 * index) / sampleRate),
   )
   void call.audio.writable
     .getWriter()
@@ -25,7 +25,8 @@ async function record(ringing: RingingCall): Promise<void> {
   clearTimeout(limit)
   const file = `voicemail-${Date.now()}.wav`
   await writeFile(file, wav(frames, sampleRate))
-  console.log(`${frames.length / 50} s from ${call.from} in ${file}`)
+  const seconds = frames.reduce((total, frame) => total + frame.length, 0) / sampleRate
+  console.log(`${seconds.toFixed(1)} s from ${call.from} in ${file}`)
 }
 
 function wav(frames: Int16Array[], sampleRate: number): Uint8Array {

@@ -1,10 +1,9 @@
 import { isCallId, isStrictCallId } from "../message/fields/call-id"
-import { isIp } from "../message/fields/host"
 import { isRequestUri, isUri, splitSipUri } from "../message/fields/uri"
 import { hasLineBreak, isText, show } from "../message/syntax"
-import { familyOf, isUnspecified, parseRange, type Range } from "../sdp/address"
 import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
+import { familyOf, isIp, isUnspecified, parseRange, type Range } from "../support/ip"
 import { isAddress, type TransportAddress } from "../transport/address"
 import type { Credentials, LocalMedia } from "./types"
 
@@ -14,8 +13,9 @@ export function checkAddress(address: TransportAddress): void {
 
 export function checkSource(from: TransportAddress): void {
   checkAddress(from)
-  if (!isIp(from.host))
+  if (!isIp(from.host)) {
     throw new TypeError(`The source must be an IP address, got ${show(from.host)}`)
+  }
 }
 
 const MAX_TEXT = 4096
@@ -68,8 +68,9 @@ export function checkCall(call: string): void {
 
 // RFC 3550 §11: RTP takes an even port, and the far end must be able to send to our host
 export function checkMedia(media: LocalMedia, fallback: string): MediaAddress {
-  if (typeof media !== "object" || media === null)
+  if (typeof media !== "object" || media === null) {
     throw new TypeError(`Invalid media ${show(media)}`)
+  }
   const raw = media.host ?? fallback
   const host = typeof raw === "string" ? raw.replace(/^\[(.*)\]$/, "$1") : ""
   if (!familyOf(host) || isUnspecified(host)) {
@@ -102,6 +103,8 @@ export function parseAcceptFrom(ranges: readonly string[]): Range[] {
   }
   return parsed.filter((range) => range !== undefined)
 }
+
+export const MAX_CALLS = 100
 
 export function checkMaxCalls(maxCalls: number): void {
   if (!isIntegerIn(maxCalls, 0, 0xffff)) {

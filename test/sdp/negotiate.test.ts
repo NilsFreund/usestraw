@@ -30,11 +30,10 @@ describe("createOffer (RFC 3264 §5)", () => {
     })
   })
 
-  it("puts the codec in use first and takes another direction", () => {
-    const offer = createOffer(local, { prefer: "PCMA", want: "sendonly" })
+  it("puts the codec in use first", () => {
+    const offer = createOffer(local, { prefer: "PCMA" })
     expect(offer.formats).toStrictEqual(["8", "0"])
     expect([...offer.rtpmap.keys()]).toStrictEqual([8, 0])
-    expect(offer.direction).toBe("sendonly")
   })
 })
 
@@ -198,12 +197,6 @@ describe("answerOffer (RFC 3264 §6)", () => {
     expect(answer?.media[0]?.direction).toBe(answered)
   })
 
-  it("only goes as far as it wants itself", () => {
-    expect(answerOffer(parsed(sdp()), local, { want: "sendonly" })?.call.direction).toBe("sendonly")
-    const held = parsed(sdp({ direction: "sendonly" }))
-    expect(answerOffer(held, local, { want: "sendonly" })?.call.direction).toBe("inactive")
-  })
-
   it("takes a session-level direction when the media line has none", () => {
     const text = sdp().replace("t=0 0\r\n", "t=0 0\r\na=sendonly\r\n")
     expect(answerOffer(parsed(text), local)?.call.direction).toBe("recvonly")
@@ -215,6 +208,8 @@ describe("answerOffer (RFC 3264 §6)", () => {
       expect(answerOffer(parsed(sdp({ host })), local)?.call.direction).toBe("recvonly")
       const recvonly = sdp({ host, direction: "recvonly" })
       expect(answerOffer(parsed(recvonly), local)?.call.direction).toBe("inactive")
+      const sendonly = sdp({ host, direction: "sendonly" })
+      expect(answerOffer(parsed(sendonly), local)?.call.direction).toBe("recvonly")
     },
   )
 
@@ -254,9 +249,7 @@ describe("readAnswer (RFC 3264 §6.1)", () => {
 
   it("turns the answer's direction around", () => {
     expect(readAnswer(parsed(sdp({ direction: "recvonly" })), 0, local)?.direction).toBe("sendonly")
-    expect(
-      readAnswer(parsed(sdp({ direction: "sendonly" })), 0, local, "sendonly")?.direction,
-    ).toBe("inactive")
+    expect(readAnswer(parsed(sdp({ direction: "sendonly" })), 0, local)?.direction).toBe("recvonly")
   })
 
   it("finds nothing when the answer refused or changed our line", () => {

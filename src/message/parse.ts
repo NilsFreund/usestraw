@@ -58,8 +58,9 @@ function parseStatusLine(line: string): { status: number; reason: string } {
   if (!match) fail(`Invalid status line ${show(line)}`)
   const [, version = "", code = "", reason = ""] = match
   checkVersion(version)
-  if (!/^\d{3}$/.test(code) || !isStatusCode(Number(code)))
+  if (!/^\d{3}$/.test(code) || !isStatusCode(Number(code))) {
     fail(`Invalid status code ${show(code)}`)
+  }
   if (hasControl(reason)) fail("Invalid character in reason phrase")
   return { status: Number(code), reason }
 }

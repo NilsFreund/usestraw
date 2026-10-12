@@ -13,6 +13,7 @@ import {
 } from "../../src/core"
 import { createRandom } from "../../src/simulation/random"
 import { alice, bob, bytes, fixture, parsed } from "../helpers"
+import { events } from "./support"
 
 function core(seed = 1): Core {
   return createCore({ address: alice, aor: "sip:alice@example.com", random: createRandom(seed) })
@@ -29,10 +30,6 @@ function busy(): Core {
 
 function sent(outputs: CoreOutput[]) {
   return outputs.flatMap((output) => (output.type === "send" ? [output] : []))
-}
-
-function events(outputs: CoreOutput[]) {
-  return outputs.flatMap((output) => (output.type === "event" ? [output.event] : []))
 }
 
 function message(output: CoreOutput | undefined): SipMessage {

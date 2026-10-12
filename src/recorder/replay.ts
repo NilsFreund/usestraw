@@ -1,6 +1,6 @@
 import { version } from "../../package.json"
-import { type Core, type CoreOptions, createCore } from "../core/core"
-import type { CoreOutput, Credentials } from "../core/types"
+import { createCore } from "../core/core"
+import type { Core, CoreOptions, CoreOutput, Credentials } from "../core/types"
 import { decode, encode, maskSecrets } from "./codec"
 import type { RecordedStep } from "./recorder"
 
@@ -47,19 +47,18 @@ export function replay(recording: string): ReplayResult {
   }
   const { credentials, ...options } = header.options
   const login = credentials ? { credentials: { ...credentials, password: "" } } : {}
-  let core: Core | undefined
-  const start = outcome(
-    () => {
-      core = createCore({ ...options, random, ...login })
-      return []
-    },
-    () => core?.nextDeadline(),
-  )
   const started = encode({ outputs: [], next: header.next })
+  let running: Core
+  try {
+    running = createCore({ ...options, random, ...login })
+  } catch (error) {
+    const actual = encode({ thrown: maskSecrets(String(error)), next: null })
+    return { ok: false, reason: "diverged", step: 0, expected: started, actual }
+  }
+  const start = encode({ outputs: [], next: running.nextDeadline() ?? null })
   if (start !== started || draws.length > 0) {
     return { ok: false, reason: "diverged", step: 0, expected: started, actual: start }
   }
-  const running = core as Core
   for (const [index, step] of steps.entries()) {
     draws.push(...step.random)
     const actual = outcome(
@@ -89,31 +88,36 @@ function outcome(handle: () => CoreOutput[], deadline: () => number | undefined)
 
 function readHeader(line: string): RecordingHeader | undefined {
   const header = parse(line)
-  if (!isObject(header) || header["straw"] !== "recording" || header["version"] !== 1) {
-    return undefined
-  }
-  const { release, random, options, next, truncated } = header
-  const valid =
+  return isHeader(header) ? header : undefined
+}
+
+function readSteps(lines: readonly string[]): RecordedStep[] | undefined {
+  const steps = lines.map(parse)
+  return steps.every(isStep) ? steps : undefined
+}
+
+// The shape a recording promises; inputs and options are checked by the core when it runs them
+function isHeader(value: unknown): value is RecordingHeader {
+  if (!isObject(value) || value["straw"] !== "recording" || value["version"] !== 1) return false
+  const { release, random, options, next, truncated } = value
+  return (
     typeof release === "string" &&
     isDraws(random) &&
     isObject(options) &&
     (next === null || typeof next === "number") &&
     typeof truncated === "boolean"
-  return valid ? (header as unknown as RecordingHeader) : undefined
+  )
 }
 
-function readSteps(lines: readonly string[]): RecordedStep[] | undefined {
-  const steps = lines.map(parse)
-  const valid = steps.every(
-    (step) =>
-      isObject(step) &&
-      typeof step["now"] === "number" &&
-      isObject(step["input"]) &&
-      isDraws(step["random"]) &&
-      (step["next"] === null || typeof step["next"] === "number") &&
-      (Array.isArray(step["outputs"]) || typeof step["thrown"] === "string"),
+function isStep(value: unknown): value is RecordedStep {
+  return (
+    isObject(value) &&
+    typeof value["now"] === "number" &&
+    isObject(value["input"]) &&
+    isDraws(value["random"]) &&
+    (value["next"] === null || typeof value["next"] === "number") &&
+    (Array.isArray(value["outputs"]) || typeof value["thrown"] === "string")
   )
-  return valid ? (steps as RecordedStep[]) : undefined
 }
 
 function parse(line: string): unknown {

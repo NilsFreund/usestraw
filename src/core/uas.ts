@@ -7,7 +7,7 @@ import { ALLOW } from "./requests"
 
 export interface Answer {
   readonly status: number
-  readonly reason: string
+  readonly phrase: string
   readonly headers: readonly SipHeader[]
 }
 
@@ -74,5 +74,5 @@ function requiredOptions(request: SipRequest): string[] {
 }
 
 export function answerWith(status: number, headers: readonly SipHeader[] = []): Answer {
-  return { status, reason: phraseFor(status), headers }
+  return { status, phrase: phraseFor(status), headers }
 }

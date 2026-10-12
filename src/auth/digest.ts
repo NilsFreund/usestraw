@@ -38,8 +38,9 @@ export function computeAuthorization(
 ): Authorization {
   const { challenge, algorithm, qop } = offer
   const { realm, nonce, opaque } = challenge
-  if (!isIntegerIn(client.nc, 1, 0xffffffff))
+  if (!isIntegerIn(client.nc, 1, 0xffffffff)) {
     throw new RangeError(`Invalid nonce count ${client.nc}`)
+  }
   if (!CNONCE.test(client.cnonce)) throw new TypeError(`Invalid cnonce ${show(client.cnonce)}`)
   const hash = (text: string) => algorithm.hash(encoder.encode(text))
   const nc = client.nc.toString(16).padStart(8, "0")

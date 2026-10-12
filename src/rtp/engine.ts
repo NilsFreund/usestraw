@@ -1,9 +1,8 @@
-import { isPrivate, sameIp } from "../sdp/address"
-import { STATIC_CODECS } from "../sdp/negotiate"
 import type { CallMedia, Codec, MediaAddress } from "../sdp/types"
+import { isPrivate, sameIp } from "../support/ip"
 import { type Random, randomInt } from "../support/random"
 import { earliest } from "../support/time"
-import { decodeG711, encodeG711, SAMPLES_PER_MS } from "./g711"
+import { decodeG711, encodeG711, SAMPLES_PER_MS, STATIC_CODECS } from "./g711"
 import { createJitter } from "./jitter"
 import { type RtpPacket, readRtp, writeRtp } from "./packet"
 

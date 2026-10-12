@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { CallHandle, CallStatus } from "../../src/phone/call"
+import type { CallHandle } from "../../src/phone/call"
 import { createInbox } from "../../src/phone/inbox"
+import type { CallStatus } from "../../src/phone/types"
 
 function ringing(id: string) {
   const call = { id, status: "ringing" as CallStatus }

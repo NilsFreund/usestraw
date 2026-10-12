@@ -23,14 +23,14 @@ export interface InviteFields {
   readonly sdp: Uint8Array
 }
 
-export const SDP: SipHeader = { name: "Content-Type", value: "application/sdp" }
+export const SDP_CONTENT: SipHeader = { name: "Content-Type", value: "application/sdp" }
 const CREDENTIALS = /^(?:proxy-)?authorization$/i
 const MAX_ROUTES = 32
 
 export function createInvite(fields: InviteFields, identity: Identity): SipRequest {
   const { callId, from, uri, seq, contact, sdp } = fields
   const to = { uri, params: new Map() }
-  const request = { from, to, callId, seq, contact: [contact], headers: [ALLOW, SDP] }
+  const request = { from, to, callId, seq, contact: [contact], headers: [ALLOW, SDP_CONTENT] }
   return { ...createRequest("INVITE", uri, request, identity), body: sdp }
 }
 

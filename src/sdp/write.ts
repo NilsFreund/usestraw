@@ -1,4 +1,4 @@
-import { bareHost } from "../message/fields/host"
+import { bareHost } from "../support/ip"
 import type { MediaDescription } from "./types"
 
 export interface Origin {

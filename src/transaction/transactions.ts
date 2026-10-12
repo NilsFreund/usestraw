@@ -41,8 +41,9 @@ export function createTransactions(options: TransactionOptions): Transactions {
     if (request.method === "ACK") return [send(request, to)]
     const create = request.method === "INVITE" ? createClientInvite : createClientNonInvite
     const transaction = create(request, to, timers)
-    if (clients.has(transaction.key))
+    if (clients.has(transaction.key)) {
       throw new Error(`Transaction ${transaction.key} already exists`)
+    }
     clients.set(transaction.key, transaction)
     return settle(transaction, transaction.start(now))
   }

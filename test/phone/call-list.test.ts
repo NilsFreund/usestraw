@@ -380,11 +380,13 @@ describe("phone.incoming", () => {
   it("hands out a call that rang before anyone looked, with the caller's name", async () => {
     const { phone, carrier } = await setup()
     const early = await carrier.dial()
-    await pause(100)
+    await expect.poll(() => phone.calls).toHaveLength(1)
     carrier.hangup(early)
-    await pause(100)
+    await expect.poll(() => phone.calls).toHaveLength(0)
     carrier.invite("Dr. Müller")
-    await pause(100)
+    await expect
+      .poll(() => phone.calls.map((call) => call.callerName))
+      .toStrictEqual(["Dr. Müller"])
     for await (const call of phone.incoming) {
       expect(call).toMatchObject({ from: "+4930555", callerName: "Dr. Müller", status: "ringing" })
       expect(call.toJSON()).toMatchObject({ callerName: "Dr. Müller" })
@@ -404,11 +406,12 @@ describe("phone.incoming", () => {
   it("turns away calls beyond maxCalls as busy", async () => {
     const { phone, carrier } = await setup("echo", 1)
     await carrier.dial()
-    await pause(100)
+    await expect.poll(() => phone.calls).toHaveLength(1)
     const second = await carrier.dial()
-    await pause(100)
+    await expect
+      .poll(() => carrier.ended.get(second))
+      .toMatchObject({ reason: "busy", status: 486 })
     expect(phone.calls).toHaveLength(1)
-    expect(carrier.ended.get(second)).toMatchObject({ reason: "busy", status: 486 })
   })
 })
 
@@ -429,7 +432,7 @@ describe("phone.close", () => {
   it("turns down calls that still ring when it starts draining", async () => {
     const { phone, carrier } = await setup()
     const ringing = await carrier.dial()
-    await pause(100)
+    await expect.poll(() => phone.calls).toHaveLength(1)
     await phone.close({ drain: true })
     expect(carrier.ended.get(ringing)).toMatchObject({ reason: "busy" })
   })
@@ -462,7 +465,6 @@ describe("phone.close", () => {
     const { phone, carrier } = await setup({ hangupAfter: 300 })
     const call = await phone.call("bob")
     const closing = phone.close({ drain: true })
-    await pause(50)
     const late = await carrier.dial()
     await expect.poll(() => carrier.ended.get(late)).toMatchObject({ reason: "busy" })
     expect(call.status).toBe("live")
@@ -500,7 +502,6 @@ describe("who may call", () => {
     cleanups.push(() => phone.close())
     const sent = network.sent
     network.inject(invite, stranger)
-    await pause(10)
     return { phone, answered: network.sent > sent }
   }
 

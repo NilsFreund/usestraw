@@ -37,7 +37,11 @@ function level(frame: Int16Array): number {
 }
 
 function join(frames: Int16Array[]): Int16Array {
-  const joined = new Int16Array(frames.length * 160)
-  for (const [index, frame] of frames.entries()) joined.set(frame, index * 160)
+  const joined = new Int16Array(frames.reduce((total, frame) => total + frame.length, 0))
+  let offset = 0
+  for (const frame of frames) {
+    joined.set(frame, offset)
+    offset += frame.length
+  }
   return joined
 }

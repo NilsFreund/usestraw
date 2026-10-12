@@ -5,14 +5,14 @@ import { createRandom } from "../../src/simulation/random"
 import { serverKey } from "../../src/transaction/keys"
 import { request } from "../transaction/support"
 
-const rejection = { status: 405, reason: "Method Not Allowed", headers: [] }
+const rejection = { status: 405, phrase: "Method Not Allowed", headers: [] }
 
 function acked(ack: SipRequest, tag: string | null | undefined): SipRequest {
   return { ...ack, to: { ...ack.to, params: new Map([["tag", tag ?? ""]]) } }
 }
 
 describe("createStateless (RFC 3261 §8.2.7)", () => {
-  it("builds the rejection with the given status, reason and headers", () => {
+  it("builds the rejection with the given status, phrase and headers", () => {
     const headers = [{ name: "Allow", value: "OPTIONS" }]
     const reply = createStateless(createRandom(1)).reply(request("INVITE"), {
       ...rejection,

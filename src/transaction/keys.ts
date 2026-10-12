@@ -1,6 +1,6 @@
-import { bareHost } from "../message/fields/host"
 import type { Via } from "../message/fields/via"
 import type { SipMessage, SipRequest, SipResponse } from "../message/types"
+import { bareHost } from "../support/ip"
 import { defaultPort } from "../transport/address"
 
 const MAGIC_COOKIE = "z9hG4bK"

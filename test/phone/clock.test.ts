@@ -13,24 +13,28 @@ describe("createClock", () => {
     expect(clock.now()).toBe(250)
   })
 
-  it("fires once at the deadline and drops the schedule it replaces", async () => {
+  it("fires once at the deadline and drops the schedule it replaces", () => {
+    vi.useFakeTimers()
     const clock = createClock()
     const fired: string[] = []
     clock.schedule(clock.now() + 5, () => fired.push("replaced"))
     clock.schedule(clock.now() + 20, () => fired.push("current"))
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    vi.advanceTimersByTime(19)
+    expect(fired).toStrictEqual([])
+    vi.advanceTimersByTime(41)
     expect(fired).toStrictEqual(["current"])
   })
 
-  it("fires at once for a deadline in the past and never after cancel or without deadline", async () => {
+  it("fires at once for a deadline in the past and never after cancel or without deadline", () => {
+    vi.useFakeTimers()
     const clock = createClock()
     const fired: string[] = []
     clock.schedule(-1000, () => fired.push("past"))
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    vi.advanceTimersByTime(0)
     clock.schedule(clock.now() + 5, () => fired.push("cancelled"))
     clock.cancel()
     clock.schedule(undefined, () => fired.push("none"))
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    vi.advanceTimersByTime(20)
     expect(fired).toStrictEqual(["past"])
   })
 

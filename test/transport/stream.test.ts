@@ -68,10 +68,8 @@ describe("createStreamFramer (RFC 3261 §18.3)", () => {
   it("waits for the rest of the head and the body", () => {
     const framer = createStreamFramer()
     expect(framer.push(bytes(sdp.slice(0, 40)))).toStrictEqual([])
-    expect(framer.buffered).toBe(40)
     expect(framer.push(bytes(sdp.slice(40, -3)))).toStrictEqual([])
     expect(messages(framer.push(bytes(sdp.slice(-3))))).toStrictEqual([sdp])
-    expect(framer.buffered).toBe(0)
   })
 
   it.each([

@@ -4,8 +4,6 @@ import { earliest } from "../../support/time"
 import { transactionTimeout } from "../../transaction/timers"
 import { createIncoming, type IncomingSetup } from "./incoming"
 import { createOutgoing, type OutgoingSetup } from "./outgoing"
-import { respond } from "./outputs"
-import { createReply } from "./replies"
 import type { CallContext, CallOutput, CallState } from "./types"
 
 export interface Calls {
@@ -14,7 +12,7 @@ export interface Calls {
   active(): number
   tracked(): number
   start(setup: OutgoingSetup, now: number): CallOutput[]
-  receive(setup: IncomingSetup, now: number): CallOutput[]
+  ring(setup: IncomingSetup, now: number): CallOutput[]
   accept(call: string, media: MediaAddress, now: number): CallOutput[]
   end(call: string, now: number, status?: number): CallOutput[]
   response(response: SipResponse, now: number): CallOutput[]
@@ -52,11 +50,9 @@ export function createCalls(context: CallContext): Calls {
     return track(id, call.start(), now)
   }
 
+  // The core only hands over requests that match a call
   function request(incoming: SipRequest, transaction: string, now: number): CallOutput[] {
-    if (calls.has(incoming.callId)) {
-      return on(incoming.callId, now, (call) => call.request(incoming, transaction, now))
-    }
-    return [respond(transaction, createReply(incoming, 481))]
+    return on(incoming.callId, now, (call) => call.request(incoming, transaction, now))
   }
 
   return {
@@ -69,7 +65,7 @@ export function createCalls(context: CallContext): Calls {
     active: () => [...calls.values()].filter((entry) => !entry.call.ended).length,
     tracked: () => calls.size,
     start: (setup, now) => add(setup.call, createOutgoing(setup, context), now),
-    receive: (setup, now) => add(setup.invite.callId, createIncoming(setup, context, now), now),
+    ring: (setup, now) => add(setup.invite.callId, createIncoming(setup, context, now), now),
     accept: (id, media, now) => on(id, now, (call) => call.accept(media, now)),
     end: (id, now, status) => on(id, now, (call) => call.end(now, status)),
     response: (response, now) => on(response.callId, now, (call) => call.response(response, now)),

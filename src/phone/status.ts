@@ -1,4 +1,5 @@
 import type { ConnectError } from "./connect-error"
+import type { Call, PhoneSnapshot } from "./types"
 
 /**
  * `"connecting"` until the first registration, `"online"` while registered, `"reconnecting"` while
@@ -56,4 +57,14 @@ export function createStatus(notify: () => void): Status {
       starting.reject(reason)
     },
   }
+}
+
+export function snapshotOf(state: Status, calls: readonly Call[]): PhoneSnapshot {
+  const { status, error, retryAt } = state
+  return Object.freeze({
+    status,
+    ...(error ? { error: Object.freeze({ reason: error.reason, message: error.message }) } : {}),
+    ...(retryAt === undefined ? {} : { retryAt }),
+    calls: Object.freeze(calls.map((call) => call.toJSON())),
+  })
 }

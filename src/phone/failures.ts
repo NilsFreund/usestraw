@@ -16,7 +16,7 @@ const UNTRUSTED = /SELF_SIGNED|UNABLE_TO_(?:GET|VERIFY)/
 export function toConnectError(
   failure: PhoneFailure,
   context: ErrorContext,
-  cause?: Error,
+  cause?: unknown,
 ): ConnectError {
   const status = "status" in failure ? failure.status : undefined
   return new ConnectError(explain(failure, context, cause), {
@@ -45,7 +45,7 @@ function reasonOf(failure: PhoneFailure): ConnectReason {
   }
 }
 
-function explain(failure: PhoneFailure, context: ErrorContext, cause?: Error): string {
+function explain(failure: PhoneFailure, context: ErrorContext, cause?: unknown): string {
   const { label: server, username, realm } = context
   switch (failure.reason) {
     case "timeout":
@@ -92,9 +92,9 @@ function list(names: readonly string[]): string {
   return [...names.slice(0, 3).map(show), ...(names.length > 3 ? ["…"] : [])].join(", ")
 }
 
-function detail(cause: Error | undefined): string {
-  if (!cause) return "the server closed the connection"
-  const code = String((cause as { code?: unknown }).code ?? "")
+function detail(cause: unknown): string {
+  if (!(cause instanceof Error)) return String(cause ?? "") || "the server closed the connection"
+  const code = "code" in cause ? String(cause.code) : ""
   const hint = UNTRUSTED.test(code) ? " (pass tls.ca if the server uses a private CA)" : ""
   return `${cause.message}${hint}`
 }

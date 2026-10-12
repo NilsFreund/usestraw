@@ -1,5 +1,4 @@
-import type { Core } from "../core/core"
-import type { CoreCommand, CoreEvent, CoreOutput, Random } from "../core/types"
+import type { Core, CoreCommand, CoreEvent, CoreOutput, Random } from "../core/types"
 import { createAgenda } from "../support/agenda"
 import { earliest } from "../support/time"
 import type { TransportAddress } from "../transport/address"

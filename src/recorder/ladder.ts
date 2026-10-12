@@ -7,7 +7,7 @@ import type { RecordedStep } from "./recorder"
 
 const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu
 const WIDTH = 160
-const firstLine = new TextDecoder()
+const decoder = new TextDecoder()
 
 /** Draws a recording as a ladder, one line per message or event, like `STRAW_DEBUG=1`. */
 export function ladder(recording: string): string {
@@ -78,7 +78,7 @@ function place(address: TransportAddress): string {
 }
 
 function summary(data: Uint8Array): string {
-  const text = firstLine.decode(data)
+  const text = decoder.decode(data)
   const end = text.indexOf("\r\n")
   return end === -1 ? text : text.slice(0, end)
 }

@@ -1,8 +1,9 @@
 import type { TransportAddress } from "../../src/core"
 import { openAudio } from "../../src/node/audio"
 import type { PhoneSettings } from "../../src/phone/options"
-import { type Phone, type PhoneHandle, startPhone } from "../../src/phone/phone"
+import { type PhoneHandle, startPhone } from "../../src/phone/phone"
 import type { Link, LinkHandlers, Platform } from "../../src/phone/platform"
+import type { Phone } from "../../src/phone/types"
 import { createRandom } from "../../src/simulation/random"
 import { type Registrar, type RegistrarOptions, registrar } from "../registrar"
 

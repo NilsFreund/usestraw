@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
-  bareHost,
   formatHost,
   isHost,
-  isIp,
   isPort,
   isSocketHost,
   sameHost,
 } from "../../../src/message/fields/host"
+import { bareHost, isIp } from "../../../src/support/ip"
 
 describe("isHost", () => {
   it.each(["192.0.2.1", "host.example.com", "[2001:db8::1]"])("accepts %s", (host) => {

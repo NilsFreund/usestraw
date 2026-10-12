@@ -66,8 +66,9 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
     const media = createMedia(local, identity.random)
     const offered = invite.body.length === 0
     const sdp = offered ? media.offer() : media.answer(invite.body)
-    if (!sdp)
+    if (!sdp) {
       return reject(488, { by: "local", reason: "incompatible", status: 488 }, [INCOMPATIBLE_MEDIA])
+    }
     // A move while it rang changed the Contact, so the answer takes the current one
     const { contact } = context
     const ok = createReply(invite, 200, { tag, contact, sdp, recordRoute: true })

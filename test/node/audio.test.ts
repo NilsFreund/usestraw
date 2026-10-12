@@ -76,12 +76,13 @@ describe("openAudio", () => {
     void writer.write(tone(8000))
     const reader = right.readable.getReader()
     const frames: Int16Array[] = []
-    while (frames.length < 25) {
+    const loud = () => frames.filter((frame) => loudness(frame) > 3000).length
+    while (loud() <= 10 && frames.length < 200) {
       const { value } = await reader.read()
       if (value) frames.push(value)
     }
     expect(frames.every((frame) => frame.length === 160)).toBe(true)
-    expect(frames.filter((frame) => loudness(frame) > 3000).length).toBeGreaterThan(10)
+    expect(loud()).toBeGreaterThan(10)
     reader.releaseLock()
     writer.releaseLock()
   })
@@ -161,10 +162,12 @@ describe("openAudio", () => {
     await pause(60)
     await writer.abort()
     const since = payloads.length
-    await pause(100)
-    const after = payloads.slice(since + 1)
-    expect(after.length).toBeGreaterThan(2)
-    expect(after.every((payload) => payload.every((byte) => byte === 0xff))).toBe(true)
+    const silent = (payload: Uint8Array) => payload.every((byte) => byte === 0xff)
+    // A busy event loop sends a few packets at once, so the last tone may still be on its way
+    await expect.poll(() => payloads.slice(since).filter(silent).length).toBeGreaterThan(3)
+    const quiet = payloads.findIndex((payload, index) => index >= since && silent(payload))
+    expect(quiet - since).toBeLessThan(5)
+    expect(payloads.slice(quiet).every(silent)).toBe(true)
     socket.close()
   })
 
@@ -219,6 +222,7 @@ describe("openAudio", () => {
     right.update(towards(left))
     await right.readable.cancel()
     await pause(100)
+    await expect(right.writable.getWriter().write(tone(160))).resolves.toBeUndefined()
   })
 
   it("ends its streams with the error when sending fails outright", async () => {

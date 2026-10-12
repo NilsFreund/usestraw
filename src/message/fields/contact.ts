@@ -2,6 +2,7 @@ import { atMost, MAX_CONTACTS } from "../limits"
 import { splitOutside } from "../syntax"
 import { formatNameAddr, type NameAddr, parseNameAddr } from "./name-addr"
 
+/** RFC 3261 §20.10: the Contact header's addresses, or `"*"` for all of them in a REGISTER. */
 export type Contact = readonly NameAddr[] | "*"
 
 export function parseContact(values: readonly string[]): Contact {
