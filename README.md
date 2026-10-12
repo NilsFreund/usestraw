@@ -8,6 +8,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/usestraw"><img src="https://img.shields.io/npm/v/usestraw" alt="npm"></a>
   <a href="https://github.com/NilsFreund/usestraw/actions/workflows/ci.yml"><img src="https://github.com/NilsFreund/usestraw/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/NilsFreund/usestraw/blob/main/package.json"><img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="zero dependencies"></a>
   <a href="https://github.com/NilsFreund/usestraw/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
