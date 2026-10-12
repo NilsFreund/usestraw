@@ -25,6 +25,7 @@ The pre-commit hook runs biome, the typecheck and all tests.
 - `src/recorder`, `src/simulation`: recorder, replay, ladder, and the deterministic network simulation.
 - `test` mirrors `src`. `test/scenarios` runs whole flows through the simulated network; `test/node/carrier.ts` is a local SIP carrier.
 - `examples`: runnable apps that import `usestraw`. They are typechecked.
+- `site`: usestraw.dev, static files in an nginx image that `site.yml` publishes to GHCR. The legal notice comes from `IMPRESSUM_*` and `PRIVACY_LOG_DAYS` at container start. Never part of the npm package.
 
 ## Rules
 

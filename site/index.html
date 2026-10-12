@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>usestraw: SIP without the hangover</title>
+    <meta name="description" content="A modern SIP stack for voice apps and AI agents. Make and take phone calls from Node, with the audio as Web Streams.">
+    <meta name="color-scheme" content="light dark">
+    <link rel="canonical" href="https://usestraw.dev/">
+    <link rel="icon" href="/favicon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="preload" href="/fonts/JetBrainsMono-Bold.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <meta property="og:title" content="usestraw: SIP without the hangover">
+    <meta property="og:description" content="A modern SIP stack for voice apps and AI agents.">
+    <meta property="og:image" content="https://raw.githubusercontent.com/NilsFreund/usestraw/main/.github/banner.jpg">
+    <meta property="og:url" content="https://usestraw.dev/">
+    <meta name="twitter:card" content="summary_large_image">
+    <script src="/copy.js" defer></script>
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/"><img src="/mascot.webp" alt="" width="36" height="36">usestraw</a>
+      <nav>
+        <a href="https://github.com/NilsFreund/usestraw/blob/main/GUIDE.md">Docs</a>
+        <a href="https://github.com/NilsFreund/usestraw">GitHub</a>
+        <a href="https://www.npmjs.com/package/usestraw">npm</a>
+        <a class="button" href="https://github.com/NilsFreund/usestraw#install">Get started <span aria-hidden="true">›</span></a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="pitch">
+          <p class="eyebrow">// a modern sip stack</p>
+          <h1>SIP without <span class="nowrap">the hangover.<span class="cursor" aria-hidden="true"></span></span></h1>
+          <p class="lead">A modern SIP stack for voice apps and AI agents.</p>
+          <div class="actions">
+            <div class="install">
+              <code>npm install usestraw</code>
+              <button type="button" data-copy="npm install usestraw" aria-label="Copy the install command">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+              </button>
+            </div>
+            <a class="docs" href="https://github.com/NilsFreund/usestraw/blob/main/GUIDE.md">Read the docs <span aria-hidden="true">→</span></a>
+          </div>
+        </div>
+        <div class="mascot">
+          <img src="/mascot.webp" alt="The usestraw mascot, a smiling glass with a straw" width="448" height="448">
+          <p class="motto" aria-hidden="true">good<br>calls<br>better<br>builders<br>–</p>
+        </div>
+      </section>
+
+      <section class="split">
+        <div class="window">
+          <div class="bar">
+            <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>~/voice-app</span>
+            <span class="shell">zsh</span>
+          </div>
+          <pre><code><span class="c"># answer the phone from Node</span>
+<span class="p">$</span> npm install usestraw
+<span class="p">$</span> STRAW_DEBUG=1 node agent.ts
+<span class="g">●</span> online for 600 s
+<span class="g">●</span> call incoming from sip:+442079460123@example.com
+<span class="g">●</span> call live PCMU to 198.51.100.7:18610<span class="block" aria-hidden="true"></span></code></pre>
+        </div>
+
+        <ul class="features">
+          <li>
+            <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+            <div><h2>Built for developers</h2><p>Calls are plain data. Audio is Web Streams.</p></div>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
+            <div><h2>Voice for the next generation</h2><p>Any TransformStream can answer, so your AI agent can too.</p></div>
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2"/></svg>
+            <div><h2>Open source</h2><p>MIT licensed, zero dependencies.</p></div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="split code">
+        <div class="window">
+          <div class="bar">
+            <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>agent.ts</span>
+          </div>
+          <pre><code><span class="k">import</span> { connect } <span class="k">from</span> <span class="s">"usestraw"</span>
+
+<span class="k">const</span> phone = <span class="k">await</span> connect(process.env.SIP_URL)
+
+<span class="k">for await</span> (<span class="k">const</span> call <span class="k">of</span> phone.incoming) {
+  <span class="k">void</span> call.accept(<span class="k">new</span> TransformStream()) <span class="c">// callers hear themselves</span>
+}</code></pre>
+        </div>
+        <div class="note">
+          <h2>The whole app</h2>
+          <p>Put your voice agent where the <code>TransformStream</code> is, and it answers the phone. Calling out works like <code>fetch</code>, and every call says why it ended.</p>
+          <p class="muted">0.1 runs in Node 22.12 and up and speaks G.711. No SRTP, DTMF, hold or transfer yet; the browser comes next. <a href="https://github.com/NilsFreund/usestraw/blob/main/GUIDE.md#limits">All limits</a></p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div><strong>usestraw</strong><span class="sep"></span>Open source SIP for what's next.</div>
+      <nav class="links">
+        <a href="https://github.com/NilsFreund/usestraw/blob/main/SECURITY.md">Security</a>
+        <a href="/impressum">Impressum &amp; Datenschutz</a>
+      </nav>
+      <p class="aside">// voice is infrastructure now.</p>
+    </footer>
+  </body>
+</html>

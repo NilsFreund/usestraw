@@ -6,3 +6,9 @@ updates:
       interval: monthly
     cooldown:
       default-days: 14
+  - package-ecosystem: docker
+    directory: /site
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14

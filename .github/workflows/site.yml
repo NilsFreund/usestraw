@@ -1,0 +1,64 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["site/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Builds usestraw.dev as an nginx image, checks it, and publishes it from main to GHCR
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/nilsfreund/usestraw-site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --tag site site
+      - name: Refuses to start without the legal notice
+        run: |
+          if docker run --rm site; then
+            echo "::error::The site started without IMPRESSUM_* and PRIVACY_LOG_DAYS"
+            exit 1
+          fi
+      - name: Serves the pages with the legal notice filled in
+        run: |
+          docker run -d --name site -p 8080:8080 \
+            -e IMPRESSUM_NAME="Ada Example" -e IMPRESSUM_STREET="Example Street 1" \
+            -e IMPRESSUM_CITY="12345 Example City" -e IMPRESSUM_EMAIL="ada@example.com" \
+            -e PRIVACY_LOG_DAYS=14 site
+          for _ in $(seq 1 30); do curl -fs localhost:8080/healthz > /dev/null && break; sleep 1; done
+          curl -fsS localhost:8080/ | grep -q "npm install usestraw"
+          curl -fsS localhost:8080/impressum | grep -q "Ada Example"
+          if curl -fsS localhost:8080/impressum | grep -q "{{"; then echo "::error::Placeholders left"; exit 1; fi
+          curl -fsSI localhost:8080/ | grep -qi "^content-security-policy: default-src 'none'"
+          for file in style.css copy.js mascot.webp favicon.png fonts/JetBrainsMono-Bold.woff2; do
+            curl -fsS -o /dev/null "localhost:8080/$file"
+          done
+      - name: Publish
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          stamp=$(date -u +%Y%m%d%H%M%S)
+          for tag in latest "sha-${GITHUB_SHA::7}" "$stamp"; do
+            docker tag site "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          docker logout ghcr.io

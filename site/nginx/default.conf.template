@@ -1,0 +1,36 @@
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+    absolute_redirect off;
+    charset utf-8;
+
+    add_header Content-Security-Policy "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    # The legal notice gets its details from the container's environment
+    sub_filter_once off;
+    sub_filter "{{name}}" "${IMPRESSUM_NAME}";
+    sub_filter "{{street}}" "${IMPRESSUM_STREET}";
+    sub_filter "{{city}}" "${IMPRESSUM_CITY}";
+    sub_filter "{{email}}" "${IMPRESSUM_EMAIL}";
+    sub_filter "{{log_days}}" "${PRIVACY_LOG_DAYS}";
+
+    location / {
+        try_files $uri $uri.html $uri/ =404;
+    }
+
+    location ~* \.(css|js|png|webp|woff2)$ {
+        expires 1h;
+    }
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+}
