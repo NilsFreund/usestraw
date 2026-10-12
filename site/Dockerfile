@@ -1,4 +1,4 @@
-FROM nginxinc/nginx-unprivileged:1.30.4-alpine@sha256:adf5042a17f4ecdd200c595fa9ffd1be37efb18f89a830bd1a00e4ab4d59d42c
+FROM nginxinc/nginx-unprivileged:1.31.5-alpine@sha256:19c132c9ab02d3b783f478743dafc7a7f42e27aa7d2bdcbec1bb1128ca8f2a07
 
 COPY --chmod=644 index.html impressum.html style.css copy.js mascot.webp favicon.png apple-touch-icon.png /usr/share/nginx/html/
 COPY fonts /usr/share/nginx/html/fonts
