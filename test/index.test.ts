@@ -8,6 +8,11 @@ describe("usestraw", () => {
     expect(Object.keys(straw).sort()).toEqual(["ConnectError", "connect"])
   })
 
+  it("has no runtime dependencies, as the README badge says", () => {
+    const runtime = ["dependencies", "peerDependencies", "optionalDependencies"]
+    expect(Object.keys(manifest).filter((key) => runtime.includes(key))).toEqual([])
+  })
+
   // webpack's electron-renderer target sets both node and browser, so no node key may come first
   it("sends browsers to the placeholder and keeps usestraw/node out of their reach", () => {
     expect(Object.keys(manifest.exports["."])).toStrictEqual(["types", "browser", "default"])
