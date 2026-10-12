@@ -39,3 +39,4 @@ The pre-commit hook runs biome, the typecheck and all tests.
 - The README stays a short pitch. Details go in `GUIDE.md`, options in the JSDoc, API pitfalls in `llms.txt`.
 - Never commit credentials, real hostnames or phone numbers. Tests use `example.com` and documentation addresses.
 - Commit messages: one Conventional Commits line.
+- Releases: set the version in `package.json` and `CHANGELOG.md` (section and links), push main, then push a `v<version>` tag. `release.yml` runs CI, publishes the tested package to npm and creates the GitHub release. Release candidates go to `latest` until the first stable version, to `next` after.

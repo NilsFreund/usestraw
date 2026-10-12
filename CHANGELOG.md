@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 
 ## [Unreleased]
 
+## [0.1.0-rc.0] - 2026-10-12
+
+The first release candidate: make and take phone calls from Node, with the audio as Web Streams.
+
 ### Added
 
 - `connect(url | options)`: registers over TLS or UDP and reconnects on its own. `status`, `error`, `retryAt`, `subscribe`.
@@ -24,4 +28,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 - `usestraw/core`: the sans-I/O SIP core, experimental until the browser softphone settles it.
 - `usestraw/node` for the Node build, and a browser placeholder whose `connect()` rejects with `NotSupportedError` until 0.2.
 
-[Unreleased]: https://github.com/NilsFreund/usestraw/commits/main
+[Unreleased]: https://github.com/NilsFreund/usestraw/compare/v0.1.0-rc.0...HEAD
+[0.1.0-rc.0]: https://github.com/NilsFreund/usestraw/releases/tag/v0.1.0-rc.0

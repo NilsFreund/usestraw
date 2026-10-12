@@ -1,6 +1,6 @@
 {
   "name": "usestraw",
-  "version": "0.0.0",
+  "version": "0.1.0-rc.0",
   "description": "SIP without the hangover: make and take phone calls from Node, with the audio as Web Streams. For voice apps and AI agents.",
   "keywords": [
     "sip",
