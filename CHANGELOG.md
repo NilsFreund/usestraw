@@ -14,9 +14,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 - G.711 μ-law and A-law over RTP, with an adaptive jitter buffer and RTP Bleed protection.
 - SDP offer/answer, re-INVITEs, forking, CANCEL, and digest auth with MD5, SHA-256 and SHA-512-256.
 - `STRAW_DEBUG=1` live ladder and replayable `phone.trace`.
-- Over UDP only the SIP server may start calls (`acceptFrom: "anyone"` for direct IP calls); when registered, digest answers only the registered realm, never with a weaker hash.
-- Calls without audio for 60 s are hung up as `"dropped"`; a refused re-registration ends calls with a proper BYE.
-- Reconnects after a dropped TLS connection, keeping registration and calls; CRLF keepalives over UDP and TLS, dead-connection detection, and 600 s registrations.
+- Over UDP only the SIP server may start calls (`acceptFrom: "anyone"` for direct IP calls), and strangers' packets stay out of the trace; when registered, digest answers only the registered realm, never with a weaker hash, and `realm` pins one.
+- Calls without audio for 60 s are hung up as `"dropped"`, also while Straw only sends; a refused re-registration ends calls with a proper BYE.
+- Reconnects after a dropped TLS connection, keeping registration and calls; CRLF keepalives over UDP and TLS, dead-connection detection for servers that answer them, and 600 s registrations.
 - Behind NAT over UDP, registers the public address the registrar saw (RFC 3581) and drops the private one.
 - Trunks without registration: `register: false` with a SIP ping every minute, a fixed `localPort`, and `acceptFrom` lists of IPs and CIDR ranges.
 - `usestraw/core`: the sans-I/O SIP core, experimental until the browser softphone settles it.

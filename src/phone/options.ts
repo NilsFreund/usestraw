@@ -19,6 +19,12 @@ export interface ConnectUrlOptions {
   readonly password?: string | undefined
   /** The auth user, if your provider's differs from your SIP user. */
   readonly authUser?: string | undefined
+  /**
+   * The one digest realm to answer, for registering and calling. Without it, calls answer the
+   * realms your registration answered, and any realm when it answered none, as with
+   * `register: false`.
+   */
+  readonly realm?: string | undefined
   readonly tls?: TlsOptions | undefined
   /** Aborts connecting. Once connected, aborting closes the phone. */
   readonly signal?: AbortSignal | undefined
@@ -95,6 +101,8 @@ export interface PhoneSettings {
 
 const SERVER = /^(udp|tls):\/\/(\[[^\]]*\]|[^:/[\]]+)(?::(\d{1,5}))?$/i
 const TRANSPORT = /;transport=([^;?]*)/i
+const SCHEME = /^(?:[a-z][\w+.-]*:\/\/|sips?:|tel:)/i
+const BRACKETED = /^\[[^\]]*\]/
 
 export function resolveOptions(
   target: string | ConnectOptions | undefined,
@@ -104,8 +112,8 @@ export function resolveOptions(
   if (!options) {
     throw new TypeError("Missing connection URL: pass tls://user:password@host[:port]")
   }
-  const { uri, password, signal, tls, trace = true, maxCalls, register = true, localPort } = options
-  const { acceptFrom = "server" } = options
+  const { uri, password, realm, signal, tls, trace = true, maxCalls, register = true } = options
+  const { localPort, acceptFrom = "server" } = options
   if (maxCalls !== undefined) checkMaxCalls(maxCalls)
   if (Array.isArray(acceptFrom)) parseAcceptFrom(acceptFrom)
   else if (acceptFrom !== "server" && acceptFrom !== "anyone") {
@@ -119,16 +127,17 @@ export function resolveOptions(
   if (localPort !== undefined && !isIntegerIn(localPort, 1, 65535)) {
     throw new RangeError(`localPort must be an integer from 1 to 65535, got ${show(localPort)}`)
   }
+  checkText("uri", uri)
+  if (options.server !== undefined) checkText("server", options.server)
   const invalidUri = new TypeError(`Invalid uri ${show(redact(uri))}: use sip:user@domain`)
   const parts = isUri(uri) ? splitSipUri(uri) : undefined
   if (!parts?.user) throw invalidUri
   if (parts.user.includes(":")) throw new TypeError("Pass the password as password, not in the uri")
   if (!parseServer(`udp://${parts.hostport}`)) throw invalidUri
   const server = parseServer(options.server ?? fallback(uri, parts.scheme, parts.hostport))
-  const given = show(redact(options.server ?? ""))
-  if (!server) {
-    throw new TypeError(`Invalid server ${given}: use udp://host[:port] or tls://host[:port]`)
-  }
+  const named = options.server ?? ""
+  const given = show(redact(named))
+  if (!server) throw new TypeError(`Invalid server ${given}: ${hint(named)}`)
   if (parts.scheme === "sips" && server.transport !== "TLS") {
     throw new TypeError(`A sips: uri needs a tls:// server, got ${given}`)
   }
@@ -138,8 +147,12 @@ export function resolveOptions(
   if (server.transport !== "UDP" && Array.isArray(acceptFrom)) {
     throw new TypeError("An acceptFrom list only works with a udp:// server")
   }
+  if (realm === "") throw new TypeError("realm must not be empty: leave it out instead")
   const username = options.authUser ?? parts.user
-  const credentials = password === undefined ? undefined : { username, password }
+  const credentials =
+    password === undefined
+      ? undefined
+      : { username, password, ...(realm === undefined ? {} : { realm }) }
   if (credentials) checkCredentials(credentials)
   return {
     aor: uri,
@@ -193,7 +206,28 @@ function parseServer(server: string): Server | undefined {
   return { transport, host: host.replace(/^\[(.*)\]$/, "$1"), port: number }
 }
 
+// What redact() cuts away, said in words
+function hint(server: string): string {
+  const port = SERVER.exec(server)?.[3]
+  if (port !== undefined && !isIntegerIn(Number(port), 1, 65535)) {
+    return "the port must be from 1 to 65535"
+  }
+  if (/^\w+:\/\/[^/]*\//.test(server)) return "leave out the path"
+  return "use udp://host[:port] or tls://host[:port]"
+}
+
+function checkText(name: string, value: unknown): asserts value is string {
+  if (typeof value === "string") return
+  const kind = typeof value === "object" && value !== null ? value.constructor?.name : show(value)
+  throw new TypeError(`${name} must be a string, got ${kind ?? "an object"}`)
+}
+
+// Errors repeat what was given, but nothing after a user: or host:, where a password may be
 function redact(value: string): string {
   const at = value.lastIndexOf("@")
-  return at === -1 ? value : `…${value.slice(at)}`
+  if (at !== -1) return `…${value.slice(at)}`
+  const scheme = SCHEME.exec(value)?.[0].length ?? 0
+  const host = BRACKETED.exec(value.slice(scheme))?.[0].length ?? 0
+  const colon = value.indexOf(":", scheme + host)
+  return colon === -1 ? value : `${value.slice(0, colon)}:…`
 }

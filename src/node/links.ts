@@ -115,7 +115,7 @@ export async function openTls(
   let failure: Error | undefined
   let keepalive: ReturnType<typeof setInterval> | undefined
   let silence: ReturnType<typeof setTimeout> | undefined
-  let answers = false
+  let pongs = 0
   socket.on("error", (error) => {
     failure = error
   })
@@ -124,11 +124,14 @@ export async function openTls(
     clearTimeout(silence)
     handlers?.close(failure)
   })
-  // RFC 5626 §4.4.1: a server that answered pings and then stays silent is gone
+  // RFC 5626 §4.4.1: a server that ponged twice without missing a window, then misses one, is gone
   const ping = () => {
     write(PING)
-    if (!answers || silence) return
-    silence = setTimeout(() => socket.destroy(new Error("The server stopped answering")), PONG_WAIT)
+    silence = setTimeout(() => {
+      if (pongs > 1) socket.destroy(new Error("The server stopped answering"))
+      silence = undefined
+      pongs = 0
+    }, PONG_WAIT)
     silence.unref()
   }
   const framer = createStreamFramer()
@@ -156,7 +159,7 @@ export async function openTls(
             socket.destroy(new Error(event.error))
             continue
           }
-          answers ||= event.type !== "message"
+          if (event.type === "pong" && silence) pongs++
           clearTimeout(silence)
           silence = undefined
           if (event.type === "message") next.receive(event.data, remote)

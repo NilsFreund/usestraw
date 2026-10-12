@@ -2,11 +2,12 @@ import { createSocket, Socket } from "node:dgram"
 import dns from "node:dns"
 import { isIP } from "node:net"
 import { networkInterfaces } from "node:os"
+import type { TLSSocket } from "node:tls"
 import { describe, expect, it, vi } from "vitest"
 import type { TransportAddress } from "../../src/core"
 import { openLink, openTls, openUdp } from "../../src/node/links"
 import type { LinkHandlers } from "../../src/phone/platform"
-import { certificate, localhost, silentServer, tlsRegistrar } from "./servers"
+import { certificate, localhost, silentServer, type TestServer, tlsRegistrar } from "./servers"
 
 function recorder() {
   const log: string[] = []
@@ -23,6 +24,48 @@ const udpHandles = () =>
 const ipv6 = Object.values(networkInterfaces())
   .flat()
   .some((entry) => entry?.internal && entry.family === "IPv6")
+
+// Waits on real I/O without moving fake timers, unlike vi.waitFor
+const until = async (check: () => boolean) => {
+  const started = performance.now()
+  while (!check()) {
+    if (performance.now() - started > 2000) throw new Error("Timed out")
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}
+
+async function pinging(server: TestServer) {
+  const link = await openTls(tls(server.port), { ca: certificate })
+  const { log, handlers } = recorder()
+  link.start(handlers)
+  await until(() => server.sockets.length === 1)
+  const socket = server.sockets[0] as TLSSocket
+  let since = 0
+  // Fires the next keepalive, 30 s after the last one, and waits until the server has it
+  const ping = async () => {
+    const sent = new Promise((resolve) => socket.once("data", resolve))
+    vi.advanceTimersByTime(30_000 - since)
+    since = 0
+    await sent
+  }
+  const wait = (ms: number) => {
+    vi.advanceTimersByTime(ms)
+    since += ms
+  }
+  const answer = async (pong: string, user: string) => {
+    socket.write(`${pong}OPTIONS sip:${user}@b SIP/2.0\r\nContent-Length: 0\r\n\r\n`)
+    await until(() => log.at(-1) === `receive OPTIONS sip:${user}@b SIP/2.0`)
+  }
+  // The server pings us, and we answer with a pong
+  const pinged = async () => {
+    const pong = new Promise<string>((resolve) =>
+      socket.once("data", (chunk: Buffer) => resolve(chunk.toString())),
+    )
+    socket.write("\r\n\r\n")
+    expect(await pong).toBe("\r\n")
+  }
+  return { log, ping, wait, answer, pinged }
+}
 
 describe("openUdp", () => {
   it("survives send errors and failed lookups and keeps sending", async () => {
@@ -235,35 +278,63 @@ describe("openTls", () => {
     }
   })
 
-  it("keeps a connection whose server answers pings, and closes it once it stops", async () => {
+  it("watches a server once it answered two pings in a row, and closes it when it stops", async () => {
     const server = await tlsRegistrar()
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] })
     try {
-      const link = await openTls(tls(server.port), { ca: certificate })
-      const { log, handlers } = recorder()
-      link.start(handlers)
-      await vi.waitFor(() => expect(server.sockets).toHaveLength(1))
-      const [socket] = server.sockets
-      const ping = async () => {
-        const pinged = new Promise((resolve) => socket?.once("data", resolve))
-        vi.advanceTimersByTime(30_000)
-        await pinged
+      const { log, ping, wait, answer } = await pinging(server)
+      await ping()
+      await answer("\r\n", "first")
+      await ping()
+      await answer("", "busy")
+      await ping()
+      await answer("\r\n", "second")
+      await ping()
+      wait(9_999)
+      await answer("", "late")
+      await ping()
+      wait(10_000)
+      await until(() => log.at(-1) === "close The server stopped answering")
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+    }
+  })
+
+  it("never watches a server that only pings itself, even right after our pings", async () => {
+    const server = await tlsRegistrar()
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] })
+    try {
+      const { ping, wait, answer, pinged } = await pinging(server)
+      for (let round = 0; round < 3; round++) {
+        await ping()
+        await pinged()
       }
-      const answer = async (user: string) => {
-        socket?.write(`\r\nOPTIONS sip:${user}@b SIP/2.0\r\nContent-Length: 0\r\n\r\n`)
-        await vi.waitFor(() => expect(log.at(-1)).toBe(`receive OPTIONS sip:${user}@b SIP/2.0`))
-      }
       await ping()
-      await answer("first")
+      wait(10_000)
+      await answer("", "alive")
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+    }
+  })
+
+  it("forgets pongs nobody asked for and starts counting over after a missed one", async () => {
+    const server = await tlsRegistrar()
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] })
+    try {
+      const { ping, wait, answer } = await pinging(server)
+      await answer("\r\n", "unasked")
       await ping()
-      await answer("second")
-      vi.advanceTimersByTime(10_000)
-      await answer("third")
+      await answer("\r\n", "first")
       await ping()
-      vi.advanceTimersByTime(9_999)
-      expect(log).toHaveLength(3)
-      vi.advanceTimersByTime(1)
-      await vi.waitFor(() => expect(log.at(-1)).toBe("close The server stopped answering"))
+      wait(10_000)
+      await answer("\r\n", "late")
+      await ping()
+      await answer("\r\n", "second")
+      await ping()
+      wait(10_000)
+      await answer("", "alive")
     } finally {
       vi.useRealTimers()
       await server.close()

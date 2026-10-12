@@ -386,9 +386,24 @@ describe("media engine: silence", () => {
     expect(silent(held.handle({ type: "timeout" }, 600_000))).toHaveLength(0)
   })
 
-  it("waits nobody out on hold, and starts over when the media changes", () => {
-    const held = live({ direction: "sendonly" })
-    hear(held, remote, [1], 1000)
+  it("hangs up a far end that only listens, since nothing shows that it is still there", () => {
+    const listening = live({ direction: "sendonly" })
+    hear(listening, remote, [1], 1000)
+    expect(silent(listening.handle({ type: "timeout" }, 60_999))).toHaveLength(0)
+    expect(silent(listening.handle({ type: "timeout" }, 61_000))).toHaveLength(1)
+  })
+
+  it.each([
+    ["sendrecv", "recvonly"],
+    ["sendonly", "inactive"],
+  ] as const)("stops waiting when a %s call goes %s on hold", (from, to) => {
+    const engine = live({ direction: from })
+    engine.handle({ type: "media", media: { ...media, direction: to } }, 30_000)
+    expect(silent(engine.handle({ type: "timeout" }, 600_000))).toHaveLength(0)
+  })
+
+  it("starts over when the media changes", () => {
+    const held = live({ direction: "recvonly" })
     expect(silent(held.handle({ type: "timeout" }, 600_000))).toHaveLength(0)
     held.handle({ type: "media", media }, 600_000)
     expect(silent(held.handle({ type: "timeout" }, 659_999))).toHaveLength(0)

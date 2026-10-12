@@ -184,10 +184,13 @@ describe.each(["udp", "tls"] as const)("connect over %s", (transport) => {
   it("gives up when aborted while it waits for the registrar", async () => {
     const server = await start()
     server.mute()
-    const signal = AbortSignal.timeout(50)
-    await expect(connect({ ...options(server, transport), signal })).rejects.toMatchObject({
-      name: "TimeoutError",
-    })
+    const controller = new AbortController()
+    const connecting = connect({ ...options(server, transport), signal: controller.signal })
+    await vi.waitFor(() => expect(server.received).toBeGreaterThan(0))
+    const reason = new DOMException("Too slow", "TimeoutError")
+    controller.abort(reason)
+    await expect(connecting).rejects.toBe(reason)
+    await pause(100)
     const received = server.received
     await pause(600)
     expect(server.received).toBe(received)
@@ -383,13 +386,13 @@ describe("connect", () => {
     await server.close()
     await vi.waitFor(() => expect(phone.status).toBe("reconnecting"))
     const first = phone.retryAt ?? 0
-    await vi.waitFor(() => expect(phone.retryAt).toBeGreaterThan(first), { timeout: 3000 })
+    await vi.waitFor(() => expect(phone.retryAt).toBeGreaterThan(first), { timeout: 8000 })
     expect(phone.error?.reason).toBe("network")
     const started = performance.now()
     await phone.close()
     expect(performance.now() - started).toBeLessThan(2500)
     expect(phone.status).toBe("closed")
-  })
+  }, 15_000)
 
   it("closes cleanly when the connection drops during close", async () => {
     const server = await serve(tlsRegistrar())

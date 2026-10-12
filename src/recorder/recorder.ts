@@ -1,7 +1,9 @@
 import { version } from "../../package.json"
+import { parseAcceptFrom } from "../core/checks"
 import { type Core, type CoreOptions, createCore } from "../core/core"
 import type { CoreInput, CoreOutput, Random } from "../core/types"
 import { show } from "../message/syntax"
+import { inRange } from "../sdp/address"
 import { isIntegerIn } from "../support/integer"
 import { resolveTimers } from "../transaction/timers"
 import { decode, encode, maskSecrets } from "./codec"
@@ -50,6 +52,8 @@ export function createRecordedCore(
     return value
   }
   const core = createCore({ ...options, random })
+  const accepted =
+    options.acceptFrom === undefined ? undefined : parseAcceptFrom(options.acceptFrom)
   const header = decode(
     encode({
       straw: "recording",
@@ -90,11 +94,27 @@ export function createRecordedCore(
       keep(encode({ now: step.now, oversized: bytes }))
       truncated = true
     } else keep(line)
-    if (!onStep) return
+    tell(decode(line) as RecordedStep)
+  }
+
+  function tell(step: RecordedStep): void {
     // A debug printer that throws must not take the call down with it
     try {
-      onStep(decode(line) as RecordedStep)
+      onStep?.(step)
     } catch {}
+  }
+
+  // A stranger's packet that changed nothing stays out of the trace, so a scan cannot flush it
+  function ignored({ input, outputs = [] }: RecordedStep): boolean {
+    const [output, ...rest] = outputs
+    return (
+      input.type === "receive" &&
+      accepted !== undefined &&
+      !accepted.some((range) => inRange(input.from.host, range)) &&
+      rest.length === 0 &&
+      output?.type === "event" &&
+      (output.event.type === "invalid" || output.event.type === "stray")
+    )
   }
 
   function handle(input: CoreInput, now: number): CoreOutput[] {
@@ -106,7 +126,9 @@ export function createRecordedCore(
       record({ now, input, random: take(), next: core.nextDeadline() ?? null, thrown })
       throw error
     }
-    record({ now, input, random: take(), next: core.nextDeadline() ?? null, outputs })
+    const step = { now, input, random: take(), next: core.nextDeadline() ?? null, outputs }
+    if (!ignored(step)) record(step)
+    else if (onStep) tell(decode(encode(step)) as RecordedStep)
     return outputs
   }
 

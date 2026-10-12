@@ -143,30 +143,85 @@ describe("resolveOptions", () => {
     )
   })
 
+  const anyServer = "use udp://host[:port] or tls://host[:port]"
+  const range = "the port must be from 1 to 65535"
   it.each([
-    "sip.example.com",
-    "sip:sip.example.com",
-    "tcp://sip.example.com",
-    "tls://",
-    "tls://sip.example.com:0",
-    "tls://sip.example.com:65536",
-    "tls://sip.example.com:5061/",
-    "tls://sip.example.com:x",
-    "tls://[::1",
-    "tls://exa_mple.com",
-    " tls://sip.example.com",
-  ])("refuses the server %j", (server) => {
+    ["sip.example.com", "sip.example.com", anyServer],
+    ["sip:sip.example.com", "sip:sip.example.com", anyServer],
+    ["tcp://sip.example.com", "tcp://sip.example.com", anyServer],
+    ["tls://", "tls://", anyServer],
+    ["tls://sip.example.com:0", "tls://sip.example.com:…", range],
+    ["tls://sip.example.com:65536", "tls://sip.example.com:…", range],
+    ["tls://sip.example.com:5061/", "tls://sip.example.com:…", "leave out the path"],
+    ["tls://sip.example.com/", "tls://sip.example.com/", "leave out the path"],
+    ["tls://sip.example.com:x", "tls://sip.example.com:…", anyServer],
+    ["tls://exa_mple.com:5061", "tls://exa_mple.com:…", anyServer],
+    ["tls://[::1", "tls://[:…", anyServer],
+    ["tls://[::1]:65536", "tls://[::1]:…", range],
+    [" tls://sip.example.com", " tls:…", anyServer],
+  ])("refuses the server %j, cut after its first colon", (server, shown, hint) => {
     expect(() => resolve("sip:alice@example.com", server)).toThrow(
-      new TypeError(
-        `Invalid server ${JSON.stringify(server)}: use udp://host[:port] or tls://host[:port]`,
-      ),
+      new TypeError(`Invalid server ${JSON.stringify(shown)}: ${hint}`),
     )
   })
+
+  it.each([
+    [`sip:agent:${SECRET}`, undefined, 'Invalid uri "sip:agent:…"'],
+    [`agent:${SECRET}`, undefined, 'Invalid uri "agent:…"'],
+    ["sip:agent@example.com", `tls://agent:${SECRET}`, 'Invalid server "tls://agent:…"'],
+    [
+      "sip:agent@example.com",
+      `udp://[2001:db8::1]:${SECRET}`,
+      'Invalid server "udp://[2001:db8::1]:…"',
+    ],
+  ])("never repeats a password written where no host follows: %j %j", (uri, server, shown) => {
+    expect(() => resolve(uri, server)).toThrow(shown)
+    expect(() => resolve(uri, server)).not.toThrow(SECRET)
+  })
+
+  it.each([
+    [{ uri: 42 }, "uri must be a string, got 42"],
+    [{ uri: undefined }, "uri must be a string, got undefined"],
+    [{ uri: null }, "uri must be a string, got null"],
+    [{ uri: new URL(`sip:alice:${SECRET}@example.com`) }, "uri must be a string, got URL"],
+    [{ uri: Object.create(null) }, "uri must be a string, got an object"],
+    [
+      { uri: "sip:alice@example.com", server: new String(`tls://alice:${SECRET}@example.com`) },
+      "server must be a string, got String",
+    ],
+  ])(
+    "names the type, never the value, of a uri or server that is not text: %j",
+    (options, message) => {
+      expect(() => resolveOptions(options as never)).toThrow(new TypeError(message))
+    },
+  )
 
   it("never repeats credentials pasted into the server", () => {
     expect(() => resolve("sip:agent@example.com", `tls://agent:${SECRET}@example.com`)).toThrow(
       new TypeError('Invalid server "…@example.com": use udp://host[:port] or tls://host[:port]'),
     )
+  })
+
+  it("answers only the realm it is given, and checks it like the password", () => {
+    const pinned = resolveOptions({
+      uri: "sip:alice@example.com",
+      password: "pw",
+      realm: "example.com",
+    })
+    expect(pinned.credentials).toStrictEqual({
+      username: "alice",
+      password: "pw",
+      realm: "example.com",
+    })
+    expect(
+      resolveOptions("tls://alice:pw@example.com", { realm: "example.com" }).credentials,
+    ).toStrictEqual({ username: "alice", password: "pw", realm: "example.com" })
+    expect(() =>
+      resolveOptions({ uri: "sip:alice@example.com", password: "pw", realm: "a\r\nb" }),
+    ).toThrow(TypeError)
+    expect(() =>
+      resolveOptions({ uri: "sip:alice@example.com", password: "pw", realm: "" }),
+    ).toThrow(new TypeError("realm must not be empty: leave it out instead"))
   })
 
   it("refuses a password with a line break before connecting", () => {

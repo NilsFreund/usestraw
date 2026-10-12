@@ -1,7 +1,7 @@
 /**
  * - `"wrong-password"`: credentials refused.
  * - `"password-missing"`: the server wants a password.
- * - `"unsupported-auth"`: the server wants auth that Straw doesn't speak.
+ * - `"unsupported-auth"`: the server wants auth that Straw doesn't speak, or a realm other than `realm`.
  * - `"refused"`: registration denied for good, e.g. 403.
  * - `"unavailable"`: the server can't register you right now, e.g. 503.
  * - `"no-answer"`: no response. Check host, port and transport.

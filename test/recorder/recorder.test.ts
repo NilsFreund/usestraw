@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { createRecordedCore, defaultTimers, type RecordedStep, replay } from "../../src/core"
+import { version } from "../../package.json"
+import {
+  createRecordedCore,
+  createResponse,
+  defaultTimers,
+  type RecordedStep,
+  replay,
+  serializeMessage,
+} from "../../src/core"
 import { decode } from "../../src/recorder/codec"
 import { createRandom } from "../../src/simulation/random"
-import { alice, bob, bytes } from "../helpers"
+import { alice, bob, bytes, parsedRequest, register } from "../helpers"
 
 const options = (seed = 1) => ({
   address: alice,
@@ -33,7 +41,7 @@ describe("createRecordedCore", () => {
     expect(header).toMatchObject({
       straw: "recording",
       version: 1,
-      release: "0.0.0",
+      release: version,
       truncated: false,
       next: null,
       options: {
@@ -133,6 +141,45 @@ describe("createRecordedCore", () => {
     expect(input?.type === "receive" && new TextDecoder().decode(input.data)).toContain(
       'rspauth="masked"',
     )
+  })
+
+  it("leaves a stranger's ignored packets out of the trace, but still shows them to the listener", () => {
+    const seen: RecordedStep[] = []
+    const core = createRecordedCore(
+      { ...options(), acceptFrom: [bob.host] },
+      { onStep: (step) => seen.push(step) },
+    )
+    const stranger = { ...bob, host: "203.0.113.9" }
+    const hash = 'response="6629fae49393a05397450978507c4ef1"'
+    const knock = register.replace(
+      "Content-Length",
+      `Authorization: Digest ${hash}\r\nContent-Length`,
+    )
+    core.handle({ type: "receive", data: bytes("junk"), from: stranger }, 0)
+    core.handle({ type: "receive", data: bytes(knock), from: stranger }, 1)
+    const [sent] = core.handle(optionsCommand, 2)
+    const request = parsedRequest(sent?.type === "send" ? sent.data : "")
+    const ok = serializeMessage(createResponse(request, 200, "OK", { toTag: "b1" }))
+    core.handle({ type: "receive", data: ok, from: stranger }, 3)
+    const stray = new TextDecoder().decode(ok).replace("branch=", "branch=z9hG4bKstray")
+    core.handle({ type: "receive", data: bytes(stray), from: stranger }, 4)
+    core.handle({ type: "receive", data: bytes("junk"), from: bob }, 5)
+    const [header, ...steps] = lines(core.recording())
+    expect(header).toMatchObject({ options: { acceptFrom: [bob.host] } })
+    expect(steps.map((step) => step["now"])).toStrictEqual([2, 3, 5])
+    expect(seen.map((step) => step.now)).toStrictEqual([0, 1, 2, 3, 4, 5])
+    expect(seen[4]?.outputs).toMatchObject([{ event: { type: "stray" } }])
+    const knocked = seen[1]?.input
+    expect(knocked?.type === "receive" && new TextDecoder().decode(knocked.data)).toContain(
+      'response="masked"',
+    )
+    expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 3 })
+    const quiet = createRecordedCore({ ...options(), acceptFrom: [bob.host] })
+    quiet.handle({ type: "receive", data: bytes("junk"), from: stranger }, 0)
+    expect(lines(quiet.recording())).toHaveLength(1)
+    const open = createRecordedCore(options())
+    open.handle({ type: "receive", data: bytes("junk"), from: stranger }, 0)
+    expect(lines(open.recording())).toHaveLength(2)
   })
 
   it("refuses a limit it cannot honour", () => {

@@ -87,8 +87,9 @@ export function createMediaEngine(random: Random): MediaEngine {
       learnUntil = undefined
     }
     media = next
-    heardAt = next.direction === "sendrecv" ? now : undefined
     const sending = next.direction === "sendrecv" || next.direction === "sendonly"
+    // Audio stops at a minute without an answer, so an SDP cannot aim it at a bystander for long
+    heardAt = sending ? now : undefined
     if (!sending) sendAt = undefined
     else sendAt ??= now
     playAt ??= now

@@ -128,7 +128,11 @@ export async function startPhone(
     first.close()
     throw signal.reason
   }
-  const context = { label: settings.label, username: settings.username }
+  const context = {
+    label: settings.label,
+    username: settings.username,
+    realm: settings.credentials?.realm,
+  }
   const clock = createClock()
   const listeners = createListeners()
   const state = createStatus(listeners.notify)

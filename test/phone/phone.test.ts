@@ -161,6 +161,15 @@ describe("phone status", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it("registers only in the realm it is given", async () => {
+    const network = memoryNetwork({ realm: "corp.example" })
+    const settings = resolveOptions({ ...account, realm: "example.com" })
+    await expect(startOn(network, settings)).rejects.toMatchObject({
+      reason: "unsupported-auth",
+      message: expect.stringContaining('in realm "corp.example", not "example.com"'),
+    })
+  })
+
   it("ends ringing calls as dropped before it closes for a refused refresh", async () => {
     const network = memoryNetwork()
     const phone = await options(network)

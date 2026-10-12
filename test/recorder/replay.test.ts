@@ -82,7 +82,7 @@ describe("replay", () => {
     expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 5 })
   })
 
-  it("replays a phone that turns calls away with its own maxCalls and acceptFrom", () => {
+  it("replays a phone that turns calls away with its own maxCalls, past the strangers it ignored", () => {
     const core = createRecordedCore({
       address: alice,
       aor: "sip:alice@example.com",
@@ -112,6 +112,7 @@ describe("replay", () => {
     )
     const probe = bytes(invite.replace("branch=z9hG4bK1", "branch=z9hG4bK2"))
     core.handle({ type: "receive", data: probe, from: { ...bob, host: "203.0.113.9" } }, 1)
+    core.handle({ type: "timeout" }, 2)
     expect(replay(core.recording())).toStrictEqual({ ok: true, steps: 2 })
   })
 

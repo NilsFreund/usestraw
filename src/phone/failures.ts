@@ -8,6 +8,7 @@ export type PhoneFailure = RegistrationFailure | { readonly reason: "network" }
 export interface ErrorContext {
   readonly label: string
   readonly username: string
+  readonly realm?: string | undefined
 }
 
 const UNTRUSTED = /SELF_SIGNED|UNABLE_TO_(?:GET|VERIFY)/
@@ -45,7 +46,7 @@ function reasonOf(failure: PhoneFailure): ConnectReason {
 }
 
 function explain(failure: PhoneFailure, context: ErrorContext, cause?: Error): string {
-  const { label: server, username } = context
+  const { label: server, username, realm } = context
   switch (failure.reason) {
     case "timeout":
       return `No answer from ${server}: check the host, port and transport`
@@ -55,8 +56,13 @@ function explain(failure: PhoneFailure, context: ErrorContext, cause?: Error): s
       return `${server} accepted the registration but did not keep it: a NAT or SIP ALG may have rewritten our address`
     case "no-credentials":
       return `${server} asks for a password, but none was given`
-    case "unsupported-challenge":
+    case "unsupported-challenge": {
+      const named = realmsOf(failure.offered)
+      if (realm !== undefined && named.length > 0 && !named.includes(realm)) {
+        return `${server} asks for authentication in realm ${list(named)}, not ${show(realm)}: check realm`
+      }
       return `${server} asks for authentication Straw does not support: ${describe(failure.offered)}`
+    }
     case "unauthorized":
       return `${server} refused the password for ${show(username)} with ${failure.status}: check the password, or pass authUser if your provider uses a separate auth user`
     case "network":
@@ -66,12 +72,19 @@ function explain(failure: PhoneFailure, context: ErrorContext, cause?: Error): s
 
 function describe(offered: readonly AuthChallenge[]): string {
   if (offered.length === 0) return "no challenge"
-  const shown = offered
-    .slice(0, 3)
-    .map(({ scheme, algorithm }) =>
-      show(algorithm === undefined ? scheme : `${scheme} ${algorithm}`),
-    )
-  return [...shown, ...(offered.length > 3 ? ["…"] : [])].join(", ")
+  return list(
+    offered.map(({ scheme, algorithm }) =>
+      algorithm === undefined ? scheme : `${scheme} ${algorithm}`,
+    ),
+  )
+}
+
+function realmsOf(offered: readonly AuthChallenge[]): string[] {
+  return [...new Set(offered.flatMap((offer) => (offer.realm === undefined ? [] : [offer.realm])))]
+}
+
+function list(names: readonly string[]): string {
+  return [...names.slice(0, 3).map(show), ...(names.length > 3 ? ["…"] : [])].join(", ")
 }
 
 function detail(cause: Error | undefined): string {

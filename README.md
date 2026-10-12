@@ -159,7 +159,7 @@ const phone = await connect({
 
 Give the trunk this machine's public IP and `localPort`, and list every signaling range your provider publishes in `acceptFrom`: calls often come from more addresses than the server's name resolves to. Open `localPort` and UDP 16384–24575 (audio) to the provider's signaling and media ranges, and forward them behind NAT. Straw learns its public address from the pings and puts it in Contact; audio needs symmetric RTP, see Limits.
 
-A `password` answers digest challenges on outgoing calls. Over UDP a listed address can be forged, so don't treat caller ID as proof.
+A `password` answers digest challenges on outgoing calls. Without registration Straw cannot learn your provider's realm, so pass it as `realm`, and challenges in other realms go unanswered. Over UDP a listed address can be forged, so don't treat caller ID as proof.
 
 ## Errors
 
@@ -169,7 +169,7 @@ A `password` answers digest challenges on outgoing calls. Over UDP a listed addr
 | --- | --- |
 | `"wrong-password"` | Credentials refused. Try `authUser` if your provider has a separate auth user. |
 | `"password-missing"` | The server wants a password. |
-| `"unsupported-auth"` | The server wants auth that Straw doesn't speak. |
+| `"unsupported-auth"` | The server wants auth that Straw doesn't speak, or a realm other than `realm`. |
 | `"refused"` | Registration denied for good, e.g. 403. |
 | `"unavailable"` | The server can't register you right now, e.g. 503. |
 | `"no-answer"` | No response. Check host, port and transport, and that a trunk allows your IP. |
@@ -217,7 +217,7 @@ Replays need the usestraw version that made the trace, and a trace that grew pas
 
 | | |
 | --- | --- |
-| `connect(url, options?)` | Registers (or pings, with `register: false`) and resolves once online. Options: `password`, `authUser`, `tls.ca`, `signal`, `trace`, `maxCalls`, `acceptFrom`, `register`, `localPort`. |
+| `connect(url, options?)` | Registers (or pings, with `register: false`) and resolves once online. Options: `password`, `authUser`, `realm`, `tls.ca`, `signal`, `trace`, `maxCalls`, `acceptFrom`, `register`, `localPort`. |
 | `phone.status` | `"connecting"`, `"online"`, `"reconnecting"` or `"closed"`, plus `error` and `retryAt`. |
 | `phone.incoming` | Ringing calls, for `for await`. |
 | `phone.call(to, options?)` | Calls out. Options: `agent`, `timeout`, `signal`. |
@@ -255,8 +255,8 @@ Digest auth needs MD5 and SHA-256 inside that synchronous core, and WebCrypto is
 
 - `tls://` verifies certificates. Use `tls.ca` for a private CA.
 - Over UDP only your SIP server may start calls; strangers who find the port get no answer at all. `acceptFrom` adds IPs and CIDR ranges, or allows `"anyone"` for direct IP calls.
-- Straw answers authentication only for the realms your server used when registering, never with a weaker hash, and never inside a call, where the far end could be asking. With `register: false` it has nothing to learn from and answers any challenge to an outgoing call. Digest also lets a callee behind a provider that merely forwards challenges ask for a hash, so use a long random SIP password.
-- An incoming call starts sending audio only once the caller confirmed it, so a forged call cannot aim your audio at someone else.
+- Straw answers authentication only for the realms your server used when registering, never with a weaker hash, and never inside a call, where the far end could be asking. With `register: false`, or a server that registered you without asking, it has nothing to learn from and answers any realm on an outgoing call; `realm` limits it to your provider's. Digest also lets a callee behind a provider that merely forwards challenges ask for a hash, so use a long random SIP password.
+- An incoming call starts sending audio only once the caller confirmed it, so a forged call cannot aim your audio at someone else. The far end of a real call decides where your audio goes, so Straw hangs up once nothing has come back for a minute after the last media change, also when the far end only listens.
 - Audio comes from the signalled address. Only when that is a private address behind NAT does Straw learn the real one, from the first packets within 2 s, like most SIP stacks; a public address is never replaced by another host (RTP Bleed protection).
 - The parser has hard size limits and is fuzzed.
 - Passwords never show up in errors, logs or traces.
