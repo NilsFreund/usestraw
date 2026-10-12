@@ -1,5 +1,3 @@
-import { show } from "../message/syntax"
-
 export interface UrlFields {
   readonly uri: string
   readonly server: string
@@ -11,9 +9,9 @@ const SIP_USER = /[^\w\-.!~*'()&=+$,;?/]/gu
 
 export function parseConnectionUrl(url: string): UrlFields {
   const parsed = URL.canParse(url) ? new URL(url) : undefined
-  const where = parsed?.hostname ? ` for ${show(parsed.hostname)}` : ""
+  // The host is left out: with a # ? or / in the password, what URL calls the host is part of it
   const invalid = new TypeError(
-    `Invalid connection URL${where}: use tls://user:password@host[:port]`,
+    "Invalid connection URL: use tls://user:password@host[:port], with % # ? / in the password percent-encoded",
   )
   const scheme = parsed?.protocol.slice(0, -1)
   if (!parsed || (scheme !== "udp" && scheme !== "tls")) throw invalid

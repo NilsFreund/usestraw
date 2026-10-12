@@ -149,6 +149,22 @@ describe("ConnectError", () => {
     )
   })
 
+  it("suggests the password when a server refuses one with 403", () => {
+    const forbidden = { reason: "rejected", status: 403, phrase: "Forbidden" } as const
+    const refused = 'tls://sip.example.com:5061 rejected the registration with 403 "Forbidden"'
+    expect(toConnectError({ ...forbidden, withCredentials: true }, context).message).toBe(
+      `${refused}: check the password and authUser`,
+    )
+    expect(toConnectError(forbidden, context).message).toBe(refused)
+    const gone = {
+      reason: "rejected",
+      status: 404,
+      phrase: "Not Found",
+      withCredentials: true,
+    } as const
+    expect(toConnectError(gone, context).message).not.toContain("password")
+  })
+
   it("escapes the username", () => {
     const error = toConnectError(
       { reason: "unauthorized", status: 403 },

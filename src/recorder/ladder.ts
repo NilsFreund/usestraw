@@ -62,7 +62,8 @@ function call(event: CallEvent): string {
   if (event.state === "ringing") return `ringing ${event.status}${describeMedia(event.media)}`
   if (event.state === "live") return `live${describeMedia(event.media)}`
   const { by, reason, status } = event.ended
-  return `ended by ${by}: ${reason}${status === undefined ? "" : ` ${status}`}`
+  const who = by === "local" ? "us" : "them"
+  return `ended by ${who}: ${reason}${status === undefined ? "" : ` ${status}`}`
 }
 
 function describeMedia(media: CallMedia | undefined): string {

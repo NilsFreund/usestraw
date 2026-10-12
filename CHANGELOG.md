@@ -14,6 +14,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 - G.711 μ-law and A-law over RTP, with an adaptive jitter buffer and RTP Bleed protection.
 - SDP offer/answer, re-INVITEs, forking, CANCEL, and digest auth with MD5, SHA-256 and SHA-512-256. No RFC 4733 events are offered yet, so key presses reach the audio as tones at best.
 - `STRAW_DEBUG=1` live ladder and replayable `phone.trace`.
+- `phone.toJSON()` and `call.toJSON()`: frozen snapshots without the trace that stay the same object until something changes, for React's `useSyncExternalStore`, logs and IPC; `phone.calls` is frozen too.
 - Over UDP only the SIP server may start calls (`acceptFrom: "anyone"` for direct IP calls), others only reach a running call, and strangers' packets stay out of the trace; when registered, digest answers only the registered realm, never with a weaker hash, and `realm` pins one.
 - Calls without audio for 60 s are hung up as `"dropped"`, also while Straw only sends; a refused re-registration ends calls with a proper BYE.
 - Reconnects after a dropped TLS connection, keeping registration and calls; CRLF keepalives over UDP and TLS, dead-connection detection for servers that answer them, and 600 s registrations.

@@ -79,7 +79,8 @@ export async function openUdp(peer: Peer, port = 0): Promise<Link> {
     start: (next) => {
       handlers = next
       keepalive = setInterval(() => send(PING, remote), NAT_KEEPALIVE)
-      keepalive.unref()
+      // Timers are plain numbers in an Electron renderer or jsdom, without unref()
+      keepalive.unref?.()
     },
     send,
     close: () => {
@@ -132,7 +133,7 @@ export async function openTls(
       silence = undefined
       pongs = 0
     }, PONG_WAIT)
-    silence.unref()
+    silence.unref?.()
   }
   const framer = createStreamFramer()
   const remote: TransportAddress = {
@@ -152,7 +153,7 @@ export async function openTls(
     start: (next) => {
       handlers = next
       keepalive = setInterval(ping, KEEPALIVE)
-      keepalive.unref()
+      keepalive.unref?.()
       socket.on("data", (chunk: Buffer) => {
         for (const event of framer.push(new Uint8Array(chunk))) {
           if (event.type === "error") {

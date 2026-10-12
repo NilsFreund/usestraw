@@ -97,7 +97,9 @@ export function createRegistration(
       return send({ ...attempt, expires: minimum, raised: true })
     }
     if (status >= 300) {
-      return fail(attempt, { reason: "rejected", status, phrase: response.reason }, now, response)
+      const sent = authenticator.answered().length > 0 ? { withCredentials: true as const } : {}
+      const failure = { reason: "rejected", status, phrase: response.reason, ...sent } as const
+      return fail(attempt, failure, now, response)
     }
     failures = 0
     if (attempt.expires === 0) {

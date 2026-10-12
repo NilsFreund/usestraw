@@ -108,9 +108,12 @@ export function resolveOptions(
   target: string | ConnectOptions | undefined,
   extra: ConnectUrlOptions = {},
 ): PhoneSettings {
-  const options = typeof target === "string" ? fromUrl(target, extra) : target
+  const url = typeof target === "string" && target.trim() === "" ? undefined : target
+  const options = typeof url === "string" ? fromUrl(url, extra) : url
   if (!options) {
-    throw new TypeError("Missing connection URL: pass tls://user:password@host[:port]")
+    throw new TypeError(
+      "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port]",
+    )
   }
   const { uri, password, realm, signal, tls, trace = true, maxCalls, register = true } = options
   const { localPort, acceptFrom = "server" } = options

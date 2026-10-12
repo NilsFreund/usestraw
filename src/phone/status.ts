@@ -3,7 +3,8 @@ import type { ConnectError } from "./connect-error"
 /**
  * `"connecting"` until the first registration, `"online"` while registered, `"reconnecting"` while
  * retrying after a failure, `"closed"` once closed or failed for good. With `register: false`,
- * answers to a SIP ping every minute stand in for the registration.
+ * answers to a SIP ping every minute stand in for the registration. This list is complete: a
+ * phone that is offline but trying again is `"reconnecting"`.
  */
 export type PhoneStatus = "connecting" | "online" | "reconnecting" | "closed"
 

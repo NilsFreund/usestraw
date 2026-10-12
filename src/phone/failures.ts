@@ -50,8 +50,13 @@ function explain(failure: PhoneFailure, context: ErrorContext, cause?: Error): s
   switch (failure.reason) {
     case "timeout":
       return `No answer from ${server}: check the host, port and transport`
-    case "rejected":
-      return `${server} rejected the registration with ${failure.status} ${show(failure.phrase)}`
+    case "rejected": {
+      const rejected = `${server} rejected the registration with ${failure.status} ${show(failure.phrase)}`
+      // Some servers answer a wrong password with 403 instead of another challenge
+      return failure.status === 403 && failure.withCredentials
+        ? `${rejected}: check the password and authUser`
+        : rejected
+    }
     case "not-bound":
       return `${server} accepted the registration but did not keep it: a NAT or SIP ALG may have rewritten our address`
     case "no-credentials":

@@ -113,8 +113,8 @@ describe("formatStep", () => {
       "    1.234  ● call live",
       "    1.234  ● call live PCMA to 192.0.2.20:4000",
       "    1.234  ● call live PCMA to [2001:db8::5]:4000 recvonly",
-      "    1.234  ● call ended by remote: busy 486",
-      "    1.234  ● call ended by local: hangup",
+      "    1.234  ● call ended by them: busy 486",
+      "    1.234  ● call ended by us: hangup",
     ])
   })
 

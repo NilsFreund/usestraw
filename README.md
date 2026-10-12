@@ -170,7 +170,7 @@ A `password` answers digest challenges on outgoing calls. Without registration S
 | `"wrong-password"` | Credentials refused. Try `authUser` if your provider has a separate auth user. |
 | `"password-missing"` | The server wants a password. |
 | `"unsupported-auth"` | The server wants auth that Straw doesn't speak, or a realm other than `realm`. |
-| `"refused"` | Registration denied for good, e.g. 403. |
+| `"refused"` | Registration denied for good, e.g. 403. Some servers answer a wrong password with 403, so when one was sent the message suggests checking it. |
 | `"unavailable"` | The server can't register you right now, e.g. 503. |
 | `"no-answer"` | No response. Check host, port and transport, and that a trunk allows your IP. |
 | `"network"` | The connection failed, or the TLS certificate isn't trusted. |
@@ -198,7 +198,7 @@ $ STRAW_DEBUG=1 node examples/call.ts "+49 30 1234567"
     0.012  ● call live PCMU to 198.51.100.7:18610
     0.994  phone → 203.0.113.10:5060  BYE sip:bob@203.0.113.10:5060 SIP/2.0
     0.996  203.0.113.10:5060 → phone  SIP/2.0 200 OK
-    0.996  ● call ended by local: hangup
+    0.996  ● call ended by us: hangup
 ```
 
 `phone.trace` holds the latest 512 KB of SIP traffic, timers and random draws, with password hashes masked. Attach it to bug reports:
@@ -225,6 +225,7 @@ Replays need the usestraw version that made the trace, and a trace that grew pas
 | `phone.subscribe(listener)` | Fires when any of the above changes. |
 | `phone.close(options?)` | Hangs up and closes. Options: `drain`, `signal`. |
 | `phone.trace` | The recording. |
+| `phone.toJSON()`, `call.toJSON()` | Frozen plain data without the trace, the same object until something changes: React snapshots, logs, IPC. |
 | `call.accept(agent?)` | Answers a ringing call. |
 | `call.end(options?)` | Declines, cancels or hangs up. |
 | `call.audio` | `readable`, `writable`, `played`, `clear()`, `sampleRate`. |
@@ -243,7 +244,7 @@ Digest auth needs MD5 and SHA-256 inside that synchronous core, and WebCrypto is
 
 ## Limits
 
-- Node only. Browser and Electron are next. Until then, a browser bundle gets a placeholder whose `connect()` rejects; jsdom tests and Electron with Node integration import `usestraw/node`.
+- Node only. Browser and Electron are next. Until then, a browser bundle gets a placeholder whose `connect()` rejects. In Electron, run the phone in the main process or a `utilityProcess` and send `toJSON()` snapshots to the window; jsdom tests import `usestraw/node`.
 - G.711 only (8 kHz narrowband), no Opus.
 - No SRTP. TLS protects signaling, but audio travels unencrypted, as on most SIP trunks.
 - No STUN or ICE. Over UDP behind NAT, Straw keeps the mapping open and registers its public address. Audio is offered at the public address the server saw only when the NAT kept Straw's port, as on a cloud VM; otherwise your provider has to send audio back to where it comes from (symmetric RTP: on Asterisk `rtp_symmetric=yes`, on Twilio Elastic SIP Trunking switch it on). Most do.

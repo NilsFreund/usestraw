@@ -32,4 +32,10 @@ export type {
 } from "./phone/call"
 export { ConnectError, type ConnectErrorOptions, type ConnectReason } from "./phone/connect-error"
 export type { ConnectOptions, ConnectUrlOptions, TlsOptions } from "./phone/options"
-export type { CallOptions, CloseOptions, Phone, PhoneStatus } from "./phone/phone"
+export type {
+  CallOptions,
+  CloseOptions,
+  Phone,
+  PhoneSnapshot,
+  PhoneStatus,
+} from "./phone/phone"

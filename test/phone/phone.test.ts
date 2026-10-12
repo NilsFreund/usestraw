@@ -161,6 +161,17 @@ describe("phone status", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it("suggests the password only when the registrar refused one with 403", async () => {
+    const answered = memoryNetwork({ script: [undefined, 403] })
+    await expect(startOn(answered, resolveOptions(account))).rejects.toThrow(
+      "check the password and authUser",
+    )
+    const unasked = memoryNetwork({ script: [403] })
+    await expect(startOn(unasked, resolveOptions(account))).rejects.toThrow(
+      /rejected the registration with 403 "Scripted"$/,
+    )
+  })
+
   it("registers only in the realm it is given", async () => {
     const network = memoryNetwork({ realm: "corp.example" })
     const settings = resolveOptions({ ...account, realm: "example.com" })
@@ -298,6 +309,20 @@ describe("phone status", () => {
     )
     expect(network.sent).toBe(sent)
     expect(phone.status).toBe("reconnecting")
+  })
+
+  it("shows why and until when it reconnects in its plain data", async () => {
+    const network = memoryNetwork()
+    const phone = await startOn(network, { ...resolveOptions(account), expires: 60 })
+    network.drop(new Error("reset"))
+    expect(phone.toJSON()).toStrictEqual({
+      status: "reconnecting",
+      error: { reason: "network", message: phone.error?.message },
+      retryAt: phone.retryAt,
+      calls: [],
+    })
+    expect(Object.isFrozen(phone.toJSON().error)).toBe(true)
+    await closeNow(phone)
   })
 
   it("registers the new connection's port after a reconnect and drops the old binding", async () => {
@@ -668,9 +693,13 @@ describe("phone and its calls", () => {
       "retryAt",
       "status",
       "subscribe",
+      "toJSON",
       "trace",
     ])
-    expect(Object.getOwnPropertySymbols(phone)).toStrictEqual([Symbol.asyncDispose])
+    expect(Object.getOwnPropertySymbols(phone)).toStrictEqual([
+      Symbol.for("nodejs.util.inspect.custom"),
+      Symbol.asyncDispose,
+    ])
     expect(Object.keys(phone.incoming)).toStrictEqual([])
     network.inject(invite("shape-1"))
     expect(Object.keys(phone.calls[0] ?? {}).sort()).toStrictEqual([

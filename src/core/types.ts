@@ -62,7 +62,13 @@ export type AuthFailure =
 
 export type RegistrationFailure =
   | { readonly reason: "timeout" }
-  | { readonly reason: "rejected"; readonly status: number; readonly phrase: string }
+  | {
+      readonly reason: "rejected"
+      readonly status: number
+      readonly phrase: string
+      /** The refused REGISTER answered a challenge with the credentials. */
+      readonly withCredentials?: true
+    }
   | { readonly reason: "not-bound" }
   | AuthFailure
 

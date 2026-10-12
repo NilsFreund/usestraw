@@ -48,25 +48,28 @@ describe("parseConnectionUrl", () => {
   })
 
   it.each([
-    ["not a url", ""],
-    [`https://agent:${SECRET}@sip.carrier.example`, ' for "sip.carrier.example"'],
-    ["tls://sip.carrier.example", ' for "sip.carrier.example"'],
-    [`tls://agent:${SECRET}@sip.carrier.example/`, ' for "sip.carrier.example"'],
-    [`tls://agent:pw@sip.carrier.example?password=${SECRET}`, ' for "sip.carrier.example"'],
-    [`tls://agent:pw@sip.carrier.example#${SECRET}`, ' for "sip.carrier.example"'],
-    [`tls://%zz:${SECRET}@sip.carrier.example`, ' for "sip.carrier.example"'],
-    [`tls://agent:%zz${SECRET}@sip.carrier.example`, ' for "sip.carrier.example"'],
-    [`agent:${SECRET}@sip.carrier.example`, ""],
-    [`sip:agent:${SECRET}@sip.carrier.example`, ""],
-    [`tls:agent:${SECRET}@sip.carrier.example`, ""],
-    [`//agent:${SECRET}@sip.carrier.example`, ""],
-    [`"tls://agent:${SECRET}@sip.carrier.example"`, ""],
-    [` tls://agent:${SECRET}@sip.carrier.example/`, ' for "sip.carrier.example"'],
-    [`tls://agent:${SECRET}`, ""],
-    [`tls://agent:pw@sip.carrier.example:${SECRET}`, ""],
-  ])("refuses %s without repeating anything secret", (url, where) => {
+    "not a url",
+    `https://agent:${SECRET}@sip.carrier.example`,
+    "tls://sip.carrier.example",
+    `tls://agent:${SECRET}@sip.carrier.example/`,
+    `tls://agent:pw@sip.carrier.example?password=${SECRET}`,
+    `tls://agent:pw@sip.carrier.example#${SECRET}`,
+    `tls://%zz:${SECRET}@sip.carrier.example`,
+    `tls://agent:%zz${SECRET}@sip.carrier.example`,
+    `agent:${SECRET}@sip.carrier.example`,
+    `sip:agent:${SECRET}@sip.carrier.example`,
+    `tls:agent:${SECRET}@sip.carrier.example`,
+    `//agent:${SECRET}@sip.carrier.example`,
+    `"tls://agent:${SECRET}@sip.carrier.example"`,
+    ` tls://agent:${SECRET}@sip.carrier.example/`,
+    `tls://agent:${SECRET}`,
+    `tls://agent:pw@sip.carrier.example:${SECRET}`,
+    `tls://agent:p@ss#w@sip.carrier.example`,
+  ])("refuses %s without repeating anything secret, not even its host", (url) => {
     expect(() => parseConnectionUrl(url)).toThrow(
-      new TypeError(`Invalid connection URL${where}: use tls://user:password@host[:port]`),
+      new TypeError(
+        "Invalid connection URL: use tls://user:password@host[:port], with % # ? / in the password percent-encoded",
+      ),
     )
   })
 })

@@ -230,11 +230,16 @@ describe("resolveOptions", () => {
     )
   })
 
-  it("asks for a connection URL when it got none, as from an unset variable", () => {
-    expect(() => resolveOptions(undefined)).toThrow(
-      new TypeError("Missing connection URL: pass tls://user:password@host[:port]"),
-    )
-  })
+  it.each([undefined, "", "  "])(
+    "asks for a connection URL when it got %j, as from an unset or empty variable",
+    (url) => {
+      expect(() => resolveOptions(url)).toThrow(
+        new TypeError(
+          "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port]",
+        ),
+      )
+    },
+  )
 
   it("reads a connection URL and takes the remaining options beside it", () => {
     const signal = new AbortController().signal
@@ -295,7 +300,9 @@ describe("resolveOptions", () => {
 
   it("refuses a broken URL without repeating its password", () => {
     expect(() => resolveOptions(`tls://agent:${SECRET}@`)).toThrow(
-      new TypeError("Invalid connection URL: use tls://user:password@host[:port]"),
+      new TypeError(
+        "Invalid connection URL: use tls://user:password@host[:port], with % # ? / in the password percent-encoded",
+      ),
     )
   })
 

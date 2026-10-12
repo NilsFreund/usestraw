@@ -38,7 +38,9 @@ export interface CallList {
   /** True once new callers are turned away. */
   readonly draining: boolean
   receive(event: CallEvent): void
-  place(to: string, options: CallOptions): Promise<LiveCall | UnansweredCall>
+  /** Checks what `phone.call()` got and returns the SIP URI to call. */
+  check(to: string, options: CallOptions): string
+  place(uri: string, options: CallOptions): Promise<LiveCall | UnansweredCall>
   turnAway(): void
   hangUp(options: CloseOptions, timeout: number): Promise<void>
   dropAll(timeout: number): Promise<void>
@@ -57,9 +59,9 @@ export function createCallList(setup: CallListSetup): CallList {
   let draining = false
 
   function refresh(): void {
-    calls = [...handles.values()]
-      .map((handle) => handle.call)
-      .filter((call) => call.status !== "ended")
+    calls = Object.freeze(
+      [...handles.values()].map((handle) => handle.call).filter((call) => call.status !== "ended"),
+    )
     changed()
   }
 
@@ -67,10 +69,7 @@ export function createCallList(setup: CallListSetup): CallList {
     const { id } = call
     const handle = createCall({ ...call, openAudio, run, changed: refresh })
     handles.set(id, handle)
-    void handle.call.ended.then(() => {
-      handles.delete(id)
-      refresh()
-    })
+    void handle.call.ended.then(() => handles.delete(id))
     refresh()
     return handle
   }
@@ -90,14 +89,23 @@ export function createCallList(setup: CallListSetup): CallList {
     inbox.push(track({ id, direction: "incoming", ...parties }))
   }
 
-  async function place(to: string, options: CallOptions): Promise<LiveCall | UnansweredCall> {
-    const { agent, signal, timeout } = options
+  // Checked before the phone's state, as fetch checks its arguments first
+  function check(to: string, options: CallOptions): string {
+    const { agent, timeout } = options
     if (agent) checkAgent(agent)
     if (timeout !== undefined && !isIntegerIn(timeout, 1, MAX_DELAY)) {
-      throw new RangeError(`The timeout must be a number of milliseconds, got ${show(timeout)}`)
+      throw new RangeError(
+        `The timeout must be a whole number of milliseconds from 1 to ${MAX_DELAY}, got ${show(timeout)}`,
+      )
     }
     const uri = targetUri(to, domain)
-    if (!isRequestUri(uri)) throw cannotCall(to)
+    const parts = isRequestUri(uri) ? splitSipUri(uri) : undefined
+    if (!parts?.hostport.replace(/:\d*$/, "") || parts.user === "") throw cannotCall(to)
+    return uri
+  }
+
+  async function place(uri: string, options: CallOptions): Promise<LiveCall | UnansweredCall> {
+    const { agent, signal, timeout } = options
     const id = createCallId(secureRandom)
     const parties = { from: userOf(aor), to: userOf(uri), ...(agent ? { agent } : {}) }
     const handle = track({ id, direction: "outgoing", ...parties })
@@ -169,6 +177,7 @@ export function createCallList(setup: CallListSetup): CallList {
       return draining
     },
     receive,
+    check,
     place,
     turnAway,
     hangUp,

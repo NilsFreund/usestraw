@@ -7,7 +7,7 @@ Straw is a SIP user agent, not a server or proxy. It registers with any SIP prov
 ## Core API
 
 ```ts
-import { connect, ConnectError, type Agent, type Call, type LiveCall, type RingingCall } from "usestraw" // "usestraw/node" in jsdom or Electron with Node integration
+import { connect, ConnectError, type Agent, type Call, type LiveCall, type RingingCall } from "usestraw" // "usestraw/node" in jsdom tests or Electron's main process
 
 const phone = await connect(process.env.SIP_URL) // "tls://user:password@host[:port]" or "udp://…"
 const phone2 = await connect({ uri: "sip:+4930123@sip.example.com", password, server: "tls://edge.example.com" })
@@ -26,7 +26,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 ```
 
 - An agent is a `ReadableWritablePair<Int16Array, Int16Array>`, usually a `TransformStream`; `createAgent()` above is your own function that makes a new one per call. `new TransformStream()` echoes.
-- Phone fields: `status` ("connecting" | "online" | "reconnecting" | "closed"), `error`, `retryAt`, `calls`, `trace`. `subscribe(listener)` returns an unsubscribe function (works with `useSyncExternalStore`).
+- Phone fields: `status` ("connecting" | "online" | "reconnecting" | "closed"), `error`, `retryAt`, `calls`, `trace`. `subscribe(listener)` returns an unsubscribe function; `toJSON()` is a frozen snapshot without the trace that stays the same object until something changes, so `useSyncExternalStore(phone.subscribe, () => phone.toJSON())` works, and the same holds for calls.
 - Call fields: `id` (opaque), `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "answering" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `subscribe(listener)`, `toJSON()`.
 - Call reasons: hangup, cancelled, answered-elsewhere, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, dropped. New reasons may come in minor versions: keep a default branch.
 - `connect()` rejects with `ConnectError`; switch on `error.reason`: wrong-password, password-missing, unsupported-auth, refused, unavailable, no-answer, network.

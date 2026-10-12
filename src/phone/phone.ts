@@ -3,10 +3,11 @@ import { createCallId } from "../core/ids"
 import type { CoreEvent, CoreInput, CoreOutput } from "../core/types"
 import { createRecordedCore, type RecordedCore } from "../recorder/recorder"
 import type { TransportAddress } from "../transport/address"
-import type { Agent, Call, LiveCall, RingingCall, UnansweredCall } from "./call"
+import type { Agent, Call, CallSnapshot, LiveCall, RingingCall, UnansweredCall } from "./call"
 import { createCallList } from "./call-list"
 import { createClock } from "./clock"
-import type { ConnectError } from "./connect-error"
+import type { ConnectError, ConnectReason } from "./connect-error"
+import { asyncDispose } from "./dispose"
 import { toConnectError } from "./failures"
 import { createListeners } from "./listeners"
 import type { PhoneSettings } from "./options"
@@ -43,6 +44,14 @@ export interface CloseOptions {
   readonly drain?: boolean | undefined
   /** Stops the drain and hangs up whatever is still running. */
   readonly signal?: AbortSignal | undefined
+}
+
+/** A phone as plain data, as `JSON.stringify` and `console.log` show it, without the trace. Frozen. */
+export interface PhoneSnapshot {
+  readonly status: PhoneStatus
+  readonly error?: { readonly reason: ConnectReason; readonly message: string }
+  readonly retryAt?: number
+  readonly calls: readonly CallSnapshot[]
 }
 
 /** A connected phone. Read its fields; `subscribe` tells you when they change. */
@@ -83,7 +92,8 @@ export interface Phone extends AsyncDisposable {
    * ```
    * @throws {TypeError} for an address it cannot call, or an agent already in use
    * @throws {RangeError} for a timeout that is not a positive integer
-   * @throws {DOMException} `InvalidStateError` once the phone is closing
+   * @throws {DOMException} `InvalidStateError` once the phone is closing, or `NotAllowedError`
+   *   where a microphone is needed and denied
    * @throws {ConnectError} while the phone reconnects
    * @throws the signal's reason when it aborts first, or a socket error when no audio port is free
    */
@@ -95,6 +105,11 @@ export interface Phone extends AsyncDisposable {
   subscribe(listener: () => void): () => void
   /** Hangs up, unregisters and closes. Calling it again returns the same promise. */
   close(options?: CloseOptions): Promise<void>
+  /**
+   * The phone as plain data, without the trace: the same frozen object until something changes, so
+   * it works as a `useSyncExternalStore` snapshot.
+   */
+  toJSON(): PhoneSnapshot
 }
 
 export interface PhoneHandle {
@@ -135,7 +150,8 @@ export async function startPhone(
   }
   const clock = createClock()
   const listeners = createListeners()
-  const state = createStatus(listeners.notify)
+  let shown: PhoneSnapshot | undefined
+  const state = createStatus(changed)
   const retry = createRetry()
   const pings = createPings()
   const cancel = new AbortController()
@@ -151,9 +167,29 @@ export async function startPhone(
     server: () => link.remote,
     openAudio: (silent) => platform.openAudio(link.local.host, silent),
     run: (command) => run({ type: "command", command }),
-    changed: listeners.notify,
+    changed,
   })
   const { recorder, core } = startCore(first, settings, platform)
+
+  function changed(): void {
+    shown = undefined
+    listeners.notify()
+  }
+
+  function snapshot(): PhoneSnapshot {
+    shown ??= describe()
+    return shown
+  }
+
+  function describe(): PhoneSnapshot {
+    const { status, error, retryAt } = state
+    return Object.freeze({
+      status,
+      ...(error ? { error: Object.freeze({ reason: error.reason, message: error.message }) } : {}),
+      ...(retryAt === undefined ? {} : { retryAt }),
+      calls: Object.freeze(list.calls.map((call) => call.toJSON())),
+    })
+  }
 
   // Each connection has its own local port, which Via and Contact have to carry
   function use(next: Link): void {
@@ -231,10 +267,11 @@ export async function startPhone(
   }
 
   async function call(to: string, options: CallOptions = {}): Promise<LiveCall | UnansweredCall> {
+    const uri = list.check(to, options)
     options.signal?.throwIfAborted()
     if (closed()) throw new DOMException("The phone is closed", "InvalidStateError")
     if (!connected) throw state.error
-    return list.place(to, options)
+    return list.place(uri, options)
   }
 
   function update(next: "online" | "reconnecting", failure?: ConnectError, at?: number): void {
@@ -313,7 +350,7 @@ export async function startPhone(
     signal?.removeEventListener("abort", abort)
     pings.abort(new DOMException("The phone is closed", "InvalidStateError"))
     list.close()
-    listeners.notify()
+    changed()
     leaving?.()
   }
 
@@ -391,7 +428,9 @@ export async function startPhone(
     call,
     subscribe: listeners.subscribe,
     close,
-    [Symbol.asyncDispose]: close,
+    toJSON: snapshot,
+    [Symbol.for("nodejs.util.inspect.custom")]: snapshot,
+    [asyncDispose]: close,
   }
   return { phone, ping }
 }

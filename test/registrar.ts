@@ -28,7 +28,7 @@ export interface RegistrarOptions {
   readonly maxExpires?: number
   readonly nonceLifetime?: number
   readonly rewrite?: string
-  readonly script?: readonly number[]
+  readonly script?: readonly (number | undefined)[]
   readonly retryAfter?: number
   readonly optionsStatus?: number
 }

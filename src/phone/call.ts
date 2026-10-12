@@ -1,5 +1,6 @@
 import type { CallEnd, CallEvent, CoreCommand } from "../core/types"
 import type { CallMedia } from "../sdp/types"
+import { asyncDispose } from "./dispose"
 import { createListeners } from "./listeners"
 import type { CallAudio } from "./platform"
 
@@ -93,7 +94,7 @@ export interface EndOptions {
   readonly reason?: "busy" | "declined" | undefined
 }
 
-/** A call as plain data, as `JSON.stringify` and `console.log` show it. */
+/** A call as plain data, as `JSON.stringify` and `console.log` show it. Frozen. */
 export interface CallSnapshot {
   readonly id: string
   readonly direction: "incoming" | "outgoing"
@@ -123,11 +124,14 @@ interface CallBase extends AsyncDisposable {
   readonly reason: CallReason | undefined
   /** Resolves when the call ends. Never rejects. */
   readonly ended: Promise<CallEnded>
-  /** Calls `listener` on every change and returns an unsubscribe function. */
+  /** Calls `listener` when `status`, `ok` or `reason` change, and returns an unsubscribe function. */
   subscribe(listener: () => void): () => void
   /** Declines a ringing call, cancels a calling one, or hangs up. Never rejects. */
   end(options?: EndOptions): Promise<CallEnded>
-  /** The call as plain data. */
+  /**
+   * The call as plain data: the same frozen object until the call changes, so it works as a
+   * `useSyncExternalStore` snapshot.
+   */
   toJSON(): CallSnapshot
 }
 
@@ -139,8 +143,10 @@ export interface RingingCall extends CallBase {
   readonly status: "ringing" | "ended"
   /**
    * Answers the call. Talk through the agent, or through `audio` on the returned call. Resolves to
-   * an {@link UnansweredCall} if the caller gave up first or no audio port was free. Rejects only
-   * for an agent that is already in use.
+   * an {@link UnansweredCall} if the caller gave up first or no audio port was free. In Node it
+   * rejects only for an agent that is already in use. Where a microphone is needed, it also
+   * rejects with a `NotAllowedError` when access is denied, and the call keeps `"ringing"`, so you
+   * can try again.
    *
    * @example
    * ```ts
@@ -220,9 +226,7 @@ const STATUSES: Readonly<Record<NonNullable<EndOptions["reason"]>, number>> = {
 
 export function checkAgent(agent: Agent): void {
   if (agent.readable.locked || agent.writable.locked) {
-    throw new TypeError(
-      "This agent already talks on another call: create a new agent for each call",
-    )
+    throw new TypeError("This agent was already used for a call: create a new agent for each call")
   }
 }
 
@@ -241,12 +245,14 @@ export function createCall(setup: CallSetup): CallHandle {
   let streams: CallAudioStreams | undefined
   let opening: Promise<CallAudio> | undefined
   let accepting: Promise<LiveCall | UnansweredCall> | undefined
+  let shown: CallSnapshot | undefined
   let agent = setup.agent
 
   function set(next: CallStatus): void {
     status = next
-    listeners.notify()
+    shown = undefined
     changed()
+    listeners.notify()
   }
 
   // A platform that throws instead of rejecting must not leave the call hanging
@@ -363,7 +369,7 @@ export function createCall(setup: CallSetup): CallHandle {
   }
 
   function snapshot(): CallSnapshot {
-    return {
+    shown ??= Object.freeze({
       id,
       direction,
       from,
@@ -372,7 +378,8 @@ export function createCall(setup: CallSetup): CallHandle {
       status,
       ok,
       ...(reason === undefined ? {} : { reason }),
-    }
+    })
+    return shown
   }
 
   const call: CallObject = {
@@ -399,7 +406,7 @@ export function createCall(setup: CallSetup): CallHandle {
     end,
     toJSON: snapshot,
     [Symbol.for("nodejs.util.inspect.custom")]: snapshot,
-    [Symbol.asyncDispose]: async () => {
+    [asyncDispose]: async () => {
       await end()
     },
   }

@@ -1,7 +1,7 @@
 /**
  * The browser build of `usestraw`, a placeholder until the browser softphone ships: `connect()`
- * rejects with a `NotSupportedError`. Where Node APIs are available, as in jsdom tests or Electron
- * with Node integration, import `usestraw/node`.
+ * rejects with a `NotSupportedError`. Where Node runs, as in Electron's main process or a
+ * `utilityProcess`, or in jsdom tests, import `usestraw/node`.
  *
  * @module
  */

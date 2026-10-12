@@ -341,6 +341,31 @@ describe("openTls", () => {
     }
   })
 
+  it("runs where timers are plain numbers, as in an Electron renderer or jsdom", async () => {
+    const server = await tlsRegistrar()
+    const secure = await openTls(tls(server.port), { ca: certificate })
+    const plain = await openUdp({ address: "127.0.0.1", family: 4, port: 5060 })
+    let ping: (() => void) | undefined
+    vi.stubGlobal("setInterval", (fire: () => void) => {
+      ping = fire
+      return 1
+    })
+    vi.stubGlobal("setTimeout", () => 2)
+    try {
+      expect(() => {
+        plain.start(recorder().handlers)
+        secure.start(recorder().handlers)
+        ping?.()
+      }).not.toThrow()
+      expect(ping).toBeDefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    plain.close()
+    secure.close()
+    await server.close()
+  })
+
   it("answers a ping with a pong and closes on a framing error", async () => {
     const server = await tlsRegistrar()
     const link = await openTls(tls(server.port), { ca: certificate })

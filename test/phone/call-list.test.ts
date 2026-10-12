@@ -120,10 +120,22 @@ describe("phone.call", () => {
       'Cannot call "sip:bob@bad host": use a number, a user name or sip:user@host',
     )
     await expect(phone.call("tel:bob")).rejects.toThrow('Cannot call "tel:bob"')
+    for (const half of [
+      "",
+      "   ",
+      "bob@",
+      "@host.example",
+      "sip:bob@",
+      "sip:@host.example",
+      "bob@:5060",
+    ]) {
+      await expect(phone.call(half)).rejects.toThrow(`Cannot call ${JSON.stringify(half)}`)
+    }
     expect(phone.calls).toStrictEqual([])
     expect(seen).toStrictEqual([])
     await phone.close()
     await expect(phone.call("bob")).rejects.toMatchObject({ name: "InvalidStateError" })
+    await expect(phone.call("")).rejects.toThrow(TypeError)
   })
 
   it("settles as no answer when the ring timeout runs out", async () => {
@@ -146,12 +158,18 @@ describe("phone.call", () => {
     expect(carrier.methods).not.toContain("INVITE")
   })
 
-  it("refuses an agent that already talks elsewhere, and a timeout that is no duration", async () => {
+  it("refuses an agent that was already used, and a timeout that is no duration", async () => {
     const { phone, carrier } = await setup()
     const agent = new TransformStream<Int16Array, Int16Array<ArrayBuffer>>()
     agent.readable.getReader()
-    await expect(phone.call("bob", { agent })).rejects.toThrow("create a new agent for each call")
-    await expect(phone.call("bob", { timeout: 0 })).rejects.toThrow(RangeError)
+    await expect(phone.call("bob", { agent })).rejects.toThrow(
+      new TypeError("This agent was already used for a call: create a new agent for each call"),
+    )
+    await expect(phone.call("bob", { timeout: 0 })).rejects.toThrow(
+      new RangeError(
+        "The timeout must be a whole number of milliseconds from 1 to 2147483647, got 0",
+      ),
+    )
     expect(carrier.methods).not.toContain("INVITE")
   })
 
@@ -190,6 +208,10 @@ describe("call data", () => {
     const call = await phone.call("bob")
     expect(phone.calls).not.toBe(before)
     expect(phone.calls).toBe(phone.calls)
+    expect(Object.isFrozen(phone.calls)).toBe(true)
+    const live = call.toJSON()
+    expect(call.toJSON()).toBe(live)
+    expect(Object.isFrozen(live)).toBe(true)
     expect(JSON.parse(JSON.stringify(call))).toStrictEqual({
       id: call.id,
       direction: "outgoing",
@@ -199,8 +221,46 @@ describe("call data", () => {
       ok: true,
     })
     await call.end()
+    expect(call.toJSON()).not.toBe(live)
+    expect(call.toJSON()).toMatchObject({ status: "ended", reason: "hangup" })
     const { inspect } = await import("node:util")
     expect(inspect(call)).toContain("reason: 'hangup'")
+  })
+
+  it("has the phone's data up to date when a call's listeners run, and tells once per change", async () => {
+    const { phone } = await setup()
+    const call = await phone.call("bob")
+    const seen: string[] = []
+    call.subscribe(() =>
+      seen.push(
+        phone
+          .toJSON()
+          .calls.map((data) => data.status)
+          .join() || "none",
+      ),
+    )
+    let told = 0
+    phone.subscribe(() => told++)
+    await call.end()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(seen).toStrictEqual(["none"])
+    expect(told).toBe(1)
+  })
+
+  it("shows the phone as frozen plain data without its trace, the same until it changes", async () => {
+    const { phone } = await setup()
+    const idle = phone.toJSON()
+    expect(idle).toStrictEqual({ status: "online", calls: [] })
+    expect(phone.toJSON()).toBe(idle)
+    expect(Object.isFrozen(idle) && Object.isFrozen(idle.calls)).toBe(true)
+    expect(JSON.stringify(phone)).toBe('{"status":"online","calls":[]}')
+    const { inspect } = await import("node:util")
+    expect(inspect(phone)).toBe("{ status: 'online', calls: [] }")
+    const call = await phone.call("bob")
+    expect(phone.toJSON()).not.toBe(idle)
+    expect(phone.toJSON().calls).toStrictEqual([call.toJSON()])
+    await call.end()
+    expect(phone.toJSON()).toStrictEqual({ status: "online", calls: [] })
   })
 })
 
