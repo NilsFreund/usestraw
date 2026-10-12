@@ -422,3 +422,115 @@ describe("createRegistration", () => {
     expect(registration.nextDeadline()).toBeUndefined()
   })
 })
+
+describe("createRegistration after a reconnect", () => {
+  const first = { transport: "TLS", host: "192.0.2.10", port: 50_001 } as const
+  const second = { ...first, port: 50_002 }
+  const third = { ...first, port: 50_003 }
+  const contact = (port: number, expires?: string) => ({
+    uri: `sips:alice@192.0.2.10:${port}`,
+    params: new Map(expires === undefined ? [] : [["expires", expires]]),
+  })
+  const tls = () =>
+    createRegistration(
+      { address: first, aor: "sip:alice@example.com", random: createRandom(1) },
+      createTrust(),
+      account,
+    )
+  const registered = () => {
+    const registration = tls()
+    registration.receive(reply(sent(registration.register(intent)), 200), 0)
+    return registration
+  }
+
+  it("registers the new Contact and drops the old one in the same REGISTER", () => {
+    const registration = registered()
+    registration.move(second)
+    expect(registration.contact).toStrictEqual(contact(50_002))
+    const request = sent(registration.register(intent))
+    expect(request.contact).toStrictEqual([contact(50_002), contact(50_001, "0")])
+    const outputs = registration.receive(reply(request, 200), 10)
+    expect(events(outputs)).toMatchObject([{ state: "registered" }])
+    expect(outputs.filter((output) => output.type === "send")).toStrictEqual([])
+    expect(sent(registration.expire(Number.MAX_SAFE_INTEGER)).contact).toStrictEqual([
+      contact(50_002),
+    ])
+  })
+
+  it("drops only what was registered, however often it moves first", () => {
+    const fresh = tls()
+    fresh.move(second)
+    expect(sent(fresh.register(intent)).contact).toStrictEqual([contact(50_002)])
+    const still = registered()
+    still.move(first)
+    expect(sent(still.register(intent)).contact).toStrictEqual([contact(50_001)])
+    const registration = registered()
+    registration.move(first)
+    registration.move(second)
+    registration.move(third)
+    expect(sent(registration.register(intent)).contact).toStrictEqual([
+      contact(50_003),
+      contact(50_001, "0"),
+    ])
+  })
+
+  it("keeps the new Contact when the registrar refuses to drop the old one, even after a retry", () => {
+    const registration = registered()
+    registration.move(second)
+    const request = sent(registration.register(intent))
+    const failed = registration.receive(reply(request, 503), 10)
+    expect(events(failed)).toMatchObject([{ state: "failed", retryIn: expect.any(Number) }])
+    const retry = sent(registration.expire(Number.MAX_SAFE_INTEGER))
+    expect(retry.contact).toStrictEqual([contact(50_002), contact(50_001, "0")])
+    const alone = sent(registration.receive(reply(retry, 403), 20))
+    expect(alone.contact).toStrictEqual([contact(50_002)])
+    expect(registration.contact).toStrictEqual(contact(50_002))
+  })
+
+  it("learns its public address again after a move, even when the NAT maps the same port", () => {
+    const registration = setup(account)
+    const rewrite = requestIn(registration.receive(natted(sent(registration.register(intent))), 0))
+    registration.receive(natted(rewrite), 10)
+    registration.move({ ...alice, port: 5062 })
+    const moved = sent(registration.register(intent))
+    expect(moved.contact).toStrictEqual([
+      { uri: "sip:alice@192.0.2.10:5062", params: new Map() },
+      { uri: "sip:alice@203.0.113.1:33172", params: new Map([["expires", "0"]]) },
+    ])
+    registration.receive(natted(moved), 20)
+    const refresh = sent(registration.expire(Number.MAX_SAFE_INTEGER))
+    expect(requestIn(registration.receive(natted(refresh), 30)).contact).toStrictEqual([
+      { uri: "sip:alice@203.0.113.1:33172", params: new Map() },
+      { uri: "sip:alice@192.0.2.10:5062", params: new Map([["expires", "0"]]) },
+    ])
+  })
+
+  it("drops nothing when it moves back before it registers again", () => {
+    const registration = registered()
+    registration.move(second)
+    registration.move(first)
+    expect(sent(registration.register(intent)).contact).toStrictEqual([contact(50_001)])
+  })
+
+  it("registers at once after a move instead of waiting for a REGISTER the old connection lost", () => {
+    const registration = registered()
+    const lost = sent(registration.expire(Number.MAX_SAFE_INTEGER))
+    expect(registration.register(intent)).toStrictEqual([])
+    registration.move(second)
+    const request = sent(registration.register(intent))
+    expect(request.contact).toStrictEqual([contact(50_002), contact(50_001, "0")])
+    expect(registration.receive({ type: "timeout", request: lost }, 32_000)).toStrictEqual([])
+    const outputs = registration.receive(reply(request, 200), 32_010)
+    expect(events(outputs)).toMatchObject([{ state: "registered" }])
+    expect(outputs.filter((output) => output.type === "send")).toStrictEqual([])
+  })
+
+  it("drops the old Contact along with the new one when it unregisters right after moving", () => {
+    const registration = registered()
+    registration.move(second)
+    expect(sent(registration.unregister()).contact).toStrictEqual([
+      contact(50_002),
+      contact(50_001, "0"),
+    ])
+  })
+})

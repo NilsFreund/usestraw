@@ -223,7 +223,7 @@ describe("media engine: hearing", () => {
   })
 
   it("ignores tones, unknown payload types, empty or oversized payloads and port 0", () => {
-    const engine = live({ direction: "recvonly", dtmf: 101 })
+    const engine = live({ direction: "recvonly" })
     hear(engine, remote, [0], 0, { payloadType: 101 })
     hear(engine, remote, [1], 0, { payloadType: 18 })
     hear(engine, remote, [2], 0, { samples: 0 })

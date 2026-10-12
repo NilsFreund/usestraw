@@ -377,6 +377,25 @@ describe("connect", () => {
     await vi.waitFor(() => expect(phone.status).toBe("online"), { timeout: 3000 })
   })
 
+  it("registers its new port when the server drops the connection, and drops the old one", async () => {
+    const server = await serve(tlsRegistrar())
+    const phone = await phoneFor(options(server, "tls"))
+    const [before] = server.registrar.bindings.keys()
+    server.sockets[0]?.destroy()
+    await vi.waitFor(
+      () => {
+        expect(server.registrar.bindings.size).toBe(1)
+        expect(server.registrar.bindings.has(before ?? "")).toBe(false)
+      },
+      { timeout: 8000 },
+    )
+    const port = server.sockets[1]?.remotePort
+    expect([...server.registrar.bindings.keys()]).toStrictEqual([
+      expect.stringMatching(new RegExp(`^sips:alice@.+:${port}$`)),
+    ])
+    expect(phone.status).toBe("online")
+  }, 15_000)
+
   it("keeps trying while the server is gone, and stops when closed", async () => {
     const server = await serve(tlsRegistrar())
     const phone = await phoneFor({

@@ -12,12 +12,11 @@ const encoder = new TextEncoder()
 export function writeMedia(host: string, media: readonly MediaDescription[]): string {
   const address = bareHost(host)
   const lines = ["s=-", `c=IN ${family(address)} ${address}`, "t=0 0"]
-  for (const { kind, port, protocol, formats, rtpmap, fmtp, ptime, direction } of media) {
+  for (const { kind, port, protocol, formats, rtpmap, ptime, direction } of media) {
     lines.push(`m=${kind} ${port} ${protocol} ${formats.join(" ")}`)
     for (const [type, { name, rate, channels }] of rtpmap) {
       lines.push(`a=rtpmap:${type} ${name}/${rate}${channels === undefined ? "" : `/${channels}`}`)
     }
-    for (const [type, parameters] of fmtp) lines.push(`a=fmtp:${type} ${parameters}`)
     if (ptime !== undefined) lines.push(`a=ptime:${ptime}`)
     if (direction !== undefined) lines.push(`a=${direction}`)
   }

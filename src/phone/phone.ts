@@ -155,9 +155,11 @@ export async function startPhone(
   })
   const { recorder, core } = startCore(first, settings, platform)
 
+  // Each connection has its own local port, which Via and Contact have to carry
   function use(next: Link): void {
     link = next
     connected = true
+    run({ type: "command", command: { type: "move", address: next.local } })
     next.start({ receive, close: lost })
     checkIn()
   }

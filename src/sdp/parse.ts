@@ -9,7 +9,6 @@ const MEDIA = new RegExp(
 )
 const CONNECTION = /^IN (IP[46]) ([^\s/]+)/
 const RTPMAP = /^(\d{1,3}) ([^/\s]+)\/(\d{1,6})(?:\/(\d{1,2}))?$/
-const FMTP = /^(\d{1,3}) (.+)$/
 const decoder = new TextDecoder("utf-8", { fatal: true })
 
 interface Draft {
@@ -20,7 +19,6 @@ interface Draft {
   connection?: Connection
   direction?: MediaDirection
   rtpmap: Map<number, RtpMap>
-  fmtp: Map<number, string>
   ptime?: number
 }
 
@@ -67,7 +65,7 @@ function parseMedia(value: string): Draft | undefined {
   const number = Number(port)
   if (kind === "" || !isIntegerIn(number, 0, 65535)) return undefined
   const list = formats.trim().split(/[ \t]+/)
-  return { kind, port: number, protocol, formats: list, rtpmap: new Map(), fmtp: new Map() }
+  return { kind, port: number, protocol, formats: list, rtpmap: new Map() }
 }
 
 function attribute(value: string, media: Draft): void {
@@ -84,8 +82,5 @@ function attribute(value: string, media: Draft): void {
       Number(type),
       channels === undefined ? map : { ...map, channels: Number(channels) },
     )
-  } else if (name === "fmtp") {
-    const [, type, parameters = ""] = FMTP.exec(rest) ?? []
-    if (type !== undefined) media.fmtp.set(Number(type), parameters)
   } else if (name === "ptime" && /^\d{1,3}$/.test(rest)) media.ptime = Number(rest)
 }

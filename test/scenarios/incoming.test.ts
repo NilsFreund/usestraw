@@ -69,7 +69,7 @@ describe("incoming calls from another Straw phone", () => {
     expect(states(caller.events)).toStrictEqual(["ringing", "live", "ended"])
     expect(ended(phone.events)).toStrictEqual({ by: "remote", reason: "hangup" })
     expect(ended(caller.events)).toStrictEqual({ by: "local", reason: "hangup" })
-    const agreed = { codec: "PCMU", payloadType: 0, dtmf: 101, ptime: 20, direction: "sendrecv" }
+    const agreed = { codec: "PCMU", payloadType: 0, ptime: 20, direction: "sendrecv" }
     expect(phone.events).toContainEqual({
       type: "call",
       call: "c1",

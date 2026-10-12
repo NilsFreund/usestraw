@@ -23,7 +23,6 @@ describe("parseSdp (RFC 8866)", () => {
             [0, { name: "PCMU", rate: 8000 }],
             [101, { name: "telephone-event", rate: 8000 }],
           ]),
-          fmtp: new Map([[101, "0-16"]]),
           ptime: 20,
           direction: "sendrecv",
         },
@@ -104,7 +103,6 @@ describe("parseSdp (RFC 8866)", () => {
           protocol: "RTP/AVP",
           formats: ["0", "8"],
           rtpmap: new Map(),
-          fmtp: new Map(),
         },
       ],
     })

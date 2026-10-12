@@ -19,11 +19,9 @@ describe("writeSdp (RFC 8866)", () => {
         "s=-",
         "c=IN IP4 192.0.2.10",
         "t=0 0",
-        "m=audio 40000 RTP/AVP 0 8 101",
+        "m=audio 40000 RTP/AVP 0 8",
         "a=rtpmap:0 PCMU/8000",
         "a=rtpmap:8 PCMA/8000",
-        "a=rtpmap:101 telephone-event/8000",
-        "a=fmtp:101 0-16",
         "a=ptime:20",
         "a=sendrecv",
         "",
@@ -39,7 +37,6 @@ describe("writeSdp (RFC 8866)", () => {
       protocol: "RTP/AVP",
       formats: ["31"],
       rtpmap: new Map([[31, { name: "L16", rate: 44_100, channels: 2 }]]),
-      fmtp: new Map(),
     }
     const data = writeSdp(
       { id: "1", version: 1, host: "[2001:db8::1]" },

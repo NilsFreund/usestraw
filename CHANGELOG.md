@@ -12,12 +12,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 - Call audio as Web Streams of 8 kHz PCM, with `played` and `clear()` for barge-in. Any `TransformStream` can be an agent.
 - `phone.close({ drain, signal })` and `await using`.
 - G.711 μ-law and A-law over RTP, with an adaptive jitter buffer and RTP Bleed protection.
-- SDP offer/answer, re-INVITEs, forking, CANCEL, and digest auth with MD5, SHA-256 and SHA-512-256.
+- SDP offer/answer, re-INVITEs, forking, CANCEL, and digest auth with MD5, SHA-256 and SHA-512-256. No RFC 4733 events are offered yet, so key presses reach the audio as tones at best.
 - `STRAW_DEBUG=1` live ladder and replayable `phone.trace`.
-- Over UDP only the SIP server may start calls (`acceptFrom: "anyone"` for direct IP calls), and strangers' packets stay out of the trace; when registered, digest answers only the registered realm, never with a weaker hash, and `realm` pins one.
+- Over UDP only the SIP server may start calls (`acceptFrom: "anyone"` for direct IP calls), others only reach a running call, and strangers' packets stay out of the trace; when registered, digest answers only the registered realm, never with a weaker hash, and `realm` pins one.
 - Calls without audio for 60 s are hung up as `"dropped"`, also while Straw only sends; a refused re-registration ends calls with a proper BYE.
 - Reconnects after a dropped TLS connection, keeping registration and calls; CRLF keepalives over UDP and TLS, dead-connection detection for servers that answer them, and 600 s registrations.
-- Behind NAT over UDP, registers the public address the registrar saw (RFC 3581) and drops the private one.
+- Behind NAT over UDP, registers the public address the registrar saw (RFC 3581) and drops the private one; behind a NAT that keeps ports, as on a cloud VM, audio is offered at the public address too, over UDP and TLS.
+- After a TLS reconnect, registers the new connection's Contact and asks to drop the old one in the same REGISTER.
 - Trunks without registration: `register: false` with a SIP ping every minute, a fixed `localPort`, and `acceptFrom` lists of IPs and CIDR ranges.
 - `usestraw/core`: the sans-I/O SIP core, experimental until the browser softphone settles it.
 - `usestraw/node` for the Node build, and a browser placeholder whose `connect()` rejects with `NotSupportedError` until 0.2.

@@ -26,6 +26,21 @@ describe("createTransactions", () => {
     ])
   })
 
+  it("still takes answers to requests sent before a move, but not from two moves back", () => {
+    const transactions = createTransactions({ local: alice })
+    const before = request("OPTIONS", "z9hG4bKbefore")
+    transactions.send(before, udp, 0)
+    transactions.move({ ...alice, port: 5062 })
+    expect(kinds(transactions.receive(response(before, 200), bob, 10))).toContain("response")
+    const older = request("OPTIONS", "z9hG4bKolder")
+    transactions.send(older, udp, 20)
+    transactions.move({ ...alice, port: 5064 })
+    transactions.move({ ...alice, port: 5066 })
+    expect(transactions.receive(response(older, 200), bob, 30)).toMatchObject([
+      { type: "event", event: { type: "stray" } },
+    ])
+  })
+
   it("rejects invalid timer settings", () => {
     const timers = { t1: 500, t2: 100, t4: 0, d: 32_000, trying: 0 }
     expect(() => createTransactions({ local: alice, timers })).toThrow(

@@ -4,7 +4,7 @@ import type { NameAddr } from "../../message/fields/name-addr"
 import { splitSipUri } from "../../message/fields/uri"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
-import { isPrivate, sameIp } from "../../sdp/address"
+import { familyOf, isPrivate, isUnspecified, sameIp } from "../../sdp/address"
 import { isIntegerIn } from "../../support/integer"
 import type { TransportAddress } from "../../transport/address"
 import type { Random } from "../types"
@@ -44,6 +44,15 @@ export function publicAddress(
   if (same && port === current.port) return undefined
   if (isPrivate(host) && (same || !isPrivate(current.host))) return undefined
   return { ...current, host, port }
+}
+
+// RFC 3581 §4: a public received with our own port as rport shows a NAT that keeps ports, like a cloud VM's
+export function publicHost(response: SipResponse, local: TransportAddress): string | undefined {
+  const via = response.via[0]
+  const host = bareHost(via?.params.get("received") ?? "")
+  const kept = via?.params.get("rport") === String(local.port)
+  const usable = familyOf(host) !== undefined && !isUnspecified(host) && !isPrivate(host)
+  return kept && usable ? host : undefined
 }
 
 export function listsBinding(response: SipResponse, contact: NameAddr): boolean {

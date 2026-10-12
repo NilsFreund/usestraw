@@ -15,41 +15,37 @@ function parsed(text: string): SessionDescription {
 }
 
 describe("createOffer (RFC 3264 §5)", () => {
-  it("offers PCMU, PCMA and telephone-event at 20 ms", () => {
+  it("offers PCMU and PCMA at 20 ms, and no tones until Straw can hear them", () => {
     expect(createOffer(local)).toStrictEqual({
       kind: "audio",
       port: 40_000,
       protocol: "RTP/AVP",
-      formats: ["0", "8", "101"],
+      formats: ["0", "8"],
       rtpmap: new Map([
         [0, { name: "PCMU", rate: 8000 }],
         [8, { name: "PCMA", rate: 8000 }],
-        [101, { name: "telephone-event", rate: 8000 }],
       ]),
-      fmtp: new Map([[101, "0-16"]]),
       ptime: 20,
       direction: "sendrecv",
     })
   })
 
-  it("puts the codec in use first, takes another tone type and another direction", () => {
-    const offer = createOffer(local, { prefer: "PCMA", dtmf: 96, want: "sendonly" })
-    expect(offer.formats).toStrictEqual(["8", "0", "96"])
-    expect([...offer.rtpmap.keys()]).toStrictEqual([8, 0, 96])
-    expect(offer.fmtp).toStrictEqual(new Map([[96, "0-16"]]))
+  it("puts the codec in use first and takes another direction", () => {
+    const offer = createOffer(local, { prefer: "PCMA", want: "sendonly" })
+    expect(offer.formats).toStrictEqual(["8", "0"])
+    expect([...offer.rtpmap.keys()]).toStrictEqual([8, 0])
     expect(offer.direction).toBe("sendonly")
   })
 })
 
 describe("answerOffer (RFC 3264 §6)", () => {
-  it("answers FreeSWITCH with its first codec we can play, keeping its payload types", () => {
+  it("answers FreeSWITCH with its first codec we can play, and leaves its tones out", () => {
     const answer = answerOffer(parsed(freeswitch), local)
     expect(answer?.index).toBe(0)
     expect(answer?.call).toStrictEqual({
       remote: { host: "203.0.113.5", port: 23456 },
       codec: "PCMA",
       payloadType: 8,
-      dtmf: 101,
       ptime: 20,
       direction: "sendrecv",
     })
@@ -58,12 +54,8 @@ describe("answerOffer (RFC 3264 §6)", () => {
         kind: "audio",
         port: 40_000,
         protocol: "RTP/AVP",
-        formats: ["8", "101"],
-        rtpmap: new Map([
-          [8, { name: "PCMA", rate: 8000 }],
-          [101, { name: "telephone-event", rate: 8000 }],
-        ]),
-        fmtp: new Map([[101, "0-16"]]),
+        formats: ["8"],
+        rtpmap: new Map([[8, { name: "PCMA", rate: 8000 }]]),
         ptime: 20,
         direction: "sendrecv",
       },
@@ -91,14 +83,12 @@ describe("answerOffer (RFC 3264 §6)", () => {
       remote: { host: "198.51.100.1", port: 49170 },
       codec: "PCMU",
     })
-    expect(answer?.call).not.toHaveProperty("dtmf")
     expect(answer?.media[1]).toStrictEqual({
       kind: "video",
       port: 0,
       protocol: "RTP/AVP",
       formats: ["31"],
       rtpmap: new Map(),
-      fmtp: new Map(),
     })
   })
 
@@ -113,7 +103,6 @@ describe("answerOffer (RFC 3264 §6)", () => {
       protocol: "RTP/AVP",
       formats: ["31"],
       rtpmap: new Map(),
-      fmtp: new Map(),
     })
   })
 
@@ -137,10 +126,10 @@ describe("answerOffer (RFC 3264 §6)", () => {
     expect(second?.index).toBe(1)
   })
 
-  it("answers an IPv6 offer from rtpengine with an IPv6 address and copies its tone events", () => {
+  it("answers an IPv6 offer from rtpengine with an IPv6 address", () => {
     const answer = answerOffer(parsed(rtpengine), local6)
-    expect(answer?.call).toMatchObject({ remote: { host: "2001:db8::5", port: 40002 }, dtmf: 101 })
-    expect(answer?.media[0]?.fmtp).toStrictEqual(new Map([[101, "0-15"]]))
+    expect(answer?.call).toMatchObject({ remote: { host: "2001:db8::5", port: 40002 } })
+    expect(answer?.media[0]?.formats).toStrictEqual(["0"])
   })
 
   it.each([
@@ -148,14 +137,6 @@ describe("answerOffer (RFC 3264 §6)", () => {
     ["an IPv4 offer for our IPv6 address", sdp(), local6],
   ])("finds no media path in %s", (_, text, ours) => {
     expect(answerOffer(parsed(text), ours)).toBeUndefined()
-  })
-
-  it.each([
-    ["no fmtp", sdp({ formats: [0, 101] }).replace("a=fmtp:101 0-16\r\n", ""), "0-15"],
-    ["a plain event list", sdp({ formats: [0, 101] }).replace("0-16", "0-11,16"), "0-11,16"],
-    ["something else", sdp({ formats: [0, 101] }).replace("0-16", "0-16;\x1bx"), "0-15"],
-  ])("answers tones with %s by %s", (_, text, events) => {
-    expect(answerOffer(parsed(text), local)?.media[0]?.fmtp).toStrictEqual(new Map([[101, events]]))
   })
 
   it("echoes RTP/AVPF and plays it like RTP/AVP", () => {
@@ -194,18 +175,6 @@ describe("answerOffer (RFC 3264 §6)", () => {
   ])("finds nothing to play in %s", (_, text) => {
     expect(answerOffer(parsed(text), local)).toBeUndefined()
     expect(isPlayable(bytes(text))).toBe(false)
-  })
-
-  it("ignores a tone payload type out of range", () => {
-    const text =
-      sdp({ formats: [0] }).replace("RTP/AVP 0", "RTP/AVP 0 1000") +
-      "a=rtpmap:1000 telephone-event/8000\r\n"
-    expect(answerOffer(parsed(text), local)?.call).not.toHaveProperty("dtmf")
-  })
-
-  it("ignores tones at another clock rate", () => {
-    const text = sdp({ formats: [0, 101] }).replace("telephone-event/8000", "telephone-event/48000")
-    expect(answerOffer(parsed(text), local)?.call).not.toHaveProperty("dtmf")
   })
 
   it("plays G.711 under dynamic payload types and any case", () => {
@@ -271,7 +240,6 @@ describe("readAnswer (RFC 3264 §6.1)", () => {
       remote: { host: "192.0.2.20", port: 5000 },
       codec: "PCMA",
       payloadType: 8,
-      dtmf: 101,
       ptime: 20,
       direction: "sendrecv",
     })

@@ -11,7 +11,6 @@ export interface CallMedia {
   readonly remote: MediaAddress
   readonly codec: Codec
   readonly payloadType: number
-  readonly dtmf?: number
   readonly ptime: number
   readonly direction: MediaDirection
 }
@@ -35,7 +34,6 @@ export interface MediaDescription {
   readonly connection?: Connection
   readonly direction?: MediaDirection
   readonly rtpmap: ReadonlyMap<number, RtpMap>
-  readonly fmtp: ReadonlyMap<number, string>
   readonly ptime?: number
 }
 

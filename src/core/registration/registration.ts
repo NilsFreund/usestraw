@@ -3,6 +3,7 @@ import type { NameAddr } from "../../message/fields/name-addr"
 import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
 import { clientKey } from "../../transaction/keys"
+import type { TransportAddress } from "../../transport/address"
 import { createAuthenticator, type Trust } from "../authenticator"
 import type { Identity } from "../requests"
 import type { Credentials, RegistrationEvent, RegistrationFailure } from "../types"
@@ -14,6 +15,7 @@ import type { RegisterIntent, Registration, RegistrationInput, RegistrationOutpu
 interface Attempt extends RegisterIntent {
   readonly raised?: boolean
   readonly stale?: NameAddr
+  readonly moved?: boolean | undefined
 }
 
 export function createRegistration(
@@ -31,6 +33,7 @@ export function createRegistration(
   let queued: Attempt | undefined
   let scheduled: { readonly at: number; readonly attempt: Attempt } | undefined
   let bound: RegisterIntent | undefined
+  let left: NameAddr | undefined
   let failures = 0
 
   function register(intent: RegisterIntent): RegistrationOutput[] {
@@ -50,7 +53,9 @@ export function createRegistration(
       return []
     }
     authenticator.reset()
-    return send(attempt)
+    const stale = left
+    left = undefined
+    return send(stale ? { ...attempt, stale, moved: true } : attempt)
   }
 
   function send(attempt: Attempt): RegistrationOutput[] {
@@ -125,10 +130,13 @@ export function createRegistration(
     now: number,
     response?: SipResponse,
   ): RegistrationOutput[] {
-    const { to, registrar, expires, stale } = attempt
+    const { to, registrar, expires, stale, moved } = attempt
+    // A refused NAT rewrite goes back to the old Contact for good; a refused move keeps the new one
     if (stale && failure.reason === "rejected" && !isRetryable(failure)) {
-      rewriting = false
-      registrant = { ...registrant, contact: stale }
+      if (!moved) {
+        rewriting = false
+        registrant = { ...registrant, contact: stale }
+      }
       return send({ to, registrar, expires })
     }
     if (expires === 0 || !isRetryable(failure)) {
@@ -139,7 +147,7 @@ export function createRegistration(
     const retryIn = retryDelay(failures, random, response)
     scheduled = {
       at: now + retryIn,
-      attempt: { to, registrar, expires, ...(stale ? { stale } : {}) },
+      attempt: { to, registrar, expires, ...(stale ? { stale, moved } : {}) },
     }
     return [emit({ type: "registration", state: "failed", failure, retryIn })]
   }
@@ -150,6 +158,19 @@ export function createRegistration(
     if (!seen) return
     reachable = seen
     registrant = { ...registrant, contact: createContact(seen, identity.aor) }
+  }
+
+  // A new connection has a new port: the next REGISTER carries it and asks to drop the old Contact
+  function move(address: TransportAddress): void {
+    const contact = createContact(address, identity.aor)
+    reachable = address
+    if (contact.uri === registrant.contact.uri) return
+    // Answers to REGISTERs over the old connection can no longer arrive
+    pending = undefined
+    queued = undefined
+    if (bound) left ??= registrant.contact
+    if (left?.uri === contact.uri) left = undefined
+    registrant = { ...registrant, contact }
   }
 
   function expire(now: number): RegistrationOutput[] {
@@ -165,6 +186,7 @@ export function createRegistration(
     unregister,
     receive,
     observe,
+    move,
     expire,
     nextDeadline: () => scheduled?.at,
   }

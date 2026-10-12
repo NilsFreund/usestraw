@@ -4,9 +4,10 @@ import { MAX_MESSAGE_SIZE } from "../message/limits"
 import { parseMessage } from "../message/parse"
 import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
-import { isRequest, type SipRequest } from "../message/types"
-import { inRange } from "../sdp/address"
+import { isRequest, type SipRequest, type SipResponse } from "../message/types"
+import { familyOf, inRange, isPrivate } from "../sdp/address"
 import { isPlayable } from "../sdp/negotiate"
+import type { MediaAddress } from "../sdp/types"
 import { checkTime, earliest } from "../support/time"
 import { resolveTimers, type TimerSettings } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
@@ -32,7 +33,7 @@ import {
   parseAcceptFrom,
 } from "./checks"
 import { emit, send } from "./outputs"
-import { defaultRegistrar } from "./registration/binding"
+import { defaultRegistrar, publicHost } from "./registration/binding"
 import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
@@ -113,7 +114,8 @@ export interface Core {
  * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
 export function createCore(options: CoreOptions): Core {
-  const { address, aor, random, maxCalls = 100, acceptFrom } = options
+  const { aor, random, maxCalls = 100, acceptFrom } = options
+  let { address } = options
   checkAddress(address)
   checkAor(aor)
   const credentials = options.credentials && Object.freeze({ ...options.credentials })
@@ -124,7 +126,13 @@ export function createCore(options: CoreOptions): Core {
   const capacity = Math.max(64, 4 * maxCalls)
   const timers = resolveTimers(options.timers)
   const transactions = createTransactions({ local: address, timers })
-  const identity = { address, aor, random }
+  const identity = {
+    get address() {
+      return address
+    },
+    aor,
+    random,
+  }
   const responder = createResponder(random)
   const trust = createTrust()
   const registration = createRegistration(identity, trust, credentials)
@@ -137,6 +145,7 @@ export function createCore(options: CoreOptions): Core {
     trust,
     timers,
   })
+  let outside: string | undefined
 
   function handle(input: CoreInput, now: number): CoreOutput[] {
     checkTime(now)
@@ -165,7 +174,7 @@ export function createCore(options: CoreOptions): Core {
     if (accepted === undefined || accepted.some((range) => inRange(from.host, range))) {
       return true
     }
-    return request.method !== "CANCEL" && request.to.params.has("tag") && isForCalls(request)
+    return request.method !== "CANCEL" && calls.matches(request)
   }
 
   function receive(data: Uint8Array, from: TransportAddress, now: number): CoreOutput[] {
@@ -235,18 +244,25 @@ export function createCore(options: CoreOptions): Core {
       }
       case "unregister":
         return translateRegistration(registration.unregister(), now)
+      case "move":
+        checkAddress(command.address)
+        if (command.address.host !== address.host) outside = undefined
+        address = command.address
+        transactions.move(address)
+        registration.move(address)
+        return []
       case "call": {
         const { call, uri, to } = command
         checkCallId(call)
         checkRequestUri(uri)
         checkAddress(to)
-        const media = checkMedia(command.media, address.host)
+        const media = advertised(checkMedia(command.media, address.host))
         if (calls.owns(call)) throw new Error(`Call ${show(call)} already exists`)
         return translateCalls(calls.start({ call, uri, to, media }, now), now)
       }
       case "accept": {
         checkCall(command.call)
-        const media = checkMedia(command.media, address.host)
+        const media = advertised(checkMedia(command.media, address.host))
         return translateCalls(calls.accept(command.call, media, now), now)
       }
       case "end": {
@@ -260,13 +276,26 @@ export function createCore(options: CoreOptions): Core {
     }
   }
 
+  // Behind a NAT that keeps ports, as on a cloud VM, audio must come to the address the server saw
+  function advertised(media: MediaAddress): MediaAddress {
+    if (outside === undefined || !isPrivate(media.host)) return media
+    return familyOf(outside) === familyOf(media.host) ? { ...media, host: outside } : media
+  }
+
+  // Answers from the server show where it saw us, which audio and a trunk's Contact need
+  function learn(response: SipResponse): void {
+    const { method } = response.cseq
+    if (method === "REGISTER" || method === "OPTIONS") {
+      outside = publicHost(response, address) ?? outside
+    }
+    if (method === "OPTIONS") registration.observe(response)
+  }
+
   function translate(outputs: TransactionOutput[], now: number): CoreOutput[] {
     return outputs.flatMap((output) => {
       if (output.type === "send") return [send(output.message, output.to)]
       const happened = output.event
-      if (happened.type === "response" && happened.response.cseq.method === "OPTIONS") {
-        registration.observe(happened.response)
-      }
+      if (happened.type === "response") learn(happened.response)
       if (isRegistration(happened)) {
         return translateRegistration(registration.receive(happened, now), now)
       }

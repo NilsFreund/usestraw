@@ -29,11 +29,11 @@ const RING_LIMIT = 180_000
 
 export function createIncoming(setup: IncomingSetup, context: CallContext, now: number): CallState {
   const { invite, transaction, from: source } = setup
-  const { identity, contact, credentials, trust, timers } = context
+  const { identity, credentials, trust, timers } = context
   const call = invite.callId
   const tag = createTag(identity.random)
   const dialog = createServerDialog(invite, tag)
-  const ringing = createReply(invite, 180, { tag, contact, recordRoute: true })
+  const ringing = createReply(invite, 180, { tag, contact: context.contact, recordRoute: true })
   const expires = expiresOf(invite)
   const limited = expires !== undefined && expires < RING_LIMIT
   const giveUpAt = now + (limited ? expires : RING_LIMIT)
@@ -68,6 +68,8 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
     const sdp = offered ? media.offer() : media.answer(invite.body)
     if (!sdp)
       return reject(488, { by: "local", reason: "incompatible", status: 488 }, [INCOMPATIBLE_MEDIA])
+    // A move while it rang changed the Contact, so the answer takes the current one
+    const { contact } = context
     const ok = createReply(invite, 200, { tag, contact, sdp, recordRoute: true })
     const pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered }
     const authenticator = createAuthenticator(credentials, identity.random, trust)

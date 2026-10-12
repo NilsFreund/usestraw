@@ -14,7 +14,6 @@ import type {
 export interface OfferOptions {
   readonly want?: MediaDirection
   readonly prefer?: Codec
-  readonly dtmf?: number
 }
 
 export interface Negotiated {
@@ -28,13 +27,11 @@ const CODECS: readonly [number, Codec][] = [
   [8, "PCMA"],
 ]
 export const STATIC_CODECS: ReadonlyMap<number, Codec> = new Map(CODECS)
-const EVENTS: RtpMap = { name: "telephone-event", rate: 8000 }
 const PROTOCOLS: ReadonlySet<string> = new Set(["RTP/AVP", "RTP/AVPF"])
-const DTMF = 101
 const PTIME = 20
 
 export function createOffer(local: MediaAddress, options: OfferOptions = {}): MediaDescription {
-  const { want = "sendrecv", prefer, dtmf = DTMF } = options
+  const { want = "sendrecv", prefer } = options
   const codecs = [
     ...CODECS.filter(([, name]) => name === prefer),
     ...CODECS.filter(([, name]) => name !== prefer),
@@ -43,12 +40,8 @@ export function createOffer(local: MediaAddress, options: OfferOptions = {}): Me
     kind: "audio",
     port: local.port,
     protocol: "RTP/AVP",
-    formats: [...codecs.map(([type]) => String(type)), String(dtmf)],
-    rtpmap: new Map<number, RtpMap>([
-      ...codecs.map(([type, name]) => [type, { name, rate: 8000 }] as const),
-      [dtmf, EVENTS],
-    ]),
-    fmtp: new Map([[dtmf, "0-16"]]),
+    formats: codecs.map(([type]) => String(type)),
+    rtpmap: new Map<number, RtpMap>(codecs.map(([type, name]) => [type, { name, rate: 8000 }])),
     ptime: PTIME,
     direction: want,
   }
@@ -58,7 +51,7 @@ export function createOffer(local: MediaAddress, options: OfferOptions = {}): Me
 export function answerOffer(
   offer: SessionDescription,
   local: MediaAddress,
-  options: Omit<OfferOptions, "dtmf"> = {},
+  options: OfferOptions = {},
 ): Negotiated | undefined {
   const { want = "sendrecv", prefer } = options
   let chosen: { readonly call: CallMedia; readonly index: number } | undefined
@@ -96,7 +89,6 @@ export function refuseLine(line: MediaDescription): MediaDescription {
     protocol,
     formats: formats.slice(0, 1),
     rtpmap: new Map(),
-    fmtp: new Map(),
   }
 }
 
@@ -126,36 +118,24 @@ function remoteMedia(
   const offered = line.direction ?? sdp.direction ?? "sendrecv"
   // RFC 3264 §8.4: a connection address of 0.0.0.0 is the old way of saying "do not send to me"
   const theirs = isUnspecified(connection.address) ? meet(offered, "sendonly") : offered
-  const dtmf = line.formats.map(payloadTypeOf).find((type) => isEvents(line, type))
   return {
     remote: { host: connection.address, port: line.port },
     codec: choice.codec,
     payloadType: choice.type,
-    ...(dtmf === undefined ? {} : { dtmf }),
     ptime: line.ptime !== undefined && isIntegerIn(line.ptime, 10, 120) ? line.ptime : PTIME,
     direction: meet(reverse(theirs), want),
   }
 }
 
-// RFC 4733 §7.1.1: without an fmtp the offer means events 0-15, and only a plain event list is echoed
+// RFC 4733 events are not answered until Straw can hear them, so carriers keep tones in the audio
 function accept(line: MediaDescription, call: CallMedia, local: MediaAddress): MediaDescription {
-  const { payloadType, codec, dtmf, direction } = call
-  const rtpmap = new Map<number, RtpMap>([[payloadType, { name: codec, rate: 8000 }]])
-  const fmtp = new Map<number, string>()
-  if (dtmf !== undefined) {
-    const events = line.fmtp.get(dtmf) ?? ""
-    rtpmap.set(dtmf, EVENTS)
-    fmtp.set(dtmf, /^[\d,-]{1,64}$/.test(events) ? events : "0-15")
-  }
-  const formats = [...rtpmap.keys()].map(String)
-  const protocol = line.protocol
+  const { payloadType, codec, direction } = call
   return {
     kind: "audio",
     port: local.port,
-    protocol,
-    formats,
-    rtpmap,
-    fmtp,
+    protocol: line.protocol,
+    formats: [String(payloadType)],
+    rtpmap: new Map([[payloadType, { name: codec, rate: 8000 }]]),
     ptime: PTIME,
     direction,
   }
@@ -167,11 +147,6 @@ function codecOf(line: MediaDescription, type: number): Codec | undefined {
   const name = map.name.toUpperCase()
   const mono = map.rate === 8000 && (map.channels ?? 1) === 1
   return mono && (name === "PCMU" || name === "PCMA") ? name : undefined
-}
-
-function isEvents(line: MediaDescription, type: number | undefined): type is number {
-  const map = type === undefined ? undefined : line.rtpmap.get(type)
-  return map?.name.toLowerCase() === "telephone-event" && map.rate === 8000
 }
 
 function reverse(direction: MediaDirection): MediaDirection {

@@ -11,7 +11,11 @@ export interface Credentials {
   readonly realm?: string | undefined
 }
 
-/** What the app wants: register, call, accept, end, ping or send a raw message. */
+/**
+ * What the app wants: register, call, accept, end, ping or send a raw message. `move` follows a
+ * new connection to its local address; register again, and that REGISTER asks to drop the old
+ * Contact.
+ */
 export type CoreCommand =
   | {
       readonly type: "options"
@@ -27,6 +31,7 @@ export type CoreCommand =
       readonly expires?: number | undefined
     }
   | { readonly type: "unregister" }
+  | { readonly type: "move"; readonly address: TransportAddress }
   | {
       readonly type: "call"
       readonly call: string

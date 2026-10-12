@@ -21,13 +21,16 @@ export interface Transactions {
   respond(transaction: string, response: SipResponse, now: number): TransactionOutput[]
   receive(message: SipMessage, from: TransportAddress, now: number): TransactionOutput[]
   hasInvite(cancel: SipRequest): boolean
+  move(local: TransportAddress): void
   abandon(request: SipRequest): void
   expire(now: number): TransactionOutput[]
   nextDeadline(): number | undefined
 }
 
 export function createTransactions(options: TransactionOptions): Transactions {
-  const { local, timers = defaultTimers } = options
+  const { timers = defaultTimers } = options
+  let { local } = options
+  let previous: TransportAddress | undefined
   validateTimers(timers)
   const clients = new Map<string, ClientTransaction>()
   const servers = new Map<string, ServerTransaction>()
@@ -52,9 +55,8 @@ export function createTransactions(options: TransactionOptions): Transactions {
 
   function receive(message: SipMessage, from: TransportAddress, now: number): TransactionOutput[] {
     if (isRequest(message)) return receiveRequest(message, from, now)
-    const transaction = acceptsResponse(message, local)
-      ? clients.get(clientKey(message))
-      : undefined
+    const ours = [local, previous].some((at) => at && acceptsResponse(message, at))
+    const transaction = ours ? clients.get(clientKey(message)) : undefined
     if (!transaction) return [emit({ type: "stray", response: message, from })]
     return settle(transaction, transaction.receive(message, from, now))
   }
@@ -126,6 +128,11 @@ export function createTransactions(options: TransactionOptions): Transactions {
     respond,
     receive,
     hasInvite: (cancel) => servers.has(serverKey({ ...cancel, method: "INVITE" })),
+    // A CANCEL copies the Via of an INVITE sent before the move, so the previous address still counts
+    move: (next) => {
+      previous = local
+      local = next
+    },
     abandon: (request) => {
       const transaction = clients.get(clientKey(request))
       clients.delete(clientKey(request))

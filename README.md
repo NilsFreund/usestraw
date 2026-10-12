@@ -157,7 +157,7 @@ const phone = await connect({
 
 `connect()` then only checks that the server answers a SIP ping, and fails with `"no-answer"` if it doesn't, often because the trunk doesn't allow this machine's IP yet. The phone pings again every minute and goes `"reconnecting"` while the server is silent.
 
-Give the trunk this machine's public IP and `localPort`, and list every signaling range your provider publishes in `acceptFrom`: calls often come from more addresses than the server's name resolves to. Open `localPort` and UDP 16384–24575 (audio) to the provider's signaling and media ranges, and forward them behind NAT. Straw learns its public address from the pings and puts it in Contact; audio needs symmetric RTP, see Limits.
+Give the trunk this machine's public IP and `localPort`, and list every signaling range your provider publishes in `acceptFrom`: calls often come from more addresses than the server's name resolves to. Open `localPort` and UDP 16384–24575 (audio) to the provider's signaling and media ranges, and forward them behind NAT. Straw learns its public address from the pings and puts it in Contact; for audio, see Limits.
 
 A `password` answers digest challenges on outgoing calls. Without registration Straw cannot learn your provider's realm, so pass it as `realm`, and challenges in other realms go unanswered. Over UDP a listed address can be forged, so don't treat caller ID as proof.
 
@@ -175,7 +175,7 @@ A `password` answers digest challenges on outgoing calls. Without registration S
 | `"no-answer"` | No response. Check host, port and transport, and that a trunk allows your IP. |
 | `"network"` | The connection failed, or the TLS certificate isn't trusted. |
 
-Once online, the phone re-registers on its own and keeps its connection alive. When the server or the network fails, `status` is `"reconnecting"`, with `error` and `retryAt` set, until it is back. Running calls keep going through a reconnect when the server keeps them; one the server dropped meanwhile ends after a minute without audio.
+Once online, the phone re-registers on its own and keeps its connection alive. When the server or the network fails, `status` is `"reconnecting"`, with `error` and `retryAt` set, until it is back. Running calls keep going through a reconnect when the server keeps them; one the server dropped meanwhile ends after a minute without audio. After a TLS reconnect the phone registers its new connection and asks the registrar to drop the old binding in the same REGISTER. Running calls keep the Contact they started with, so a hangup the server can no longer deliver ends them as `"dropped"` after a minute without audio.
 
 Ended calls have a `reason` too: `hangup`, `cancelled`, `answered-elsewhere`, `busy`, `declined`, `not-found`, `no-answer`, `unavailable`, `rejected`, `unauthorized`, `incompatible` or `dropped`. New reasons may come in minor versions, so keep a `default` branch when you switch on either kind.
 
@@ -246,10 +246,11 @@ Digest auth needs MD5 and SHA-256 inside that synchronous core, and WebCrypto is
 - Node only. Browser and Electron are next. Until then, a browser bundle gets a placeholder whose `connect()` rejects; jsdom tests and Electron with Node integration import `usestraw/node`.
 - G.711 only (8 kHz narrowband), no Opus.
 - No SRTP. TLS protects signaling, but audio travels unencrypted, as on most SIP trunks.
-- No STUN or ICE. Behind NAT, Straw keeps the mapping open and registers its public address, but your provider has to send audio back to where it comes from (symmetric RTP: on Asterisk `rtp_symmetric=yes`, on Twilio Elastic SIP Trunking switch it on). Most do.
+- No STUN or ICE. Over UDP behind NAT, Straw keeps the mapping open and registers its public address. Audio is offered at the public address the server saw only when the NAT kept Straw's port, as on a cloud VM; otherwise your provider has to send audio back to where it comes from (symmetric RTP: on Asterisk `rtp_symmetric=yes`, on Twilio Elastic SIP Trunking switch it on). Most do.
 - No RTCP and no DNS SRV lookups: give the server's host name. Over UDP, Straw resolves it once.
 - No TLS server, so a trunk without registration calls in over UDP.
-- No DTMF, hold, transfer, TCP, WebSocket or video yet.
+- No DTMF yet: Straw doesn't negotiate RFC 4733 events, so key presses reach the audio as tones at best, and some servers drop them (on Asterisk, `dtmf_mode=auto` keeps them in-band).
+- No hold, transfer, TCP, WebSocket or video yet.
 
 ## Security
 

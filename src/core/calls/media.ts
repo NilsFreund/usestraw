@@ -1,10 +1,4 @@
-import {
-  answerOffer,
-  createOffer,
-  payloadTypeOf,
-  readAnswer,
-  refuseLine,
-} from "../../sdp/negotiate"
+import { answerOffer, createOffer, readAnswer, refuseLine } from "../../sdp/negotiate"
 import { parseSdp } from "../../sdp/parse"
 import type { CallMedia, MediaAddress, MediaDescription } from "../../sdp/types"
 import { writeMedia, writeSdp } from "../../sdp/write"
@@ -17,8 +11,6 @@ export interface Media {
   read(answer: Uint8Array): CallMedia | undefined
 }
 
-const DTMF = [101, ...Array.from({ length: 32 }, (_, index) => 96 + index)]
-
 // RFC 3264 §8: our o= keeps its id, a new version only on change, and every line keeps its place
 export function createMedia(local: MediaAddress, random: Random): Media {
   const id = String(randomInt(random, 2 ** 31))
@@ -26,7 +18,6 @@ export function createMedia(local: MediaAddress, random: Random): Media {
   let last: string | undefined
   let lines: readonly MediaDescription[] = []
   let index = 0
-  let taken: ReadonlySet<number> = new Set()
   let current: CallMedia | undefined
 
   function describe(media: readonly MediaDescription[]): Uint8Array {
@@ -37,18 +28,13 @@ export function createMedia(local: MediaAddress, random: Random): Media {
     return writeSdp({ id, version, host: local.host }, body)
   }
 
-  function remember(line: MediaDescription | undefined): void {
-    taken = new Set(line?.formats.map(payloadTypeOf).filter((type) => type !== undefined))
-  }
-
   return {
     get current() {
       return current
     },
     offer: () => {
-      const dtmf = current?.dtmf ?? DTMF.find((type) => !taken.has(type))
       const prefer = current?.codec
-      const ours = createOffer(local, { ...(prefer ? { prefer } : {}), ...(dtmf ? { dtmf } : {}) })
+      const ours = createOffer(local, prefer ? { prefer } : {})
       const media =
         lines.length === 0
           ? [ours]
@@ -62,7 +48,6 @@ export function createMedia(local: MediaAddress, random: Random): Media {
       if (!offer || !negotiated) return undefined
       current = negotiated.call
       index = negotiated.index
-      remember(offer.media[index])
       return describe(negotiated.media)
     },
     read: (data) => {
@@ -70,7 +55,6 @@ export function createMedia(local: MediaAddress, random: Random): Media {
       const media = answer && readAnswer(answer, index, local)
       if (!answer || !media) return undefined
       current = media
-      remember(answer.media[index])
       return media
     },
   }
@@ -82,7 +66,6 @@ export function sameMedia(a: CallMedia, b: CallMedia): boolean {
     a.remote.port === b.remote.port &&
     a.payloadType === b.payloadType &&
     a.codec === b.codec &&
-    a.dtmf === b.dtmf &&
     a.ptime === b.ptime &&
     a.direction === b.direction
   )

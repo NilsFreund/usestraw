@@ -295,6 +295,121 @@ describe("createCore", () => {
       ])
     })
 
+    it("follows a reconnect to its new port in Via and Contact, and drops the old binding", () => {
+      const tls = { transport: "TLS", host: "192.0.2.10", port: 50_001 } as const
+      const ua = createCore({
+        address: tls,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        credentials: account,
+      })
+      ua.handle(receive(responseTo(sentRequest(ua.handle(register, 0)[0]))), 10)
+      const move = { type: "move", address: { ...tls, port: 50_002 } } as const
+      expect(ua.handle({ type: "command", command: move }, 20)).toStrictEqual([])
+      const request = sentRequest(ua.handle(register, 30)[0])
+      expect(request.via[0]).toMatchObject({ transport: "TLS", host: "192.0.2.10", port: 50_002 })
+      expect(request.contact).toStrictEqual([
+        { uri: "sips:alice@192.0.2.10:50002", params: new Map() },
+        { uri: "sips:alice@192.0.2.10:50001", params: new Map([["expires", "0"]]) },
+      ])
+      expect(events(ua.handle(receive(responseTo(request)), 40))).toMatchObject([
+        { state: "registered" },
+      ])
+      expect(contactOf(ua, 50)).toStrictEqual([
+        { uri: "sips:alice@192.0.2.10:50002", params: new Map() },
+      ])
+      const nowhere = { type: "move", address: { ...tls, host: "" } } as const
+      expect(() => ua.handle({ type: "command", command: nowhere }, 60)).toThrow(TypeError)
+    })
+
+    describe("audio behind a 1:1 NAT", () => {
+      const natted = () =>
+        createCore({
+          address: { transport: "TLS", host: "10.0.0.5", port: 5061 },
+          aor: "sip:alice@example.com",
+          random: createRandom(1),
+        })
+      const sdpOf = (ua: Core, at: number, host = "10.0.0.5") => {
+        const media = { host, port: 40_000 }
+        const call = {
+          type: "call",
+          call: `s${at}`,
+          uri: "sip:bob@example.com",
+          to: bob,
+          media,
+        } as const
+        const invite = sentRequest(ua.handle({ type: "command", command: call }, at)[0])
+        return new TextDecoder().decode(invite.body)
+      }
+      const learnt = (received: string, rport = "5061") => {
+        const ua = natted()
+        const request = sentRequest(ua.handle(register, 0)[0])
+        ua.handle(receive(seenAt(request, received, rport)), 10)
+        return ua
+      }
+      const moveTo = (ua: Core, host: string, port: number) => {
+        const address = { transport: "TLS", host, port } as const
+        ua.handle({ type: "command", command: { type: "move", address } }, 15)
+        return ua
+      }
+
+      it("offers audio at the public address the server saw, over TLS too", () => {
+        const body = sdpOf(learnt("203.0.113.1"), 20)
+        expect(body).toMatch(/^o=- \d+ 1 IN IP4 203\.0\.113\.1\r$/m)
+        expect(body).toContain("c=IN IP4 203.0.113.1\r\n")
+      })
+
+      it("answers at the public address too", () => {
+        const ua = learnt("203.0.113.1")
+        ua.handle(receive(incoming("INVITE", undefined, "To: <sip:alice@example.com>")), 20)
+        const media = { host: "10.0.0.5", port: 40_000 }
+        const accept = { type: "accept", call: "ping-1", media } as const
+        const [ok] = sent(ua.handle({ type: "command", command: accept }, 30))
+        expect(new TextDecoder().decode(message(ok).body)).toContain("c=IN IP4 203.0.113.1\r\n")
+      })
+
+      it("learns it from the server's answer to a ping when it never registers", () => {
+        const ua = natted()
+        const ping = sentRequest(ua.handle(options(), 0)[0])
+        ua.handle(receive(seenAt(ping, "203.0.113.1", "5061")), 10)
+        expect(sdpOf(ua, 20)).toContain("c=IN IP4 203.0.113.1\r\n")
+      })
+
+      it("keeps it through a reconnect on the same network", () => {
+        const ua = moveTo(learnt("203.0.113.1"), "10.0.0.5", 50_002)
+        expect(sdpOf(ua, 20)).toContain("c=IN IP4 203.0.113.1\r\n")
+      })
+
+      it("keeps a public address it learnt over a private one or a name seen later", () => {
+        const ua = learnt("203.0.113.1")
+        for (const [at, received] of [
+          [20, "10.0.0.9"],
+          [40, "nat.example.com"],
+        ] as const) {
+          const ping = sentRequest(ua.handle(options(), at)[0])
+          ua.handle(receive(seenAt(ping, received, "5061")), at + 10)
+        }
+        expect(sdpOf(ua, 60)).toContain("c=IN IP4 203.0.113.1\r\n")
+      })
+
+      it.each([
+        ["nothing was learnt", natted(), "10.0.0.5"],
+        ["the server saw a private address", learnt("10.0.0.9"), "10.0.0.5"],
+        ["the NAT changed our port", learnt("203.0.113.1", "33172"), "10.0.0.5"],
+        ["the server named no usable address", learnt("0.0.0.0"), "10.0.0.5"],
+        ["the server named a host instead of an address", learnt("nat.example.com"), "10.0.0.5"],
+        [
+          "it moved to another network",
+          moveTo(learnt("203.0.113.1"), "10.9.9.5", 5061),
+          "10.9.9.5",
+        ],
+        ["audio already has a public address", learnt("203.0.113.1"), "198.51.100.5"],
+        ["audio uses another IP family", learnt("203.0.113.1"), "fd00::5"],
+      ])("leaves the audio address alone when %s", (_, ua, host) => {
+        expect(sdpOf(ua, 20, host)).toContain(` ${host}\r\n`)
+      })
+    })
+
     it("sends a REGISTER through a client transaction and reports the binding", () => {
       const ua = registering()
       const request = sentRequest(ua.handle(register, 0)[0])
@@ -619,8 +734,9 @@ describe("createCore", () => {
         random: createRandom(1),
         acceptFrom: ["192.0.2.20"],
       })
-      expect(statuses(guarded.handle(receive(incoming("INVITE")), 0))).toStrictEqual([180])
-      const cancel = incoming("CANCEL", undefined, "To: <sip:alice@example.com>;tag=forged")
+      const [ringing] = sent(guarded.handle(receive(incoming("INVITE")), 0))
+      const tag = message(ringing).to.params.get("tag")
+      const cancel = incoming("CANCEL", undefined, `To: <sip:alice@example.com>;tag=${tag}`)
       const stranger = { ...bob, host: "203.0.113.9" }
       expect(events(guarded.handle(receive(cancel, stranger), 1))).toMatchObject([
         { type: "invalid", error: "CANCEL from 203.0.113.9, not an accepted host" },

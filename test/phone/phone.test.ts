@@ -300,6 +300,19 @@ describe("phone status", () => {
     expect(phone.status).toBe("reconnecting")
   })
 
+  it("registers the new connection's port after a reconnect and drops the old binding", async () => {
+    const network = memoryNetwork({}, { stream: true })
+    const moved = { ...network.link, local: { ...network.link.local, port: 50_002 } }
+    const settings = resolveOptions({ ...account, server: "tls://example.com" })
+    const phone = await startOn(network, settings, { connect: async () => moved })
+    expect([...network.registrar.bindings.keys()]).toStrictEqual(["sips:alice@192.0.2.10:5060"])
+    network.drop()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(phone.status).toBe("online")
+    expect([...network.registrar.bindings.keys()]).toStrictEqual(["sips:alice@192.0.2.10:50002"])
+    await closeNow(phone)
+  })
+
   it("waits out a registrar that still counts its old binding after a reconnect", async () => {
     const { network, phone } = await streaming()
     network.drop()

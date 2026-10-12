@@ -25,7 +25,6 @@ const negotiated = {
   remote: { host: "192.0.2.20", port: 4000 },
   codec: "PCMU",
   payloadType: 0,
-  dtmf: 101,
   ptime: 20,
   direction: "sendrecv",
 } as const
@@ -252,9 +251,7 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     const [ok] = responses(outputs)
     expect(ok).toMatchObject({ status: 200, reason: "OK" })
     expect(ok?.to.params.get("tag")).toBe(ourTag)
-    expect(text(ok?.body)).toContain(
-      "c=IN IP4 192.0.2.10\r\nt=0 0\r\nm=audio 40000 RTP/AVP 0 101\r\n",
-    )
+    expect(text(ok?.body)).toContain("c=IN IP4 192.0.2.10\r\nt=0 0\r\nm=audio 40000 RTP/AVP 0\r\n")
     expect(text(ok?.body)).toContain("a=sendrecv\r\n")
     expect(ok && getHeader(ok, "Content-Type")).toBe("application/sdp")
     expect(ok?.contact).toStrictEqual([{ uri: "sip:alice@192.0.2.10:5060", params: new Map() }])
@@ -332,7 +329,7 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(events(outputs)).toMatchObject([{ state: "incoming" }])
     expect(events(outputs)[0]).not.toHaveProperty("sdp")
     const [ok] = responses(ua.handle(accept(), 1000))
-    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 8 101\r\n")
+    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 8\r\n")
     const ack = ua.handle(receive(request("ACK", { toTag: ourTag, body: remote })), 1100)
     expect(calls(ack)).toStrictEqual([
       { type: "call", call: "in1", state: "live", media: negotiated },
@@ -389,7 +386,16 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     expect(requests(ua.handle(end(603), 2000)).map((r) => r.method)).toStrictEqual(["BYE"])
   })
 
-  it("lets a caller outside acceptFrom finish a call the server put through", () => {
+  it("answers with the Contact of the connection it moved to while ringing", () => {
+    const ua = phone()
+    ringing(invite(), ua)
+    const address = { ...alice, port: 5062 }
+    ua.handle({ type: "command", command: { type: "move", address } }, 500)
+    const [ok] = responses(ua.handle(accept(), 1000))
+    expect(ok?.contact).toStrictEqual([{ uri: "sip:alice@192.0.2.10:5062", params: new Map() }])
+  })
+
+  it("lets a caller outside acceptFrom keep up and finish a call the server put through", () => {
     const ua = createCore({
       address: alice,
       aor: "sip:alice@example.com",
@@ -399,12 +405,28 @@ describe("incoming calls (RFC 3261 §13.3)", () => {
     const { ourTag } = ringing(invite(), ua)
     ua.handle(accept(), 1000)
     const direct = { ...bob, host: "198.51.100.7" }
+    for (const toTag of ["guessed", undefined]) {
+      const guess = request("ACK", toTag ? { toTag } : {})
+      expect(ua.handle({ type: "receive", data: bytes(guess), from: direct }, 1050)).toMatchObject([
+        { event: { type: "invalid", error: "ACK from 198.51.100.7, not an accepted host" } },
+      ])
+    }
     const ack = request("ACK", { toTag: ourTag })
     expect(
       calls(ua.handle({ type: "receive", data: bytes(ack), from: direct }, 1100)),
     ).toMatchObject([{ state: "live" }])
-    const bye = request("BYE", { toTag: ourTag, seq: 2 })
-    const outputs = ua.handle({ type: "receive", data: bytes(bye), from: direct }, 2000)
+    const from = (data: string, at: number) =>
+      ua.handle({ type: "receive", data: bytes(data), from: direct }, at)
+    expect(statuses(from(request("OPTIONS", { toTag: ourTag, seq: 2 }), 1200))).toStrictEqual([
+      "200 OPTIONS",
+    ])
+    expect(statuses(from(request("INFO", { toTag: ourTag, seq: 3 }), 1300))).toStrictEqual([
+      "405 INFO",
+    ])
+    expect(from(request("OPTIONS", { toTag: "guessed", seq: 4 }), 1400)).toMatchObject([
+      { event: { type: "invalid", error: "OPTIONS from 198.51.100.7, not an accepted host" } },
+    ])
+    const outputs = from(request("BYE", { toTag: ourTag, seq: 5 }), 2000)
     expect(statuses(outputs)).toStrictEqual(["200 BYE"])
     expect(calls(outputs)).toMatchObject([{ state: "ended", ended: { reason: "hangup" } }])
   })
@@ -827,7 +849,7 @@ describe("in-dialog requests on a live call", () => {
     const outputs = ua.handle(receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2" })), 5000)
     const [ok] = responses(outputs)
     expect(ok).toMatchObject({ status: 200, cseq: { seq: 2, method: "INVITE" } })
-    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 101\r\n")
+    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0\r\n")
     expect(ok?.contact).toHaveLength(1)
     expect(ok && getHeaders(ok, "Record-Route")).toStrictEqual([])
     expect(calls(outputs)).toStrictEqual([])
@@ -909,7 +931,7 @@ describe("in-dialog requests on a live call", () => {
       receive(invite({ toTag: ourTag, seq: 2, branch: "z9hG4bKr2", body: null })),
       5000,
     )
-    expect(text(responses(outputs)[0]?.body)).toContain("m=audio 40000 RTP/AVP 0 8 101\r\n")
+    expect(text(responses(outputs)[0]?.body)).toContain("m=audio 40000 RTP/AVP 0 8\r\n")
     const ack = ua.handle(receive(request("ACK", { toTag: ourTag, seq: 2, body: hold })), 5100)
     expect(calls(ack)).toStrictEqual([
       { type: "call", call: "in1", state: "live", media: { ...negotiated, direction: "recvonly" } },

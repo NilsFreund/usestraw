@@ -19,7 +19,6 @@ const negotiated = {
   remote: { host: "192.0.2.20", port: 4000 },
   codec: "PCMU",
   payloadType: 0,
-  dtmf: 101,
   ptime: 20,
   direction: "sendrecv",
 } as const
@@ -283,7 +282,7 @@ describe("re-INVITEs on an outgoing call (RFC 3261 §14.2)", () => {
     const refresh = ua.handle(receive(reinvite(ourTag, 1)), 20)
     const [ok] = responses(refresh)
     expect(ok?.status).toBe(200)
-    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 8 101\r\n")
+    expect(text(ok?.body)).toContain("m=audio 40000 RTP/AVP 0 8\r\n")
     expect(text(ok?.body)).toContain("a=sendrecv\r\n")
     expect(ok?.to.params.get("tag")).toBe(ourTag)
     expect(events(refresh)).toStrictEqual([])
@@ -345,7 +344,7 @@ describe("re-INVITEs on an outgoing call (RFC 3261 §14.2)", () => {
     const { ua, ourTag } = live()
     const moved = sdp({ host: "198.51.100.7", port: 6000, formats: [8, 0, 101], version: 2 })
     const outputs = ua.handle(receive(reinvite(ourTag, 1, moved)), 20)
-    expect(text(responses(outputs)[0]?.body)).toContain("m=audio 40000 RTP/AVP 0 101\r\n")
+    expect(text(responses(outputs)[0]?.body)).toContain("m=audio 40000 RTP/AVP 0\r\n")
     expect(events(outputs)).toStrictEqual([
       {
         type: "call",

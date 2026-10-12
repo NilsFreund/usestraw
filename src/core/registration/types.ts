@@ -22,6 +22,7 @@ export interface Registration {
   unregister(): RegistrationOutput[]
   receive(input: RegistrationInput, now: number): RegistrationOutput[]
   observe(response: SipResponse): void
+  move(address: TransportAddress): void
   expire(now: number): RegistrationOutput[]
   nextDeadline(): number | undefined
 }
