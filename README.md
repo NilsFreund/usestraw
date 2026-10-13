@@ -26,7 +26,7 @@ for await (const call of phone.incoming) {
 
 Put your voice agent where the `TransformStream` is, and it answers the phone.
 
-- Zero dependencies, under 40 kB min+gzip, 100% test coverage.
+- Zero dependencies, under 50 kB min+gzip, 100% test coverage.
 - `STRAW_DEBUG=1` prints the SIP traffic, and every phone keeps a replayable trace.
 - Hand-tested with real calls through Kamailio and FreeSWITCH.
 
