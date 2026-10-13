@@ -1,7 +1,7 @@
 import { sameHost } from "../message/fields/host"
 import type { Via } from "../message/fields/via"
 import type { SipResponse } from "../message/types"
-import { defaultPort, isReliable, type TransportAddress } from "./address"
+import { defaultPort, isReliable, sentByPort, type TransportAddress } from "./address"
 
 // RFC 3261 §18.2.2 and RFC 3581 §4: answers go back to the source port when the Via asks with rport
 export function replyAddress(via: Via | undefined, from: TransportAddress): TransportAddress {
@@ -17,6 +17,6 @@ export function acceptsResponse(response: SipResponse, local: TransportAddress):
     via !== undefined &&
     via.transport === local.transport &&
     sameHost(via.host, local.host) &&
-    via.port === local.port
+    via.port === sentByPort(local)
   )
 }

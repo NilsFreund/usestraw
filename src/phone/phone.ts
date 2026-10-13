@@ -119,7 +119,7 @@ export async function startPhone(
       (thrown: unknown) => {
         if (!(thrown instanceof DOMException && thrown.name === "TimeoutError")) return
         later(toConnectError({ reason: "timeout" }, context))
-        if (connection.link.local.transport === "TLS") connection.link.close()
+        if (connection.link.local.transport !== "UDP") connection.link.close()
       },
     )
   }
@@ -165,7 +165,7 @@ export async function startPhone(
     if (retryIn !== undefined) update("reconnecting", failure, Date.now() + retryIn)
     else if (failed.reason === "rejected" && justBack) later(failure)
     else fatal(failure)
-    if (failed.reason === "timeout" && connection.link.local.transport === "TLS") {
+    if (failed.reason === "timeout" && connection.link.local.transport !== "UDP") {
       connection.link.close()
     }
   }

@@ -31,6 +31,23 @@ describe("parseConnectionUrl", () => {
       "tls://agent@sip.carrier.example",
       { uri: "sip:agent@sip.carrier.example", server: "tls://sip.carrier.example", user: "agent" },
     ],
+    [
+      "wss://alice:secret@pbx.example.com/ws",
+      {
+        uri: "sip:alice@pbx.example.com",
+        server: "wss://pbx.example.com/ws",
+        user: "alice",
+        password: "secret",
+      },
+    ],
+    [
+      "WSS://alice@PBX.example.com:443",
+      { uri: "sip:alice@pbx.example.com", server: "wss://pbx.example.com/", user: "alice" },
+    ],
+    [
+      "ws://alice@localhost:8088/sip?token=abc",
+      { uri: "sip:alice@localhost", server: "ws://localhost:8088/sip?token=abc", user: "alice" },
+    ],
   ])("reads %s", (url, fields) => {
     expect(parseConnectionUrl(url)).toStrictEqual(fields)
   })
@@ -68,7 +85,7 @@ describe("parseConnectionUrl", () => {
   ])("refuses %s without repeating anything secret, not even its host", (url) => {
     expect(() => parseConnectionUrl(url)).toThrow(
       new TypeError(
-        "Invalid connection URL: use tls://user:password@host[:port], with % # ? / in the password percent-encoded",
+        "Invalid connection URL: use tls://user:password@host[:port] or wss://user:password@host[:port][/path], with % # ? / \\ in the password percent-encoded",
       ),
     )
   })

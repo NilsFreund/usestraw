@@ -3,9 +3,11 @@ import { createResponse, type NameAddr, type TransportAddress } from "../../../s
 import {
   createContact,
   defaultRegistrar,
+  dialogContact,
   grantedExpiry,
   listsBinding,
   publicAddress,
+  publicHost,
   refreshDelay,
 } from "../../../src/core/registration/binding"
 import { alice, parsedRequest, register } from "../../helpers"
@@ -17,8 +19,14 @@ describe("createContact", () => {
     [alice, "sip:alice@192.0.2.10:5060"],
     [{ ...alice, transport: "TCP" }, "sip:alice@192.0.2.10:5060;transport=tcp"],
     [{ ...alice, transport: "TLS", port: 5061 }, "sips:alice@192.0.2.10:5061"],
-    [{ ...alice, transport: "WS", port: 80 }, "sip:alice@192.0.2.10:80;transport=ws"],
-    [{ ...alice, transport: "WSS", port: 443 }, "sips:alice@192.0.2.10:443;transport=ws"],
+    [
+      { ...alice, transport: "WS", host: "a1b2.invalid", port: 0 },
+      "sip:alice@a1b2.invalid;transport=ws",
+    ],
+    [
+      { ...alice, transport: "WSS", host: "a1b2.invalid", port: 0 },
+      "sip:alice@a1b2.invalid;transport=ws",
+    ],
     [{ ...alice, host: "fe80::1%en0" }, "sip:alice@[fe80::1]:5060"],
   ] as [TransportAddress, string][])("builds the Contact for %o", (address, uri) => {
     expect(createContact(address, "sip:alice@example.com")).toStrictEqual({
@@ -72,7 +80,7 @@ describe("grantedExpiry (RFC 3261 §10.2.4)", () => {
       ],
       "900",
     )
-    expect(grantedExpiry(response, contact, 3600)).toBe(1800)
+    expect(grantedExpiry(response, { contact }, 3600)).toBe(1800)
   })
 
   it("matches a Contact without a user part", () => {
@@ -81,35 +89,35 @@ describe("grantedExpiry (RFC 3261 §10.2.4)", () => {
       binding("sip:other@192.0.2.99", "60"),
       binding("sip:192.0.2.10:5060;ob", "90"),
     ])
-    expect(grantedExpiry(response, anonymous, 3600)).toBe(90)
+    expect(grantedExpiry(response, { contact: anonymous }, 3600)).toBe(90)
   })
 
   it("takes the only binding when the registrar rewrote our Contact", () => {
-    expect(grantedExpiry(ok([binding("sip:alice@203.0.113.1:49152", "30")]), contact, 3600)).toBe(
-      30,
-    )
+    expect(
+      grantedExpiry(ok([binding("sip:alice@203.0.113.1:49152", "30")]), { contact }, 3600),
+    ).toBe(30)
   })
 
   it("does not take a binding that is being removed for its own", () => {
     const response = ok([binding("sip:a@192.0.2.1", "0"), binding("sip:b@192.0.2.2", "300")])
-    expect(grantedExpiry(response, contact, 3600)).toBe(300)
+    expect(grantedExpiry(response, { contact }, 3600)).toBe(300)
   })
 
   it("takes the soonest expiry when it cannot tell which binding is its own", () => {
     const response = ok([binding("sip:a@192.0.2.1", "600"), binding("tel:+4930123", "60")], "900")
-    expect(grantedExpiry(response, contact, 3600)).toBe(60)
+    expect(grantedExpiry(response, { contact }, 3600)).toBe(60)
     const bare = ok([binding("sip:a@192.0.2.1", null), binding("tel:+4930123", null)], "900")
-    expect(grantedExpiry(bare, contact, 3600)).toBe(900)
+    expect(grantedExpiry(bare, { contact }, 3600)).toBe(900)
   })
 
   it("never grants more than requested", () => {
-    expect(grantedExpiry(ok([binding(contact.uri, "7200")]), contact, 3600)).toBe(3600)
+    expect(grantedExpiry(ok([binding(contact.uri, "7200")]), { contact }, 3600)).toBe(3600)
   })
 
   it("caps absurd values at 2^32-1 before comparing", () => {
-    expect(grantedExpiry(ok([binding(contact.uri, "9".repeat(40))]), contact, 4_294_967_295)).toBe(
-      4_294_967_295,
-    )
+    expect(
+      grantedExpiry(ok([binding(contact.uri, "9".repeat(40))]), { contact }, 4_294_967_295),
+    ).toBe(4_294_967_295)
   })
 
   it.each([
@@ -118,7 +126,7 @@ describe("grantedExpiry (RFC 3261 §10.2.4)", () => {
     ["an expires flag without value", ok([binding(contact.uri, null)])],
     ["a malformed expires", ok([binding(contact.uri, "60abc")], "soon")],
   ])("keeps the requested expiry for %s", (_, response) => {
-    expect(grantedExpiry(response, contact, 3600)).toBe(3600)
+    expect(grantedExpiry(response, { contact }, 3600)).toBe(3600)
   })
 })
 
@@ -224,11 +232,60 @@ describe("listsBinding", () => {
   const ok = (contact: NameAddr[]) => ({ ...createResponse(request, 200, "OK"), contact })
 
   it("finds our binding, and trusts a registrar that lists none", () => {
-    expect(listsBinding(ok([ours]), ours)).toBe(true)
-    expect(listsBinding(ok([]), ours)).toBe(true)
-    expect(listsBinding({ ...ok([]), contact: "*" }, ours)).toBe(true)
-    expect(listsBinding(ok([{ uri: "sip:alice@192.168.1.10", params: new Map() }]), ours)).toBe(
-      false,
-    )
+    expect(listsBinding(ok([ours]), { contact: ours })).toBe(true)
+    expect(listsBinding(ok([]), { contact: ours })).toBe(true)
+    expect(listsBinding({ ...ok([]), contact: "*" }, { contact: ours })).toBe(true)
+    expect(
+      listsBinding(ok([{ uri: "sip:alice@192.168.1.10", params: new Map() }]), { contact: ours }),
+    ).toBe(false)
+  })
+})
+
+describe("bindings over WebSocket", () => {
+  const ws: TransportAddress = { transport: "WSS", host: "a1b2c3.invalid", port: 0 }
+  const contact = createContact(ws, "sip:alice@example.com")
+  const instance = "urn:uuid:1c69d7aa-1bf4-4b38-a169-11d4e05da802"
+  const rewritten = (uuid: string, expires: string) => ({
+    uri: "sip:alice@198.51.100.7:51234;transport=ws",
+    params: new Map([
+      ["expires", expires],
+      ["+sip.instance", `"<${uuid}>"`],
+    ]),
+  })
+  const ok = (bindings: NameAddr[]) => ({
+    ...createResponse(request, 200, "OK"),
+    contact: bindings,
+  })
+
+  it("adds ;ob to dialog Contacts over WebSocket only", () => {
+    expect(dialogContact(contact, ws).uri).toBe("sip:alice@a1b2c3.invalid;transport=ws;ob")
+    const udp = createContact(alice, "sip:alice@example.com")
+    expect(dialogContact(udp, alice)).toBe(udp)
+  })
+
+  it("finds its binding by instance when the registrar rewrote the Contact, as Asterisk does", () => {
+    const response = ok([rewritten("urn:uuid:other", "30"), rewritten(instance, "600")])
+    expect(grantedExpiry(response, { contact, instance }, 3600)).toBe(600)
+    expect(listsBinding(response, { contact, instance })).toBe(true)
+    expect(listsBinding(ok([rewritten("urn:uuid:other", "30")]), { contact, instance })).toBe(false)
+    expect(grantedExpiry(response, { contact }, 3600)).toBe(30)
+  })
+
+  it("learns a public received over WebSocket, whose port says nothing about audio", () => {
+    const answer = (received: string, rport: string) => ({
+      ...createResponse(request, 200, "OK"),
+      via: [
+        {
+          transport: "WSS",
+          host: "a1b2c3.invalid",
+          params: new Map([
+            ["received", received],
+            ["rport", rport],
+          ]),
+        },
+      ],
+    })
+    expect(publicHost(answer("203.0.113.9", "51234"), ws)).toBe("203.0.113.9")
+    expect(publicHost(answer("10.0.0.5", "51234"), ws)).toBeUndefined()
   })
 })

@@ -22,9 +22,9 @@ export interface MemoryNetwork {
 
 export function memoryNetwork(
   options: RegistrarOptions = {},
-  { stream = false }: { readonly stream?: boolean } = {},
+  { stream = false }: { readonly stream?: boolean | "websocket" } = {},
 ): MemoryNetwork {
-  const transport = stream ? "TLS" : "UDP"
+  const transport = stream === "websocket" ? "WSS" : stream ? "TLS" : "UDP"
   const local: TransportAddress = { transport, host: "192.0.2.10", port: 5060 }
   const remote: TransportAddress = { transport, host: "192.0.2.20", port: 5060 }
   let server = registrar(options)(createRandom(3))

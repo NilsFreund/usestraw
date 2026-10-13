@@ -128,7 +128,7 @@ describe("resolveOptions", () => {
     expect(() => resolve(uri)).not.toThrow(SECRET)
   })
 
-  it.each(["tcp", "ws", ""])("refuses the transport %j", (transport) => {
+  it.each(["tcp", ""])("refuses the transport %j", (transport) => {
     const uri = `sip:alice@example.com;transport=${transport}`
     expect(() => resolve(uri)).toThrow(
       new TypeError(
@@ -137,13 +137,88 @@ describe("resolveOptions", () => {
     )
   })
 
-  it("refuses to send a sips: uri over UDP", () => {
-    expect(() => resolve("sips:alice@example.com", "udp://example.com")).toThrow(
-      new TypeError('A sips: uri needs a tls:// server, got "udp://example.com"'),
+  it.each([
+    ["wss://pbx.example.com", "WSS", "pbx.example.com", 443, "/"],
+    ["WSS://pbx.example.com:8089/ws", "WSS", "pbx.example.com", 8089, "/ws"],
+    ["wss://pbx.example.com/sip/ws?token=abc", "WSS", "pbx.example.com", 443, "/sip/ws?token=abc"],
+    ["wss://pbx.example.com?token=abc", "WSS", "pbx.example.com", 443, "/?token=abc"],
+    ["wss://[2001:db8::1]:10443/ws", "WSS", "2001:db8::1", 10443, "/ws"],
+    ["ws://localhost:8088/ws", "WS", "localhost", 8088, "/ws"],
+    ["ws://127.0.0.1", "WS", "127.0.0.1", 80, "/"],
+    ["ws://[::1]:8088", "WS", "::1", 8088, "/"],
+  ])("uses the WebSocket server %s", (server, transport, host, port, path) => {
+    expect(resolve("sip:alice@example.com", server).server).toStrictEqual({
+      transport,
+      host,
+      port,
+      path,
+    })
+  })
+
+  it("names a WebSocket server with its path", () => {
+    expect(resolve("sip:alice@example.com", "wss://pbx.example.com/ws").label).toBe(
+      "wss://pbx.example.com:443/ws",
     )
   })
 
-  const anyServer = "use udp://host[:port] or tls://host[:port]"
+  it("never repeats the query of a WebSocket URL, where tokens live", () => {
+    expect(resolve("sip:alice@example.com", `wss://pbx.example.com/ws?token=${SECRET}`).label).toBe(
+      "wss://pbx.example.com:443/ws?…",
+    )
+    expect(() =>
+      resolve("sip:alice@example.com", `udp://pbx.example.com/?token=${SECRET}`),
+    ).toThrow(expect.objectContaining({ message: expect.not.stringContaining(SECRET) }))
+  })
+
+  it("sends a sips: uri over wss://", () => {
+    expect(resolve("sips:alice@example.com", "wss://pbx.example.com").server.transport).toBe("WSS")
+  })
+
+  it.each(["ws://pbx.example.com/ws", "ws://192.0.2.1", "ws://127.example.com"])(
+    "keeps the unencrypted %s to localhost",
+    (server) => {
+      expect(() => resolve("sip:alice@example.com", server)).toThrow(
+        new TypeError(
+          "ws:// sends the password unencrypted, so it only works with localhost: use wss://",
+        ),
+      )
+    },
+  )
+
+  it("points tls.ca for wss:// at the platform's trust store", () => {
+    expect(() =>
+      resolveOptions({
+        uri: "sip:alice@example.com",
+        server: "wss://pbx.example.com",
+        tls: { ca: "x" },
+      }),
+    ).toThrow(
+      new TypeError(
+        "tls.ca only works with a tls:// server; for wss:// the platform's trust store decides (NODE_EXTRA_CA_CERTS in Node)",
+      ),
+    )
+  })
+
+  it.each(["ws", "WSS"])("asks for a wss:// server for a uri with transport=%s", (transport) => {
+    expect(() => resolve(`sip:alice@example.com;transport=${transport}`)).toThrow(
+      new TypeError("For WebSocket, pass the server as wss://host[:port][/path]"),
+    )
+  })
+
+  it.each(["udp://example.com/ws", "tls://example.com?x=1"])(
+    "keeps paths to WebSocket servers, refusing %s",
+    (server) => {
+      expect(() => resolve("sip:alice@example.com", server)).toThrow(TypeError)
+    },
+  )
+
+  it("refuses to send a sips: uri over UDP", () => {
+    expect(() => resolve("sips:alice@example.com", "udp://example.com")).toThrow(
+      new TypeError('A sips: uri needs a tls:// or wss:// server, got "udp://example.com"'),
+    )
+  })
+
+  const anyServer = "use udp://host[:port], tls://host[:port] or wss://host[:port][/path]"
   const range = "the port must be from 1 to 65535"
   it.each([
     ["sip.example.com", "sip.example.com", anyServer],
@@ -198,7 +273,9 @@ describe("resolveOptions", () => {
 
   it("never repeats credentials pasted into the server", () => {
     expect(() => resolve("sip:agent@example.com", `tls://agent:${SECRET}@example.com`)).toThrow(
-      new TypeError('Invalid server "…@example.com": use udp://host[:port] or tls://host[:port]'),
+      new TypeError(
+        'Invalid server "…@example.com": use udp://host[:port], tls://host[:port] or wss://host[:port][/path]',
+      ),
     )
   })
 
@@ -301,7 +378,7 @@ describe("resolveOptions", () => {
   it("refuses a broken URL without repeating its password", () => {
     expect(() => resolveOptions(`tls://agent:${SECRET}@`)).toThrow(
       new TypeError(
-        "Invalid connection URL: use tls://user:password@host[:port], with % # ? / in the password percent-encoded",
+        "Invalid connection URL: use tls://user:password@host[:port] or wss://user:password@host[:port][/path], with % # ? / \\ in the password percent-encoded",
       ),
     )
   })

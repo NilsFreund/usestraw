@@ -13,7 +13,7 @@ export function startCore(
 ): { readonly recorder: RecordedCore | undefined; readonly core: Core } {
   const { aor, credentials, maxCalls, acceptFrom, trace } = settings
   const { debug } = platform
-  // Over TLS only the server reaches us anyway
+  // Over TLS and WebSocket only the server reaches us anyway
   const filtered = acceptFrom !== "anyone" && first.local.transport === "UDP"
   const options = {
     address: first.local,

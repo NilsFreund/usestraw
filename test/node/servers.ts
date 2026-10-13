@@ -7,6 +7,7 @@ import type { Peer } from "../../src/node/links"
 import { createRandom } from "../../src/simulation/random"
 import { createStreamFramer } from "../../src/transport/stream"
 import { type Registrar, type RegistrarOptions, registrar } from "../registrar"
+import { startWebSocketServer, type WebSocketPeer } from "./websocket-server"
 
 export const certificate: string = readFileSync(
   new URL("../fixtures/tls/localhost.crt", import.meta.url),
@@ -121,6 +122,46 @@ export async function tlsRegistrar(
         for (const socket of sockets) socket.destroy()
         tls.close(() => resolve())
       }),
+  }
+}
+
+export interface WebSocketRegistrar {
+  readonly port: number
+  readonly registrar: Registrar
+  readonly peers: readonly WebSocketPeer[]
+  readonly offered: readonly (string | undefined)[]
+  readonly frames: readonly ("text" | "binary")[]
+  close(): Promise<void>
+}
+
+// A registrar behind SIP over WebSocket (RFC 7118) on 127.0.0.1
+export async function wsRegistrar(
+  options: RegistrarOptions = {},
+  {
+    path = "/ws",
+    protocol = "sip",
+  }: { readonly path?: string; readonly protocol?: string | null } = {},
+): Promise<WebSocketRegistrar> {
+  const server = registrar(options)(createRandom(9))
+  const frames: ("text" | "binary")[] = []
+  const ws = await startWebSocketServer({
+    path,
+    protocol,
+    onMessage: (peer, data, text) => {
+      frames.push(text ? "text" : "binary")
+      const from = { transport: "WS", host: "127.0.0.1", port: peer.remotePort } as const
+      for (const output of server.handle({ type: "receive", data, from }, performance.now())) {
+        if (output.type === "send") peer.send(new TextDecoder().decode(output.data))
+      }
+    },
+  })
+  return {
+    port: ws.port,
+    registrar: server,
+    peers: ws.peers,
+    offered: ws.offered,
+    frames,
+    close: () => ws.close(),
   }
 }
 

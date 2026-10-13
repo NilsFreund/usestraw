@@ -4,6 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 
 ## [Unreleased]
 
+### Added
+
+- SIP over WebSocket (RFC 7118) in Node: `wss://user:password@host[:port][/path]` URLs and `wss://` servers, `ws://` for localhost only. The phone registers as a random `.invalid` host with `transport=ws` and an RFC 5626 instance id (`;ob` on dialog Contacts, one plain retry after 439), keeps that Contact across reconnects, sends CRLF keepalives and drops a server that stops answering them, and sends audio from the interface that reaches the server.
+
 ## [0.1.0-rc.0] - 2026-10-12
 
 The first release candidate: make and take phone calls from Node, with the audio as Web Streams.

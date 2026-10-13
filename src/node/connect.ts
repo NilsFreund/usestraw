@@ -6,15 +6,18 @@ import {
 } from "../phone/options"
 import { connectPhone } from "../phone/phone"
 import type { Platform } from "../phone/platform"
+import { secureRandom } from "../phone/random"
 import type { Phone } from "../phone/types"
+import { invalidHost, openWebSocket } from "../phone/websocket"
+import { isWebSocket } from "../transport/address"
 import { openAudio } from "./audio"
 import { debugOutput } from "./debug"
-import { openLink } from "./links"
+import { localAddressTowards, openLink } from "./links"
 
 /**
  * Registers a phone with your SIP server and resolves once it's online. After that it re-registers
- * and reconnects on its own. The URL looks like `tls://user:password@host[:port]` or `udp://…`,
- * with special characters in the password percent-encoded.
+ * and reconnects on its own. The URL looks like `tls://user:password@host[:port]`, `udp://…` or
+ * `wss://user:password@host[:port][/path]`, with special characters in the password percent-encoded.
  *
  * @example
  * ```ts
@@ -52,9 +55,19 @@ export async function connect(
 
 export function nodePlatform(settings: PhoneSettings): Platform {
   const { server, tls, localPort: port } = settings
+  if (!isWebSocket(server.transport)) {
+    return {
+      connect: (signal) => openLink(server, { tls, port }, signal),
+      openAudio,
+      debug: debugOutput(),
+    }
+  }
+  // One name for the phone's life, so a new connection registers the same Contact
+  const host = invalidHost(secureRandom)
   return {
-    connect: (signal) => openLink(server, { tls, port }, signal),
-    openAudio,
+    connect: (signal) => openWebSocket(server, host, signal),
+    openAudio: async (_, silent) =>
+      openAudio(await localAddressTowards(server.host, server.port), silent),
     debug: debugOutput(),
   }
 }

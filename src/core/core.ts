@@ -5,6 +5,7 @@ import { parseMessage } from "../message/parse"
 import { serializeMessage } from "../message/serialize"
 import { show } from "../message/syntax"
 import { isRequest, type SipRequest, type SipResponse } from "../message/types"
+import { isIp } from "../support/ip"
 import { checkTime, earliest } from "../support/time"
 import { resolveTimers } from "../transaction/timers"
 import { createTransactions } from "../transaction/transactions"
@@ -32,7 +33,7 @@ import {
 } from "./checks"
 import { emit, send } from "./outputs"
 import { createOutside } from "./outside"
-import { defaultRegistrar } from "./registration/binding"
+import { defaultRegistrar, dialogContact } from "./registration/binding"
 import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
@@ -86,7 +87,7 @@ export function createCore(options: CoreOptions): Core {
   const calls = createCalls({
     identity,
     get contact() {
-      return registration.contact
+      return dialogContact(registration.contact, address)
     },
     credentials,
     trust,
@@ -128,7 +129,7 @@ export function createCore(options: CoreOptions): Core {
       return [emit({ type: "invalid", error, from })]
     }
     const via = message.via.map((entry, index) =>
-      index === 0 ? withReceived(entry, from.host, from.port) : entry,
+      index === 0 && isIp(from.host) ? withReceived(entry, from.host, from.port) : entry,
     )
     const request = { ...message, via }
     const refusal = request.method === "INVITE" ? admit(request) : undefined

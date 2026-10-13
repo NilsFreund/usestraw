@@ -3,6 +3,7 @@ import {
   createBranch,
   createCallId,
   createCnonce,
+  createInstanceId,
   createTag,
   randomToken,
 } from "../../src/core/ids"
@@ -41,5 +42,19 @@ describe("identifiers", () => {
     expect(createTag(createRandom(1))).toMatch(/^[a-z0-9]{10}$/)
     expect(createCallId(createRandom(1))).toMatch(/^[a-z0-9]{20}$/)
     expect(createCnonce(createRandom(1))).toMatch(/^[a-z0-9]{16}$/)
+  })
+})
+
+describe("createInstanceId", () => {
+  it("is a random version 4 UUID URN", () => {
+    expect(createInstanceId(createRandom(1))).toMatch(
+      /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
+    expect(createInstanceId(createRandom(1))).not.toBe(createInstanceId(createRandom(2)))
+  })
+
+  it("keeps the version and variant at the edges of the random range", () => {
+    expect(createInstanceId(() => 0)).toBe("urn:uuid:00000000-0000-4000-8000-000000000000")
+    expect(createInstanceId(() => 0.999_999)).toBe("urn:uuid:ffffffff-ffff-4fff-bfff-ffffffffffff")
   })
 })

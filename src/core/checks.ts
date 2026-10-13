@@ -4,16 +4,17 @@ import { hasLineBreak, isText, show } from "../message/syntax"
 import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
 import { familyOf, isIp, isUnspecified, parseRange, type Range } from "../support/ip"
-import { isAddress, type TransportAddress } from "../transport/address"
+import { isAddress, isWebSocket, type TransportAddress } from "../transport/address"
 import type { Credentials, LocalMedia } from "./types"
 
 export function checkAddress(address: TransportAddress): void {
   if (!isAddress(address)) throw new TypeError(`Invalid address ${show(address)}`)
 }
 
+// A WebSocket only ever knows the server by name, as a browser does
 export function checkSource(from: TransportAddress): void {
   checkAddress(from)
-  if (!isIp(from.host)) {
+  if (!isIp(from.host) && !isWebSocket(from.transport)) {
     throw new TypeError(`The source must be an IP address, got ${show(from.host)}`)
   }
 }

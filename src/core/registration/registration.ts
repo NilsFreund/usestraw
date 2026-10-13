@@ -4,6 +4,7 @@ import { getHeader } from "../../message/headers"
 import type { SipResponse } from "../../message/types"
 import { clientKey } from "../../transaction/keys"
 import type { TransportAddress } from "../../transport/address"
+import { isReliable } from "../../transport/address"
 import { createAuthenticator, type Trust } from "../authenticator"
 import type { Identity } from "../requests"
 import type { Credentials, RegistrationEvent, RegistrationFailure } from "../types"
@@ -97,6 +98,11 @@ export function createRegistration(
     if (status === 423 && attempt.expires > 0 && !attempt.raised && minimum > attempt.expires) {
       return send({ ...attempt, expires: minimum, raised: true })
     }
+    // RFC 5626 §4.2.1: an edge without outbound support gets a plain registration instead
+    if (status === 439 && registrant.instance !== undefined) {
+      registrant = { ...registrant, instance: undefined }
+      return send(attempt)
+    }
     if (status >= 300) {
       const sent = authenticator.answered().length > 0 ? { withCredentials: true as const } : {}
       const failure = { reason: "rejected", status, phrase: response.reason, ...sent } as const
@@ -107,13 +113,13 @@ export function createRegistration(
       bound = undefined
       return [emit({ type: "registration", state: "unregistered" })]
     }
-    const granted = grantedExpiry(response, registrant.contact, attempt.expires)
+    const granted = grantedExpiry(response, registrant, attempt.expires)
     if (granted === 0) return fail(attempt, { reason: "not-bound" }, now)
     const answered = authenticator.answered()
     if (answered.length > 0) trust.learn(answered)
     bound = { to: attempt.to, registrar: attempt.registrar, expires: attempt.expires }
     const registered = emit({ type: "registration", state: "registered", expires: granted })
-    if (attempt.stale && !listsBinding(response, registrant.contact)) {
+    if (attempt.stale && !listsBinding(response, registrant)) {
       return [registered, ...send({ ...bound })]
     }
     const seen = rewriting && !attempt.stale ? publicAddress(response, reachable) : undefined
@@ -167,8 +173,8 @@ export function createRegistration(
   function move(address: TransportAddress): void {
     const contact = createContact(address, identity.aor)
     reachable = address
-    if (contact.uri === registrant.contact.uri) return
-    // Answers to REGISTERs over the old connection can no longer arrive
+    // A WebSocket keeps its Contact, yet answers over the old connection can no longer arrive
+    if (contact.uri === registrant.contact.uri && !isReliable(address)) return
     pending = undefined
     queued = undefined
     if (bound) left ??= registrant.contact

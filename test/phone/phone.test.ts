@@ -217,8 +217,11 @@ describe("phone status", () => {
     expect(await next).toStrictEqual({ value: undefined, done: true })
   })
 
-  async function streaming(reopen?: (signal: AbortSignal) => Promise<Link>) {
-    const network = memoryNetwork({}, { stream: true })
+  async function streaming(
+    reopen?: (signal: AbortSignal) => Promise<Link>,
+    stream: true | "websocket" = true,
+  ) {
+    const network = memoryNetwork({}, { stream })
     const phone = await startOn(
       network,
       { ...resolveOptions(account), expires: 60 },
@@ -246,16 +249,19 @@ describe("phone status", () => {
     expect(phone.error?.reason).toBe("wrong-password")
   })
 
-  it("drops a silent stream connection and dials back in", async () => {
-    const { network, phone } = await streaming()
-    network.online = false
-    await vi.advanceTimersByTimeAsync(70_000)
-    expect(network.closed).toBe(true)
-    expect(phone.status).toBe("reconnecting")
-    network.online = true
-    await vi.advanceTimersByTimeAsync(40_000)
-    expect(phone.status).toBe("online")
-  })
+  it.each([true, "websocket"] as const)(
+    "drops a silent stream connection (%s) and dials back in",
+    async (stream) => {
+      const { network, phone } = await streaming(undefined, stream)
+      network.online = false
+      await vi.advanceTimersByTimeAsync(70_000)
+      expect(network.closed).toBe(true)
+      expect(phone.status).toBe("reconnecting")
+      network.online = true
+      await vi.advanceTimersByTimeAsync(40_000)
+      expect(phone.status).toBe("online")
+    },
+  )
 
   it("backs off when the connection keeps dropping right after it came back", async () => {
     const { network, phone } = await streaming()
@@ -816,8 +822,8 @@ describe("phone and its calls", () => {
 describe("phone on a trunk", () => {
   const trunk = { register: false } as const
   const at = (host: string) => ({ transport: "UDP", host, port: 5060 }) as const
-  const streamed = async () => {
-    const network = memoryNetwork({}, { stream: true })
+  const streamed = async (stream: true | "websocket" = true) => {
+    const network = memoryNetwork({}, { stream })
     const settings = resolveOptions({ ...account, ...trunk })
     const phone = await startOn(network, settings)
     return { network, phone }
@@ -893,20 +899,23 @@ describe("phone on a trunk", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it("drops a stream connection whose server stops answering, and checks once a minute again after dialing back in", async () => {
-    const { network, phone } = await streamed()
-    network.online = false
-    await vi.advanceTimersByTimeAsync(92_001)
-    expect(network.closed).toBe(true)
-    expect(phone.status).toBe("reconnecting")
-    network.online = true
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(phone.status).toBe("online")
-    const sent = network.sent
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(network.sent).toBe(sent + 1)
-    await closeNow(phone)
-  })
+  it.each([true, "websocket"] as const)(
+    "drops a stream connection (%s) whose server stops answering, and checks once a minute again after dialing back in",
+    async (stream) => {
+      const { network, phone } = await streamed(stream)
+      network.online = false
+      await vi.advanceTimersByTimeAsync(92_001)
+      expect(network.closed).toBe(true)
+      expect(phone.status).toBe("reconnecting")
+      network.online = true
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(phone.status).toBe("online")
+      const sent = network.sent
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(network.sent).toBe(sent + 1)
+      await closeNow(phone)
+    },
+  )
 
   it("stops checking once closed", async () => {
     const { network, phone } = await streamed()

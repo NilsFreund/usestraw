@@ -41,6 +41,13 @@ export async function openLink(
   return openUdp({ address, family, port: server.port, others }, port)
 }
 
+// Over a WebSocket the phone knows the server by name only, so audio needs the interface towards it
+export async function localAddressTowards(host: string, port: number): Promise<string> {
+  const [found] = await lookup(host, { all: true, order: "ipv4first" })
+  const { address, family } = found as LookupAddress
+  return outboundAddress(family === 6 ? "udp6" : "udp4", { address, family, port })
+}
+
 export async function openUdp(peer: Peer, port = 0): Promise<Link> {
   const type: SocketType = peer.family === 6 ? "udp6" : "udp4"
   const host = await outboundAddress(type, peer)

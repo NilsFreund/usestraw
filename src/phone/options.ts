@@ -4,7 +4,8 @@ import { formatHost, isSocketHost } from "../message/fields/host"
 import { isUri, splitSipUri } from "../message/fields/uri"
 import { show } from "../message/syntax"
 import { isIntegerIn } from "../support/integer"
-import { defaultPort } from "../transport/address"
+import { isIp } from "../support/ip"
+import { isWebSocket } from "../transport/address"
 import { parseConnectionUrl } from "./url"
 
 /** TLS settings for a `tls://` server. */
@@ -64,8 +65,8 @@ export interface ConnectOptions extends ConnectUrlOptions {
   /** Your SIP address, e.g. `"sip:+442079460456@sip.example.com"`. */
   readonly uri: string
   /**
-   * `tls://host[:port]` (port 5061 by default) or `udp://host[:port]` (5060). Defaults to the
-   * domain of `uri`, over UDP, or TLS for `sips:`.
+   * `tls://host[:port]` (port 5061 by default), `udp://host[:port]` (5060) or
+   * `wss://host[:port][/path]` (443). Defaults to the domain of `uri`, over UDP, or TLS for `sips:`.
    */
   readonly server?: string | undefined
 }
@@ -75,9 +76,10 @@ export interface TlsSettings {
 }
 
 export interface Server {
-  readonly transport: "UDP" | "TLS"
+  readonly transport: "UDP" | "TLS" | "WS" | "WSS"
   readonly host: string
   readonly port: number
+  readonly path?: string
 }
 
 export interface PhoneSettings {
@@ -99,7 +101,9 @@ export interface PhoneSettings {
   readonly localPort?: number
 }
 
-const SERVER = /^(udp|tls):\/\/(\[[^\]]*\]|[^:/[\]]+)(?::(\d{1,5}))?$/i
+const SERVER = /^(udp|tls|wss?):\/\/(\[[^\]]*\]|[^:/?#[\]]+)(?::(\d{1,5}))?([/?][^#\s]*)?$/i
+const TRANSPORTS = { udp: "UDP", tls: "TLS", ws: "WS", wss: "WSS" } as const
+const PORTS = { UDP: 5060, TLS: 5061, WS: 80, WSS: 443 } as const
 const TRANSPORT = /;transport=([^;?]*)/i
 const SCHEME = /^(?:[a-z][\w+.-]*:\/\/|sips?:|tel:)/i
 const BRACKETED = /^\[[^\]]*\]/
@@ -141,8 +145,18 @@ export function resolveOptions(
   const named = options.server ?? ""
   const given = show(redact(named))
   if (!server) throw new TypeError(`Invalid server ${given}: ${hint(named)}`)
-  if (parts.scheme === "sips" && server.transport !== "TLS") {
-    throw new TypeError(`A sips: uri needs a tls:// server, got ${given}`)
+  if (parts.scheme === "sips" && server.transport !== "TLS" && server.transport !== "WSS") {
+    throw new TypeError(`A sips: uri needs a tls:// or wss:// server, got ${given}`)
+  }
+  if (server.transport === "WS" && !isLoopback(server.host)) {
+    throw new TypeError(
+      "ws:// sends the password unencrypted, so it only works with localhost: use wss://",
+    )
+  }
+  if (tls?.ca !== undefined && isWebSocket(server.transport)) {
+    throw new TypeError(
+      "tls.ca only works with a tls:// server; for wss:// the platform's trust store decides (NODE_EXTRA_CA_CERTS in Node)",
+    )
   }
   if (server.transport !== "UDP" && localPort !== undefined) {
     throw new TypeError("localPort only works with a udp:// server")
@@ -162,7 +176,7 @@ export function resolveOptions(
     registrar: `${parts.scheme}:${parts.hostport}`,
     username,
     server,
-    label: `${server.transport.toLowerCase()}://${formatHost(server.host)}:${server.port}`,
+    label: `${server.transport.toLowerCase()}://${formatHost(server.host)}:${server.port}${withoutQuery(server.path ?? "")}`,
     closeTimeout: 5000,
     connectTimeout: 10_000,
     trace,
@@ -192,6 +206,9 @@ function fromUrl(url: string, extra: ConnectUrlOptions): ConnectOptions {
 
 function fallback(uri: string, scheme: string, hostport: string): string {
   const transport = TRANSPORT.exec(uri.slice(uri.indexOf("@")))?.[1]?.toLowerCase()
+  if (transport === "ws" || transport === "wss") {
+    throw new TypeError("For WebSocket, pass the server as wss://host[:port][/path]")
+  }
   if (transport !== undefined && transport !== "udp" && transport !== "tls") {
     throw new TypeError(
       `Unsupported transport ${show(transport)} in ${show(redact(uri))}: use udp or tls`,
@@ -201,12 +218,23 @@ function fallback(uri: string, scheme: string, hostport: string): string {
 }
 
 function parseServer(server: string): Server | undefined {
-  const [, scheme, host = "", port] = SERVER.exec(server) ?? []
-  if (scheme === undefined || !isSocketHost(host)) return undefined
-  const transport = scheme.toUpperCase() === "TLS" ? "TLS" : "UDP"
-  const number = port === undefined ? defaultPort(transport) : Number(port)
+  const [, scheme = "", host = "", port, path] = SERVER.exec(server) ?? []
+  const transport = TRANSPORTS[scheme.toLowerCase() as keyof typeof TRANSPORTS]
+  if (transport === undefined || !isSocketHost(host)) return undefined
+  const webSocket = isWebSocket(transport)
+  if (path !== undefined && !webSocket) return undefined
+  const number = port === undefined ? PORTS[transport] : Number(port)
   if (!isIntegerIn(number, 1, 65535)) return undefined
-  return { transport, host: host.replace(/^\[(.*)\]$/, "$1"), port: number }
+  const bare = host.replace(/^\[(.*)\]$/, "$1")
+  if (!webSocket) return { transport, host: bare, port: number }
+  const full = path === undefined ? "/" : path.startsWith("?") ? `/${path}` : path
+  return { transport, host: bare, port: number, path: full }
+}
+
+function isLoopback(host: string): boolean {
+  return (
+    host.toLowerCase() === "localhost" || host === "::1" || (isIp(host) && host.startsWith("127."))
+  )
 }
 
 // What redact() cuts away, said in words
@@ -215,8 +243,8 @@ function hint(server: string): string {
   if (port !== undefined && !isIntegerIn(Number(port), 1, 65535)) {
     return "the port must be from 1 to 65535"
   }
-  if (/^\w+:\/\/[^/]*\//.test(server)) return "leave out the path"
-  return "use udp://host[:port] or tls://host[:port]"
+  if (/^(?:udp|tls):\/\/[^/]*\//i.test(server)) return "leave out the path"
+  return "use udp://host[:port], tls://host[:port] or wss://host[:port][/path]"
 }
 
 function checkText(name: string, value: unknown): asserts value is string {
@@ -226,7 +254,13 @@ function checkText(name: string, value: unknown): asserts value is string {
 }
 
 // Errors repeat what was given, but nothing after a user: or host:, where a password may be
-function redact(value: string): string {
+// A WebSocket URL's query often carries a token, so it is never repeated
+function withoutQuery(value: string): string {
+  return value.replace(/\?.*/s, "?…")
+}
+
+function redact(given: string): string {
+  const value = withoutQuery(given)
   const at = value.lastIndexOf("@")
   if (at !== -1) return `…${value.slice(at)}`
   const scheme = SCHEME.exec(value)?.[0].length ?? 0

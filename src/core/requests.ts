@@ -4,7 +4,7 @@ import type { NameAddr } from "../message/fields/name-addr"
 import type { Via } from "../message/fields/via"
 import { MAX_FORWARDS } from "../message/limits"
 import type { SipHeader, SipRequest } from "../message/types"
-import type { TransportAddress } from "../transport/address"
+import { sentByPort, type TransportAddress } from "../transport/address"
 import { createBranch, createCallId, createTag } from "./ids"
 import type { Random } from "./types"
 
@@ -59,7 +59,7 @@ function createVia(address: TransportAddress, random: Random): Via {
   return {
     transport: address.transport,
     host: formatHost(address.host),
-    port: address.port,
+    port: sentByPort(address),
     params: new Map([
       ["branch", createBranch(random)],
       ["rport", null],
