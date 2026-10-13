@@ -14,6 +14,7 @@
  */
 export { createCore } from "./core/core"
 export type {
+  AppMedia,
   AuthChallenge,
   AuthFailure,
   CallEnd,
@@ -31,6 +32,7 @@ export type {
   Random,
   RegistrationEvent,
   RegistrationFailure,
+  RemoteDescription,
 } from "./core/types"
 export type { Contact } from "./message/fields/contact"
 export type { CSeq } from "./message/fields/cseq"

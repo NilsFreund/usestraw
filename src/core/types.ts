@@ -16,7 +16,8 @@ export interface Credentials {
 /**
  * What the app wants: register, call, accept, end, ping or send a raw message. `move` follows a
  * new connection to its local address; register again, and that REGISTER asks to drop the old
- * Contact.
+ * Contact. `answer` answers a new offer from the far end with the app's own SDP, see
+ * `CoreOptions.media`.
  */
 export type CoreCommand =
   | {
@@ -39,15 +40,34 @@ export type CoreCommand =
       readonly call: string
       readonly uri: string
       readonly to: TransportAddress
-      readonly media: LocalMedia
+      readonly media: LocalMedia | AppMedia
     }
-  | { readonly type: "accept"; readonly call: string; readonly media: LocalMedia }
+  | { readonly type: "accept"; readonly call: string; readonly media: LocalMedia | AppMedia }
+  | { readonly type: "answer"; readonly call: string; readonly media: AppMedia }
   | { readonly type: "end"; readonly call: string; readonly status?: number | undefined }
 
 /** Where this phone receives RTP. `host` defaults to the core's own address. */
 export interface LocalMedia {
   readonly host?: string | undefined
   readonly port: number
+}
+
+/**
+ * The app's own SDP for a core with `media: "sdp"`, as an `RTCPeerConnection` makes it:
+ * `pc.localDescription` fits as it is.
+ */
+export interface AppMedia {
+  readonly sdp: string
+}
+
+/**
+ * The far end's SDP for the app to apply, shaped like `RTCSessionDescriptionInit` so it goes
+ * straight into `pc.setRemoteDescription()`. A `rollback` withdraws an offer the call no longer
+ * waits on.
+ */
+export interface RemoteDescription {
+  readonly type: "offer" | "pranswer" | "answer" | "rollback"
+  readonly sdp?: string
 }
 
 /** A challenge the server offered: its scheme, realm and algorithm. */
@@ -132,7 +152,12 @@ export interface CallParty {
   readonly name?: string
 }
 
-/** A call changed state; `call` is its id, the SIP Call-ID. */
+/**
+ * A call changed state; `call` is its id, the SIP Call-ID. With `media: "sdp"` the events carry
+ * the far end's SDP in `description` whenever the app has something to apply, instead of the
+ * agreed RTP `media`. An `offer` inside a call waits for an `answer` command; one without a
+ * description asks the app for an offer of its own.
+ */
 export type CallEvent =
   | {
       readonly type: "call"
@@ -141,6 +166,7 @@ export type CallEvent =
       readonly from: CallParty
       readonly to: CallParty
       readonly source: TransportAddress
+      readonly description?: RemoteDescription
     }
   | {
       readonly type: "call"
@@ -148,12 +174,20 @@ export type CallEvent =
       readonly state: "ringing"
       readonly status: number
       readonly media?: CallMedia
+      readonly description?: RemoteDescription
     }
   | {
       readonly type: "call"
       readonly call: string
       readonly state: "live"
       readonly media?: CallMedia
+      readonly description?: RemoteDescription
+    }
+  | {
+      readonly type: "call"
+      readonly call: string
+      readonly state: "offer"
+      readonly description?: RemoteDescription
     }
   | {
       readonly type: "call"
@@ -222,6 +256,21 @@ export interface CoreOptions {
    * anyone when unset. Requests inside a call only need to match the call.
    */
   readonly acceptFrom?: readonly string[] | undefined
+  /**
+   * Who makes the SDP: Straw, as G.711 for the RTP address in each call's `media` (`"rtp"`), or
+   * the app, as WebRTC does (`"sdp"`). Then `call`, `accept` and `answer` take `{ sdp }`, and the
+   * far end's SDP reaches the app unread, in each event's `description`:
+   *
+   * - `incoming` carries the offer; without one, `accept` makes the offer and `live` brings the
+   *   answer.
+   * - `ringing` may carry a `pranswer`, and `live` the `answer` to an offer the app made.
+   * - `offer` asks for an `answer` within 10 s, or the far end gets 488 and the app a `rollback`.
+   *
+   * End a call with status 488 when the app cannot use the far end's offer.
+   *
+   * @default "rtp"
+   */
+  readonly media?: "rtp" | "sdp" | undefined
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { CallEvent, CoreOutput } from "../core/types"
+import type { CallEvent, CoreOutput, RemoteDescription } from "../core/types"
 import { formatHost } from "../message/fields/host"
 import type { CallMedia } from "../sdp/types"
 import type { TransportAddress } from "../transport/address"
@@ -59,15 +59,17 @@ function describe(output: CoreOutput): string | undefined {
 
 function call(event: CallEvent): string {
   if (event.state === "incoming") return `incoming from ${event.from.uri}`
-  if (event.state === "ringing") return `ringing ${event.status}${describeMedia(event.media)}`
-  if (event.state === "live") return `live${describeMedia(event.media)}`
+  if (event.state === "ringing") return `ringing ${event.status}${describeMedia(event)}`
+  if (event.state === "live") return `live${describeMedia(event)}`
+  if (event.state === "offer") return event.description ? "offered new media" : "asked for an offer"
   const { by, reason, status } = event.ended
   const who = by === "local" ? "us" : "them"
   return `ended by ${who}: ${reason}${status === undefined ? "" : ` ${status}`}`
 }
 
-function describeMedia(media: CallMedia | undefined): string {
-  if (!media) return ""
+function describeMedia(event: { media?: CallMedia; description?: RemoteDescription }): string {
+  const { media, description } = event
+  if (!media) return description ? ` with ${description.type}` : ""
   const { codec, remote, direction } = media
   const { host, port } = remote
   return ` ${codec} to ${formatHost(host)}:${port}${direction === "sendrecv" ? "" : ` ${direction}`}`

@@ -14,10 +14,12 @@ import type { TransportAddress } from "../transport/address"
 import { createAdmission } from "./admission"
 import { createTrust } from "./authenticator"
 import { createCalls } from "./calls/calls"
+import type { MediaSetup } from "./calls/media"
 import type { CallOutput } from "./calls/types"
 import {
   checkAddress,
   checkAor,
+  checkAppMedia,
   checkCall,
   checkCallId,
   checkCredentials,
@@ -38,7 +40,15 @@ import { createRegistration } from "./registration/registration"
 import type { RegistrationInput, RegistrationOutput } from "./registration/types"
 import { createOptionsRequest } from "./requests"
 import { createResponder } from "./responder"
-import type { Core, CoreCommand, CoreInput, CoreOptions, CoreOutput } from "./types"
+import type {
+  AppMedia,
+  Core,
+  CoreCommand,
+  CoreInput,
+  CoreOptions,
+  CoreOutput,
+  LocalMedia,
+} from "./types"
 
 // Output too big for any parser, or aimed at port 0, is dropped like a lost packet
 const fits = (output: CoreOutput) =>
@@ -59,18 +69,22 @@ const fits = (output: CoreOutput) =>
  * }
  * run({ type: "command", command: { type: "register", to: server } })
  * ```
- * @throws {TypeError} for an invalid address, address of record, credentials or `acceptFrom`
+ * @throws {TypeError} for an invalid address, address of record, credentials, `acceptFrom` or `media`
  * @throws {RangeError} for timers, `maxCalls` or lengths out of range
  * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
 export function createCore(options: CoreOptions): Core {
-  const { aor, random, maxCalls = MAX_CALLS, acceptFrom } = options
+  const { aor, random, maxCalls = MAX_CALLS, acceptFrom, media: making = "rtp" } = options
   let { address } = options
   checkAddress(address)
   checkAor(aor)
   const credentials = options.credentials && Object.freeze({ ...options.credentials })
   if (credentials) checkCredentials(credentials)
   checkMaxCalls(maxCalls)
+  if (making !== "rtp" && making !== "sdp") {
+    throw new TypeError(`media must be "rtp" or "sdp", got ${show(making)}`)
+  }
+  const appMedia = making === "sdp"
   const accepted = acceptFrom === undefined ? undefined : parseAcceptFrom(acceptFrom)
   const timers = resolveTimers(options.timers)
   const transactions = createTransactions({ local: address, timers })
@@ -92,8 +106,15 @@ export function createCore(options: CoreOptions): Core {
     credentials,
     trust,
     timers,
+    appMedia,
   })
-  const { accepts, admit } = createAdmission({ accepted, maxCalls, calls, transactions })
+  const { accepts, admit } = createAdmission({
+    accepted,
+    maxCalls,
+    calls,
+    transactions,
+    appMedia,
+  })
   const outside = createOutside()
 
   function handle(input: CoreInput, now: number): CoreOutput[] {
@@ -186,14 +207,19 @@ export function createCore(options: CoreOptions): Core {
         checkCallId(call)
         checkRequestUri(uri)
         checkAddress(to)
-        const media = outside.advertised(checkMedia(command.media, address.host))
+        const media = mediaOf(command.media)
         if (calls.owns(call)) throw new TypeError(`Call ${show(call)} already exists`)
         return translateCalls(calls.start({ call, uri, to, media }, now), now)
       }
       case "accept": {
         checkCall(command.call)
-        const media = outside.advertised(checkMedia(command.media, address.host))
-        return translateCalls(calls.accept(command.call, media, now), now)
+        return translateCalls(calls.accept(command.call, mediaOf(command.media), now), now)
+      }
+      case "answer": {
+        checkCall(command.call)
+        if (!appMedia) throw new TypeError('answer needs a core with media: "sdp"')
+        const sdp = checkAppMedia(command.media)
+        return translateCalls(calls.answer(command.call, sdp, now), now)
       }
       case "end": {
         const { call, status } = command
@@ -204,6 +230,11 @@ export function createCore(options: CoreOptions): Core {
       default:
         throw new TypeError(`Unknown command ${show(command)}`)
     }
+  }
+
+  function mediaOf(media: LocalMedia | AppMedia): MediaSetup {
+    if (appMedia) return { sdp: checkAppMedia(media) }
+    return outside.advertised(checkMedia(media, address.host))
   }
 
   // Answers from the server show where it saw us, which audio and a trunk's Contact need

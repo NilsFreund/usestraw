@@ -1,12 +1,11 @@
 import type { SipRequest, SipResponse } from "../../message/types"
-import type { MediaAddress } from "../../sdp/types"
 import { sameBytes } from "../../support/bytes"
 import { transactionTimeout } from "../../transaction/timers"
 import type { TransportAddress } from "../../transport/address"
 import { createAuthenticator } from "../authenticator"
 import { createTag } from "../ids"
 import type { CallEnd } from "../types"
-import { createMedia } from "./media"
+import { type MediaSetup, mediaFor } from "./media"
 import { emit, respond, send } from "./outputs"
 import { reasonFor } from "./reasons"
 import { createReply } from "./replies"
@@ -25,7 +24,7 @@ export interface OutgoingSetup {
   readonly call: string
   readonly uri: string
   readonly to: TransportAddress
-  readonly media: MediaAddress
+  readonly media: MediaSetup
 }
 
 interface Confirmed {
@@ -41,8 +40,9 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
   const { call, uri, to } = setup
   const { identity, contact, credentials, trust, timers } = context
   const authenticator = createAuthenticator(credentials, identity.random, trust)
-  const from = { uri: identity.aor, params: new Map([["tag", createTag(identity.random)]]) }
-  const media = createMedia(setup.media, identity.random)
+  const ours = createTag(identity.random)
+  const from = { uri: identity.aor, params: new Map([["tag", ours]]) }
+  const media = mediaFor(setup.media, identity.random)
   const sdp = media.offer()
   const forks = new Map<string, SipRequest>()
   const early = new Map<string, Uint8Array>()
@@ -115,7 +115,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     }
     if (ringing && sameRinging(ringing, reply)) return outputs
     ringing = reply
-    const preview = reply.body.length > 0 ? media.read(reply.body) : undefined
+    const preview = reply.body.length > 0 && media.read(reply.body)
     return [
       ...outputs,
       emit({
@@ -123,7 +123,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
         call,
         state: "ringing",
         status: reply.status,
-        ...(preview ? { media: preview } : {}),
+        ...(preview ? media.shown("pranswer") : {}),
       }),
     ]
   }
@@ -136,7 +136,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     const dialog = createDialog(invite, reply)
     const ack = createDialogAck(dialog, invite, identity)
     const session = createSession(
-      { call, dialog, to, seq, media },
+      { call, tag: ours, dialog, to, seq, media },
       { identity, contact, authenticator, timers },
     )
     confirmed = { session, ack, tag }
@@ -144,9 +144,9 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     if (cancelWanted) return [send(ack, to), ...session.end(CANCELLED)]
     // RFC 3264 §5: the answer in the 2xx decides; without one we keep what this fork's early media said
     const answer = reply.body.length > 0 ? reply.body : early.get(tag)
-    const answered = answer && media.read(answer)
+    const answered = answer !== undefined && media.read(answer)
     if (!answered) return [send(ack, to), ...session.end(INCOMPATIBLE)]
-    return [send(ack, to), emit({ type: "call", call, state: "live", media: answered })]
+    return [send(ack, to), emit({ type: "call", call, state: "live", ...media.shown("answer") })]
   }
 
   function fork(reply: SipResponse, tag: string): CallOutput[] {
@@ -204,6 +204,7 @@ export function createOutgoing(setup: OutgoingSetup, context: CallContext): Call
     merges: (request) => repeats(invite, request),
     request,
     acknowledge: (ack) => confirmed?.session.acknowledge(ack) ?? [],
+    answer: (sdp, now) => confirmed?.session.answer(sdp, now) ?? [],
     expire,
   }
 }

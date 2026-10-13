@@ -5,7 +5,7 @@ import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
 import { familyOf, isIp, isUnspecified, parseRange, type Range } from "../support/ip"
 import { isAddress, isWebSocket, type TransportAddress } from "../transport/address"
-import type { Credentials, LocalMedia } from "./types"
+import type { AppMedia, Credentials, LocalMedia } from "./types"
 
 export function checkAddress(address: TransportAddress): void {
   if (!isAddress(address)) throw new TypeError(`Invalid address ${show(address)}`)
@@ -68,7 +68,10 @@ export function checkCall(call: string): void {
 }
 
 // RFC 3550 §11: RTP takes an even port, and the far end must be able to send to our host
-export function checkMedia(media: LocalMedia, fallback: string): MediaAddress {
+export function checkMedia(media: LocalMedia | AppMedia, fallback: string): MediaAddress {
+  if (typeof media === "object" && media !== null && "sdp" in media) {
+    throw new TypeError('{ sdp } needs a core with media: "sdp"')
+  }
   if (typeof media !== "object" || media === null) {
     throw new TypeError(`Invalid media ${show(media)}`)
   }
@@ -84,6 +87,22 @@ export function checkMedia(media: LocalMedia, fallback: string): MediaAddress {
     throw new RangeError(`The media port must be an even number from 2 to 65534, got ${show(port)}`)
   }
   return { host, port }
+}
+
+const MAX_SDP = 32_768
+const encoder = new TextEncoder()
+
+// The app's SDP goes out as it is, so it has to be SDP and fit a message
+export function checkAppMedia(media: LocalMedia | AppMedia): string {
+  const sdp = typeof media === "object" && media !== null && "sdp" in media ? media.sdp : undefined
+  if (typeof sdp !== "string" || !/^v=0\r?\n/.test(sdp) || sdp.includes("\0")) {
+    throw new TypeError(`With media: "sdp", calls take { sdp } with an SDP, got ${show(media)}`)
+  }
+  const size = encoder.encode(sdp).length
+  if (size > MAX_SDP) {
+    throw new RangeError(`An SDP must be at most ${MAX_SDP} bytes, got ${size}`)
+  }
+  return sdp
 }
 
 export function checkRejection(status: number): void {

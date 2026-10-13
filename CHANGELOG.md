@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 ### Added
 
 - SIP over WebSocket (RFC 7118) in Node: `wss://user:password@host[:port][/path]` URLs and `wss://` servers, `ws://` for localhost only. The phone registers as a random `.invalid` host with `transport=ws` and an RFC 5626 instance id (`;ob` on dialog Contacts, one plain retry after 439), keeps that Contact across reconnects, sends CRLF keepalives and drops a server that stops answering them, and sends audio from the interface that reaches the server.
+- `usestraw/core`: `media: "sdp"` lets the app make the SDP, as WebRTC does. Calls take `{ sdp }`; events carry the far end's SDP as a `description` shaped like `RTCSessionDescriptionInit` (`offer`, `pranswer`, `answer`, `rollback`). A byte-identical refresh gets the same SDP back, any other offer inside a call, or a re-INVITE without one, becomes an `offer` event for an `answer` command, refused with 488 and rolled back when none comes within 10 s or the far end cancels.
 
 ## [0.1.0-rc.0] - 2026-10-12
 

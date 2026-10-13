@@ -16,6 +16,7 @@ const context: CallContext = {
   credentials: undefined,
   trust: createTrust(),
   timers: defaultTimers,
+  appMedia: false,
 }
 
 const bye = parsedRequest(

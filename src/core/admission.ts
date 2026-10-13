@@ -4,6 +4,7 @@ import { inRange, type Range } from "../support/ip"
 import type { Transactions } from "../transaction/transactions"
 import type { TransportAddress } from "../transport/address"
 import type { Calls } from "./calls/calls"
+import { sdpOf } from "./calls/media"
 import { INCOMPATIBLE_MEDIA } from "./calls/replies"
 import { type Answer, answerWith, checkInvite } from "./uas"
 
@@ -23,10 +24,11 @@ export interface AdmissionSetup {
   readonly maxCalls: number
   readonly calls: Calls
   readonly transactions: Transactions
+  readonly appMedia: boolean
 }
 
 export function createAdmission(setup: AdmissionSetup): Admission {
-  const { accepted, maxCalls, calls, transactions } = setup
+  const { accepted, maxCalls, calls, transactions, appMedia } = setup
   // Ended calls linger for 64·T1, so a flood of short calls is capped before it costs memory
   const capacity = Math.max(64, 4 * maxCalls)
 
@@ -43,7 +45,10 @@ export function createAdmission(setup: AdmissionSetup): Admission {
     if (invite.to.params.has("tag") || transactions.hasInvite(invite)) return undefined
     const refusal = checkInvite(invite)
     if (refusal) return refusal
-    if (invite.body.length > 0 && !isPlayable(invite.body)) return UNPLAYABLE
+    const usable = appMedia ? sdpOf(invite.body) !== undefined : isPlayable(invite.body)
+    if (invite.body.length > 0 && !usable) {
+      return UNPLAYABLE
+    }
     if (calls.collides(invite)) return LOOP
     if (calls.active() >= maxCalls) return BUSY
     return calls.tracked() >= capacity ? FULL : undefined

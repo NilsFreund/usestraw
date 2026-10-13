@@ -1,13 +1,12 @@
 import type { NameAddr } from "../../message/fields/name-addr"
 import { getHeader } from "../../message/headers"
 import type { SipHeader, SipRequest } from "../../message/types"
-import type { MediaAddress } from "../../sdp/types"
 import { serverKey } from "../../transaction/keys"
 import type { TransportAddress } from "../../transport/address"
 import { createAuthenticator } from "../authenticator"
 import { createTag } from "../ids"
 import type { CallEnd, CallParty } from "../types"
-import { createMedia } from "./media"
+import { type MediaSetup, mediaFor, sdpOf } from "./media"
 import { emit, respond } from "./outputs"
 import { cancelReason, reasonFor } from "./reasons"
 import { repeatAnswer } from "./repeat"
@@ -54,16 +53,19 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
 
   function start(): CallOutput[] {
     const parties = { from: party(invite.from), to: party(invite.to), source }
+    // The app makes its own answer, so it needs the offer as it came
+    const sdp = context.appMedia ? sdpOf(invite.body) : undefined
+    const offer = sdp === undefined ? {} : { description: { type: "offer", sdp } as const }
     return [
       respond(transaction, ringing),
-      emit({ type: "call", call, state: "incoming", ...parties }),
+      emit({ type: "call", call, state: "incoming", ...parties, ...offer }),
     ]
   }
 
   // RFC 3264 §4: we answer the offer in the INVITE, or offer in the 200 and read the answer from the ACK
-  function accept(local: MediaAddress, now: number): CallOutput[] {
+  function accept(local: MediaSetup, now: number): CallOutput[] {
     if (session || state === "ended") return []
-    const media = createMedia(local, identity.random)
+    const media = mediaFor(local, identity.random)
     const offered = invite.body.length === 0
     const sdp = offered ? media.offer() : media.answer(invite.body)
     if (!sdp) {
@@ -75,7 +77,7 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
     const pending = { repeat: repeatAnswer(transaction, ok, now, timers), offered }
     const authenticator = createAuthenticator(credentials, identity.random, trust)
     session = createSession(
-      { call, dialog, to: source, seq: 0, remoteSeq: invite.cseq.seq, media, pending },
+      { call, tag, dialog, to: source, seq: 0, remoteSeq: invite.cseq.seq, media, pending },
       { identity, contact, authenticator, timers },
     )
     return [respond(transaction, ok)]
@@ -89,15 +91,15 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
   // RFC 3261 §9.2: a CANCEL gets 200, and while the INVITE it targets still rings, that INVITE gets 487
   function cancel(request: SipRequest, other: string): CallOutput[] {
     const ok = respond(other, createReply(request, 200, { tag }))
-    const ringingInvite = !session && serverKey({ ...request, method: "INVITE" }) === transaction
+    const ringingInvite = serverKey({ ...request, method: "INVITE" }) === transaction
     if (!ringingInvite) return [ok]
     return [ok, ...reject(487, { by: "remote", reason: cancelReason(request) })]
   }
 
   // RFC 3261 §15.1.2: a BYE on the early dialog ends the pending INVITE with 487
   function request(incoming: SipRequest, other: string, now: number): CallOutput[] {
-    if (incoming.method === "CANCEL") return cancel(incoming, other)
     if (session) return session.request(incoming, other, now)
+    if (incoming.method === "CANCEL") return cancel(incoming, other)
     const reply = (status: number) => respond(other, createReply(incoming, status, { tag }))
     if (state === "ended") return [reply(481)]
     if (incoming.method === "BYE") {
@@ -132,6 +134,7 @@ export function createIncoming(setup: IncomingSetup, context: CallContext, now: 
     merges: (request) => repeats(invite, request),
     request,
     acknowledge: (ack) => session?.acknowledge(ack) ?? [],
+    answer: (sdp, now) => session?.answer(sdp, now) ?? [],
     expire,
   }
 }

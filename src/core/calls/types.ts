@@ -1,11 +1,11 @@
 import type { NameAddr } from "../../message/fields/name-addr"
 import type { SipRequest, SipResponse } from "../../message/types"
-import type { MediaAddress } from "../../sdp/types"
 import type { TimerSettings } from "../../transaction/timers"
 import type { TransportAddress } from "../../transport/address"
 import type { Trust } from "../authenticator"
 import type { Identity } from "../requests"
 import type { CallEvent, Credentials } from "../types"
+import type { MediaSetup } from "./media"
 
 export type CallOutput =
   | { readonly type: "send"; readonly request: SipRequest; readonly to: TransportAddress }
@@ -19,13 +19,14 @@ export interface CallContext {
   readonly credentials: Credentials | undefined
   readonly trust: Trust
   readonly timers: TimerSettings
+  readonly appMedia: boolean
 }
 
 export interface CallState {
   readonly ended: boolean
   readonly deadline: number | undefined
   start(): CallOutput[]
-  accept(media: MediaAddress, now: number): CallOutput[]
+  accept(media: MediaSetup, now: number): CallOutput[]
   end(now: number, status?: number): CallOutput[]
   response(response: SipResponse, now: number): CallOutput[]
   timeout(request: SipRequest): CallOutput[]
@@ -33,5 +34,6 @@ export interface CallState {
   merges(invite: SipRequest): boolean
   request(request: SipRequest, transaction: string, now: number): CallOutput[]
   acknowledge(ack: SipRequest): CallOutput[]
+  answer(sdp: string, now: number): CallOutput[]
   expire(now: number): CallOutput[]
 }

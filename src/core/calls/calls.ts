@@ -1,8 +1,8 @@
 import type { SipRequest, SipResponse } from "../../message/types"
-import type { MediaAddress } from "../../sdp/types"
 import { earliest } from "../../support/time"
 import { transactionTimeout } from "../../transaction/timers"
 import { createIncoming, type IncomingSetup } from "./incoming"
+import type { MediaSetup } from "./media"
 import { createOutgoing, type OutgoingSetup } from "./outgoing"
 import type { CallContext, CallOutput, CallState } from "./types"
 
@@ -13,7 +13,8 @@ export interface Calls {
   tracked(): number
   start(setup: OutgoingSetup, now: number): CallOutput[]
   ring(setup: IncomingSetup, now: number): CallOutput[]
-  accept(call: string, media: MediaAddress, now: number): CallOutput[]
+  accept(call: string, media: MediaSetup, now: number): CallOutput[]
+  answer(call: string, sdp: string, now: number): CallOutput[]
   end(call: string, now: number, status?: number): CallOutput[]
   response(response: SipResponse, now: number): CallOutput[]
   timeout(request: SipRequest, now: number): CallOutput[]
@@ -67,6 +68,7 @@ export function createCalls(context: CallContext): Calls {
     start: (setup, now) => add(setup.call, createOutgoing(setup, context), now),
     ring: (setup, now) => add(setup.invite.callId, createIncoming(setup, context, now), now),
     accept: (id, media, now) => on(id, now, (call) => call.accept(media, now)),
+    answer: (id, sdp, now) => on(id, now, (call) => call.answer(sdp, now)),
     end: (id, now, status) => on(id, now, (call) => call.end(now, status)),
     response: (response, now) => on(response.callId, now, (call) => call.response(response, now)),
     timeout: (request, now) => on(request.callId, now, (call) => call.timeout(request)),
