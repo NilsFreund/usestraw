@@ -8,7 +8,7 @@ import { MAX_DELAY } from "../support/time"
 import type { TransportAddress } from "../transport/address"
 import { type CallHandle, type CallSetup, checkAgent, createCall, mediaOf } from "./call"
 import { createInbox } from "./inbox"
-import type { CallAudio } from "./platform"
+import type { AudioOptions, CallAudio } from "./platform"
 import { secureRandom } from "./random"
 import type {
   Call,
@@ -23,7 +23,7 @@ export interface CallListSetup {
   readonly aor: string
   readonly domain: string
   readonly server: () => TransportAddress
-  readonly openAudio: (silent: () => void) => Promise<CallAudio>
+  readonly openAudio: (silent: () => void, options: AudioOptions) => Promise<CallAudio>
   readonly run: (command: CoreCommand) => void
   readonly changed: () => void
 }

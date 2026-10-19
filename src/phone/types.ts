@@ -15,7 +15,8 @@ import type { PhoneStatus } from "./status"
  * - `"rejected"`: any other refusal (3xx, 4xx or 6xx).
  * - `"unauthorized"`: the server refused our credentials for this call.
  * - `"incompatible"`: no codec in common (488, 606).
- * - `"dropped"`: the other side stopped responding or sent no audio for a minute, or the phone closed.
+ * - `"dropped"`: the other side stopped responding or sent no audio for a minute (in the browser: the
+ *   connection failed), or the phone closed.
  *
  * New reasons may come in minor versions, so keep a default branch when you switch on them.
  */
@@ -51,12 +52,14 @@ export interface CallEnded {
 /** A live call's audio: 16-bit mono PCM at `sampleRate`, both ways. An agent locks both streams. */
 export interface CallAudioStreams {
   /**
-   * What the other side says: a 20 ms frame (160 samples at 8 kHz) every 20 ms, silence included.
+   * What the other side says: a 20 ms frame (160 samples at 8 kHz) every 20 ms, silence included,
+   * in the browser once the page may play audio.
    * Closes when the call ends. A reader that falls behind loses the oldest frames.
    */
   readonly readable: ReadableStream<Int16Array<ArrayBuffer>>
   /**
-   * What the other side hears, in chunks of any size. Writes resolve at once until 30 s are queued.
+   * What the other side hears, in chunks of any size, in the browser along with the microphone.
+   * Writes resolve at once until 30 s are queued.
    * `close()` resolves when the last sample is out, without hanging up. Once the call ends, writes
    * and a pending `close()` reject with an `AbortError`.
    */
@@ -142,8 +145,10 @@ export interface RingingCall extends CallBase {
    * Answers the call. Talk through the agent, or through `audio` on the returned call. Resolves to
    * an {@link UnansweredCall} if the caller gave up first, even while the microphone was being
    * asked for, or no audio port was free. Rejects for an agent that is already in use. In the
-   * browser it also rejects when the microphone is denied, missing or busy (`NotAllowedError`,
-   * `NotFoundError`, `NotReadableError`), and the call keeps `"ringing"`, so you can try again.
+   * browser an agent takes the microphone's place. Without one, it also rejects when the microphone
+   * is denied, missing or busy (`NotAllowedError`, `NotFoundError`, `NotReadableError`,
+   * `SecurityError`); with one, when the page can't run `call.audio` (`NotSupportedError`,
+   * `SecurityError`). Either way the call keeps `"ringing"`, so you can try again.
    *
    * @example
    * ```ts
@@ -189,7 +194,7 @@ export type Call = RingingCall | AnsweringCall | CallingCall | LiveCall | EndedC
 
 /** Options for `phone.call()`. */
 export interface CallOptions {
-  /** Talks for you once the call is answered. */
+  /** Talks for you once the call is answered. In the browser it takes the microphone's place. */
   readonly agent?: Agent | undefined
   /** How long to ring, in ms, before giving up with `reason: "no-answer"`. */
   readonly timeout?: number | undefined
@@ -254,8 +259,8 @@ export interface Phone extends AsyncDisposable {
    * ```
    * @throws {TypeError} for an address it cannot call, or an agent already in use
    * @throws {RangeError} for a timeout that is not a positive integer
-   * @throws {DOMException} `InvalidStateError` once the phone is closing, or in the browser when
-   *   the microphone is denied, missing or busy
+   * @throws {DOMException} `InvalidStateError` once the phone is closing. In the browser also what
+   *   `accept()` rejects with: the microphone's refusal, or why an agent's `call.audio` can't run
    * @throws {ConnectError} while the connection to the server is lost
    * @throws the signal's reason when it aborts first, or a socket error when no audio port is free
    */

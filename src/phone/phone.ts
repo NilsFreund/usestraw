@@ -83,7 +83,7 @@ export async function startPhone(
     aor,
     domain: registrar.slice(registrar.indexOf(":") + 1),
     server: () => connection.link.remote,
-    openAudio: (silent) => platform.openAudio(connection.link.local.host, silent),
+    openAudio: (silent, options) => platform.openAudio(connection.link.local.host, silent, options),
     run: (command) => run({ type: "command", command }),
     changed,
   })

@@ -19,7 +19,7 @@ import { localAddressTowards, openLink } from "./links"
  * and reconnects on its own. The URL looks like `tls://user:password@host[:port]`, `udp://…` or
  * `wss://user:password@host[:port][/path]`, with special characters in the password percent-encoded.
  * Browsers take only `wss://`, on a secure page, and ask for the microphone on the first call or
- * answer; behind NAT, give them `iceServers`.
+ * answer without an agent; behind NAT, give them `iceServers`.
  *
  * @example
  * ```ts
@@ -61,7 +61,7 @@ export function nodePlatform(settings: PhoneSettings): Platform {
   if (!isWebSocket(server.transport)) {
     return {
       connect: (signal) => openLink(server, { tls, port }, signal),
-      openAudio,
+      openAudio: (host, silent) => openAudio(host, silent),
       debug: debugOutput(),
     }
   }

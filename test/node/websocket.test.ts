@@ -104,7 +104,7 @@ describe("connect over WebSocket", () => {
     for (const host of ["127.0.0.1", "::1"]) {
       const server = host.includes(":") ? `[${host}]` : host
       const platform = nodePlatform(resolveOptions(`ws://alice@${server}:8088/ws`))
-      const audio = await platform.openAudio("a1b2c3d4e5f6.invalid", () => {})
+      const audio = await platform.openAudio("a1b2c3d4e5f6.invalid", () => {}, { microphone: true })
       expect("local" in audio && audio.local.host).toBe(host)
       audio.close()
     }

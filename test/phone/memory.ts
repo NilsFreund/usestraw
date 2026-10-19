@@ -85,7 +85,7 @@ export async function startOn(
 ): Promise<Phone & Pick<PhoneHandle, "ping">> {
   const { phone, ping } = await startPhone(network.link, settings, {
     connect: async () => network.link,
-    openAudio,
+    openAudio: (host, silent) => openAudio(host, silent),
     ...platform,
   })
   return Object.assign(phone, { ping })

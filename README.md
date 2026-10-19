@@ -47,7 +47,7 @@ if (!call.ok) console.log(call.reason) // "busy", "no-answer", …
 
 ## Limits
 
-0.1 runs in Node only and speaks G.711 only. It has no SRTP, DTMF, hold or transfer yet. The browser comes next.
+Straw runs in Node, and in browsers over `wss://` with WebRTC. Node speaks G.711 only, without SRTP. There is no DTMF, hold or transfer yet.
 
 ## More
 

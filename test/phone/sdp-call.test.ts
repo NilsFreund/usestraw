@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { CoreCommand, RemoteDescription } from "../../src/core"
 import { type CallSetup, createCall } from "../../src/phone/call"
 import { resolveOptions } from "../../src/phone/options"
-import type { SdpAudio } from "../../src/phone/platform"
+import type { AudioOptions, SdpAudio } from "../../src/phone/platform"
 import type { LiveCall, RingingCall } from "../../src/phone/types"
 import { memoryNetwork, startOn } from "./memory"
 
@@ -13,6 +13,7 @@ interface FakeAudio extends SdpAudio {
   readonly described: (RemoteDescription | undefined)[]
   readonly applied: RemoteDescription[]
   closed: boolean
+  lived: number
 }
 
 function fakeAudio({ fails = false, refuses = false } = {}): FakeAudio {
@@ -22,6 +23,7 @@ function fakeAudio({ fails = false, refuses = false } = {}): FakeAudio {
     described,
     applied,
     closed: false,
+    lived: 0,
     sampleRate: 8000,
     played: 0,
     readable: new ReadableStream(),
@@ -29,6 +31,9 @@ function fakeAudio({ fails = false, refuses = false } = {}): FakeAudio {
     clear: () => undefined,
     close: () => {
       audio.closed = true
+    },
+    live: () => {
+      audio.lived += 1
     },
     describe: async (remote) => {
       described.push(remote)
@@ -44,7 +49,7 @@ function fakeAudio({ fails = false, refuses = false } = {}): FakeAudio {
 }
 
 function handle(
-  audio: FakeAudio | (() => Promise<FakeAudio>),
+  audio: FakeAudio | CallSetup["openAudio"],
   direction: CallSetup["direction"] = "incoming",
   remote: RemoteDescription | null = offer,
 ) {
@@ -65,6 +70,17 @@ function handle(
 const live = { type: "call", call: "c1", state: "live" } as const
 
 describe("a call whose audio makes its own SDP", () => {
+  it("asks for the microphone unless an agent talks", async () => {
+    const asked: AudioOptions[] = []
+    const open: CallSetup["openAudio"] = async (_, options) => {
+      asked.push(options)
+      return fakeAudio()
+    }
+    void handle(open).ringing.accept()
+    void handle(open).ringing.accept(new TransformStream())
+    await expect.poll(() => asked).toStrictEqual([{ microphone: true }, { microphone: false }])
+  })
+
   it("answers the offer it rang with", async () => {
     const audio = fakeAudio()
     const call = handle(audio)
@@ -73,6 +89,40 @@ describe("a call whose audio makes its own SDP", () => {
       .poll(() => call.commands)
       .toStrictEqual([{ type: "accept", call: "c1", media: { sdp: "v=0\r\nanswer" } }])
     expect(audio.described).toStrictEqual([offer])
+  })
+
+  it("tells the audio once that the call is live, so it forgets what it heard while ringing", async () => {
+    const audio = fakeAudio()
+    const call = handle(audio)
+    void call.ringing.accept()
+    await expect.poll(() => call.commands.length).toBe(1)
+    expect(audio.lived).toBe(0)
+    call.receive(live)
+    call.receive(live)
+    expect(audio.lived).toBe(1)
+  })
+
+  it("leaves the audio's streams alone until the app reaches for them", async () => {
+    const touched: string[] = []
+    const audio: FakeAudio = {
+      ...fakeAudio(),
+      get readable() {
+        touched.push("readable")
+        return new ReadableStream()
+      },
+      get writable() {
+        touched.push("writable")
+        return new WritableStream()
+      },
+    }
+    const call = handle(audio)
+    const accepting = call.ringing.accept()
+    await expect.poll(() => call.commands.length).toBe(1)
+    call.receive(live)
+    const answered = await accepting
+    expect(touched).toStrictEqual([])
+    if (answered.ok) void answered.audio.writable
+    expect(touched).toStrictEqual(["writable"])
   })
 
   it("makes the offer when the call rang without one", async () => {
@@ -143,21 +193,24 @@ describe("a call whose audio makes its own SDP", () => {
     expect(call.commands).toStrictEqual([])
   })
 
-  it.each(["NotAllowedError", "NotFoundError", "NotReadableError", "SecurityError"])(
-    "keeps ringing on a %s for the microphone, and answers on the next try",
-    async (name) => {
-      const denied = new DOMException("No microphone", name)
-      const audio = fakeAudio()
-      const open = vi.fn().mockRejectedValueOnce(denied).mockResolvedValue(audio)
-      const call = handle(open)
-      await expect(call.ringing.accept()).rejects.toBe(denied)
-      expect(call.call.status).toBe("ringing")
-      expect(call.commands).toStrictEqual([])
-      void call.ringing.accept()
-      await expect.poll(() => call.commands).toHaveLength(1)
-      expect(open).toHaveBeenCalledTimes(2)
-    },
-  )
+  it.each([
+    "NotAllowedError",
+    "NotFoundError",
+    "NotReadableError",
+    "SecurityError",
+    "NotSupportedError",
+  ])("keeps ringing on a %s from the browser, and answers on the next try", async (name) => {
+    const denied = new DOMException("No microphone", name)
+    const audio = fakeAudio()
+    const open = vi.fn().mockRejectedValueOnce(denied).mockResolvedValue(audio)
+    const call = handle(open)
+    await expect(call.ringing.accept()).rejects.toBe(denied)
+    expect(call.call.status).toBe("ringing")
+    expect(call.commands).toStrictEqual([])
+    void call.ringing.accept()
+    await expect.poll(() => call.commands).toHaveLength(1)
+    expect(open).toHaveBeenCalledTimes(2)
+  })
 
   it("settles as unanswered when the caller gave up while the microphone was asked for", async () => {
     let refuse: (error: unknown) => void = () => undefined

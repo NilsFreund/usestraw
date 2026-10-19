@@ -7,6 +7,7 @@ Everything the [README](README.md) leaves out. The JSDoc has every option in det
 - [Making calls](#making-calls)
 - [Voice agents](#voice-agents)
 - [Servers and UIs](#servers-and-uis)
+- [Browsers](#browsers)
 - [Trunks](#trunks)
 - [Errors](#errors)
 - [Debugging](#debugging)
@@ -84,7 +85,7 @@ process.once("SIGTERM", () => {
 })
 ```
 
-With `drain`, new callers get busy and running calls finish before the phone unregisters. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run. A call that sends no audio for a minute is hung up with `reason: "dropped"` (not while the far end holds the call).
+With `drain`, new callers get busy and running calls finish before the phone unregisters. The `signal` ends the wait and hangs up the rest. `maxCalls` (default 100) turns callers away as busy once that many calls run. A call that sends no audio for a minute is hung up with `reason: "dropped"` (not while the far end holds the call; in the browser, a call drops when its connection fails).
 
 `await using` closes a phone or hangs up a call at the end of the scope. Node 24 runs it as is. On Node 22 it needs a compiler that lowers it, like TypeScript with a target below ESNext, because Node's type stripping leaves it alone.
 
@@ -95,6 +96,28 @@ const snapshot = useSyncExternalStore(phone.subscribe, () => phone.toJSON())
 ```
 
 `toJSON()` is frozen plain data without the trace, and stays the same object until something changes.
+
+## Browsers
+
+The same `import { connect } from "usestraw"` picks the browser build. It registers over `wss://` (RFC 7118) and calls through WebRTC, one peer connection per call:
+
+```ts
+const phone = await connect({
+  uri: "sip:alice@example.com",
+  password,
+  server: "wss://edge.example.com/ws",
+  iceServers: [{ urls: "stun:stun.example.com" }],
+})
+```
+
+- The page has to be secure: https, or localhost while you develop.
+- Without an agent, the first call or answer asks for the microphone. A refusal rejects `accept()` with `NotAllowedError`, and the call keeps ringing for another try.
+- Behind NAT, pass `iceServers`. TURN servers need a `username` and `credential`.
+- One tab at a time keeps its Contact across reloads, so the registrar replaces the old binding. Other tabs register beside it.
+- `call.audio` is the same 8 kHz PCM as in Node. What you write plays along with the microphone. An agent takes the microphone's place, so the browser never asks for it, and the far end still plays through the speakers.
+- Under a Content-Security-Policy, `call.audio` needs `blob:` in `script-src` for its AudioWorklet. Otherwise a call or answer with an agent rejects with `SecurityError` before it goes out, and an incoming call keeps ringing.
+- Browsers start audio only after the user clicked on the page (Safari: shortly before). An agent that answers before that hears nothing, and what it writes waits for the next click or key press.
+- `localStorage.STRAW_DEBUG = "1"` prints the ladder in the console.
 
 ## Trunks
 
@@ -156,16 +179,16 @@ $ STRAW_DEBUG=1 node examples/call.ts "+44 20 7946 0123"
 
 ## Limits
 
-- **Node only.** Browser and Electron come next. A browser bundle gets a placeholder whose `connect()` rejects. In Electron, run the phone in the main process or a `utilityProcess` and send `toJSON()` snapshots to the window. jsdom tests import `usestraw/node`.
-- **G.711 only** (8 kHz narrowband), no Opus.
-- **No SRTP.** TLS protects signaling, but audio travels unencrypted, as on most SIP trunks.
-- **No STUN or ICE.** Over UDP behind NAT, Straw keeps the mapping open and registers its public address. Audio is offered at the public address only when the NAT kept Straw's port, as on a cloud VM; otherwise your provider has to send audio back to where it comes from (symmetric RTP; on Twilio Elastic SIP Trunking, switch it on). Most do.
+- **Electron:** run the phone in the main process or a `utilityProcess` and send `toJSON()` snapshots to the window. jsdom tests import `usestraw/node`.
+- **G.711 only in Node** (8 kHz narrowband), no Opus. In browsers WebRTC picks the codec, and `call.audio` is 8 kHz either way.
+- **No SRTP in Node.** TLS protects signaling, but audio travels unencrypted, as on most SIP trunks. Browsers always encrypt it.
+- **No STUN or ICE in Node.** Over UDP behind NAT, Straw keeps the mapping open and registers its public address. Audio is offered at the public address only when the NAT kept Straw's port, as on a cloud VM; otherwise your provider has to send audio back to where it comes from (symmetric RTP; on Twilio Elastic SIP Trunking, switch it on). Most do.
 - **No DTMF yet.** Key presses reach the audio as tones at best, and some servers drop them.
 - **No PRACK and no session timers.** Calls that require them (`Require: 100rel` or `timer`) are refused with 420. Outgoing calls end as `"rejected"` on carriers that insist.
 - **No auth inside a call.** A provider that challenges your hangup may keep the call open, and billing, until it times out.
 - **No RTCP and no DNS SRV lookups,** so give the server's host name. Over UDP, Straw resolves it once.
 - **No TLS server,** so a trunk without registration calls in over UDP.
-- **No hold, transfer, TCP, WebSocket or video** yet.
+- **No hold, transfer, TCP or video** yet.
 
 **Asterisk** (not hand-tested yet): these PJSIP settings fit Straw behind NAT and across reconnects. `dtmf_mode=auto` keeps key presses in-band.
 

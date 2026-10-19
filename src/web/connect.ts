@@ -52,7 +52,8 @@ export async function webPlatform(
   const { host, instance } = await identityFor(storage, locks, secureRandom)
   return {
     connect: (signal) => openWebSocket(server, host, signal),
-    openAudio: (_, silent) => openPeerAudio(media, iceServers as RTCIceServer[], silent),
+    openAudio: (_, silent, options) =>
+      openPeerAudio(media, iceServers as RTCIceServer[], silent, options),
     debug: webDebug(storage),
     media: "sdp",
     instance,

@@ -50,7 +50,7 @@ describe("webPlatform", () => {
     const reloaded = await webPlatform(settings, fakeMedia(), storage, fakeLocks())
     expect(reloaded.instance).toBe(platform.instance)
     expect(platform.debug).toBeUndefined()
-    await platform.openAudio("x.invalid", () => undefined)
+    await platform.openAudio("x.invalid", () => undefined, { microphone: true })
     expect(FakePeer.last?.configuration).toStrictEqual({
       iceServers: [
         { urls: ["stun:a.example.com", "stun:b.example.com"], username: "u", credential: "c" },

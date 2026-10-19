@@ -1,8 +1,8 @@
 # Straw
 
-> Straw (npm: `usestraw`) makes and takes phone calls from Node over SIP. Each call's audio is a pair of Web Streams of 8 kHz 16-bit PCM. Zero dependencies, ESM only, Node 22.12+, TypeScript 5.7+ for the types.
+> Straw (npm: `usestraw`) makes and takes phone calls from Node and browsers over SIP. Each call's audio is a pair of Web Streams of 8 kHz 16-bit PCM. Zero dependencies, ESM only, Node 22.12+, TypeScript 5.7+ for the types.
 
-Straw is a SIP user agent, not a server or proxy. It registers with any SIP provider or PBX over TLS or UDP. Version 0.1 is Node only, G.711 only, and has no SRTP, DTMF, hold or transfer.
+Straw is a SIP user agent, not a server or proxy. It registers with any SIP provider or PBX over TLS, UDP or WebSocket; browsers use `wss://` only, with WebRTC for the audio. Node speaks G.711 only, without SRTP. There is no DTMF, hold or transfer yet.
 
 ## Core API
 
@@ -40,9 +40,11 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Audio is mono `Int16Array` at `call.audio.sampleRate` (8000 today), not Float32 or μ-law bytes. Resample for models that want 16 or 24 kHz.
 - Writes resolve at once until 30 s are queued. Interrupt with `clear()`, not a new writer.
 - Writes and a pending `writer.close()` reject once the call ends: add `.catch()` to writes you don't await.
-- A call whose far end sends no audio for 60 s is hung up with `reason: "dropped"`.
+- A call whose far end sends no audio for 60 s is hung up with `reason: "dropped"` (in the browser, when the connection fails).
 - The phone reconnects on its own: `status` goes `"reconnecting"` and back to `"online"`; `phone.incoming` and running calls stay open meanwhile, and `call()` throws the `ConnectError` while the connection itself is lost.
 - Readers that fall behind lose the oldest frames. Keep reading or cancel the stream.
+- In the browser, a call or answer without an agent asks for the microphone; a refusal rejects with `NotAllowedError` (`NotFoundError`, `NotReadableError`) and an incoming call keeps ringing. With an agent the microphone stays off.
+- Browser `call.audio` needs `blob:` in the page's CSP `script-src`, or `call()` and `accept()` with an agent reject with `SecurityError` (`NotSupportedError` without an AudioWorklet). Audio starts only after a click on the page: an agent that answers before one hears nothing, and its writes wait for the next click.
 - `await using` runs on Node 24. On Node 22 only a compiler that lowers it handles it (TypeScript with a target below ESNext), not type stripping; otherwise call `phone.close()` yourself.
 
 ## Debugging

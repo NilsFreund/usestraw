@@ -37,14 +37,21 @@ export interface SdpAudio extends AudioStreams {
   // An offer without `remote`, else the answer to it
   describe(remote?: RemoteDescription): Promise<string>
   apply(remote: RemoteDescription): Promise<void>
+  // The call is live: what the platform heard before was ringing, not the call
+  live(): void
 }
 
 export type CallAudio = RtpAudio | SdpAudio
 
+// An agent talks instead of the user, so a browser leaves the microphone alone
+export interface AudioOptions {
+  readonly microphone: boolean
+}
+
 /** What a phone needs from where it runs: a server connection, audio per call, a debug log. */
 export interface Platform {
   connect(signal: AbortSignal): Promise<Link>
-  openAudio(host: string, silent: () => void): Promise<CallAudio>
+  openAudio(host: string, silent: () => void, options: AudioOptions): Promise<CallAudio>
   readonly debug?: ((step: RecordedStep) => void) | undefined
   // Set where calls make their own SDP, as in browsers
   readonly media?: "sdp" | undefined

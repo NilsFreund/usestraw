@@ -8,7 +8,7 @@ import type {
 } from "../core/types"
 import { asyncDispose } from "./dispose"
 import { createListeners } from "./listeners"
-import type { CallAudio } from "./platform"
+import type { AudioOptions, CallAudio } from "./platform"
 import type {
   Agent,
   Call,
@@ -31,7 +31,7 @@ export interface CallSetup {
   readonly callerName?: string
   readonly agent?: Agent
   readonly offer?: RemoteDescription | undefined
-  readonly openAudio: (silent: () => void) => Promise<CallAudio>
+  readonly openAudio: (silent: () => void, options: AudioOptions) => Promise<CallAudio>
   readonly run: (command: CoreCommand) => void
   readonly changed: () => void
 }
@@ -69,15 +69,16 @@ export async function mediaOf(
   return "describe" in audio ? { sdp: await audio.describe(offer) } : audio.local
 }
 
-// A browser that may not use the microphone leaves the call ringing for another try
-function isRefusedDevice(error: unknown): error is DOMException {
-  return error instanceof DOMException && DEVICE_ERRORS.has(error.name)
+// A browser that refuses the microphone, or an agent's call.audio, leaves the call ringing
+function isRefusal(error: unknown): error is DOMException {
+  return error instanceof DOMException && REFUSALS.has(error.name)
 }
 
-const DEVICE_ERRORS = new Set([
+const REFUSALS = new Set([
   "NotAllowedError",
   "NotFoundError",
   "NotReadableError",
+  "NotSupportedError",
   "SecurityError",
 ])
 
@@ -115,7 +116,9 @@ export function createCall(setup: CallSetup): CallHandle {
   // A platform that throws instead of rejecting must not leave the call hanging
   function open(): Promise<CallAudio> {
     const opened = () =>
-      new Promise<CallAudio>((resolve) => resolve(openAudio(() => drop("dropped"))))
+      new Promise<CallAudio>((resolve) =>
+        resolve(openAudio(() => drop("dropped"), { microphone: agent === undefined })),
+      )
     opening ??= opened().then((sound) => {
       audio = sound
       streams = view(sound)
@@ -157,6 +160,7 @@ export function createCall(setup: CallSetup): CallHandle {
   function live(): void {
     if (status === "live" || status === "ended") return
     ok = true
+    if (audio && "live" in audio) audio.live()
     set("live")
     if (audio && agent) attach(audio, agent)
     answer.resolve(call as LiveCall)
@@ -188,7 +192,7 @@ export function createCall(setup: CallSetup): CallHandle {
     answer.resolve(call as UnansweredCall)
   }
 
-  // Rejects only for a used agent or a refused microphone, which leaves the call ringing for a retry
+  // Rejects only for a used agent or the browser's refusal, which leaves the call ringing to retry
   function accept(next?: Agent): Promise<LiveCall | UnansweredCall> {
     if (accepting) return accepting
     if (next) {
@@ -214,7 +218,7 @@ export function createCall(setup: CallSetup): CallHandle {
     try {
       opened = await open()
     } catch (error) {
-      if (isRefusedDevice(error) && status === "answering") return refused(error)
+      if (isRefusal(error) && status === "answering") return refused(error)
     }
     await finishAnswer(opened)
     return answer.promise
@@ -308,10 +312,15 @@ export function createCall(setup: CallSetup): CallHandle {
   return { call: call as Call, answered: answer.promise, receive, open, place, giveUp, drop }
 }
 
+// Getters, because a browser builds the PCM tap only once the app reaches for a stream
 function view(audio: CallAudio): CallAudioStreams {
   return {
-    readable: audio.readable,
-    writable: audio.writable,
+    get readable() {
+      return audio.readable
+    },
+    get writable() {
+      return audio.writable
+    },
     sampleRate: audio.sampleRate,
     get played() {
       return audio.played

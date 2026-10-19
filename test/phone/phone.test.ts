@@ -5,7 +5,7 @@ import { ConnectError } from "../../src/phone/connect-error"
 import { toConnectError } from "../../src/phone/failures"
 import { type ConnectOptions, type PhoneSettings, resolveOptions } from "../../src/phone/options"
 import { startPhone } from "../../src/phone/phone"
-import type { Link } from "../../src/phone/platform"
+import type { Link, Platform } from "../../src/phone/platform"
 import type { Phone, RingingCall } from "../../src/phone/types"
 import { type MemoryNetwork, memoryNetwork, startOn } from "./memory"
 
@@ -710,7 +710,10 @@ describe("phone and its calls", () => {
 
   it("shows only its public fields at runtime", async () => {
     const network = memoryNetwork()
-    const platform = { connect: async () => network.link, openAudio }
+    const platform: Platform = {
+      connect: async () => network.link,
+      openAudio: (host, silent) => openAudio(host, silent),
+    }
     const { phone } = await startPhone(network.link, settings(), platform)
     expect(Object.keys(phone).sort()).toStrictEqual([
       "call",
