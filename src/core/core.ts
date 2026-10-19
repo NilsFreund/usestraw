@@ -24,6 +24,7 @@ import {
   checkCallId,
   checkCredentials,
   checkExpires,
+  checkInstance,
   checkMaxCalls,
   checkMedia,
   checkRegistrar,
@@ -74,7 +75,7 @@ const fits = (output: CoreOutput) =>
  * @experimental `usestraw/core` may change in minor versions while the browser softphone takes shape.
  */
 export function createCore(options: CoreOptions): Core {
-  const { aor, random, maxCalls = MAX_CALLS, acceptFrom, media: making = "rtp" } = options
+  const { aor, random, maxCalls = MAX_CALLS, acceptFrom, media: making = "rtp", instance } = options
   let { address } = options
   checkAddress(address)
   checkAor(aor)
@@ -85,6 +86,7 @@ export function createCore(options: CoreOptions): Core {
     throw new TypeError(`media must be "rtp" or "sdp", got ${show(making)}`)
   }
   const appMedia = making === "sdp"
+  if (instance !== undefined) checkInstance(instance)
   const accepted = acceptFrom === undefined ? undefined : parseAcceptFrom(acceptFrom)
   const timers = resolveTimers(options.timers)
   const transactions = createTransactions({ local: address, timers })
@@ -97,7 +99,7 @@ export function createCore(options: CoreOptions): Core {
   }
   const responder = createResponder(random)
   const trust = createTrust()
-  const registration = createRegistration(identity, trust, credentials)
+  const registration = createRegistration(identity, trust, credentials, instance)
   const calls = createCalls({
     identity,
     get contact() {

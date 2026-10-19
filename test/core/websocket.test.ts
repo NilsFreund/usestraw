@@ -7,11 +7,13 @@ import {
   createResponse,
   isRequest,
   parseMessage,
+  replay,
   type SipMessage,
   type SipRequest,
   serializeMessage,
   type TransportAddress,
 } from "../../src/core"
+import { createRecordedCore } from "../../src/recorder/recorder"
 import { createRandom } from "../../src/simulation/random"
 import { aliceMedia, bytes } from "../helpers"
 import { events } from "./support"
@@ -134,6 +136,38 @@ describe("the core over WebSocket", () => {
     expect(text).toMatch(/^INVITE sip:bob@example\.com SIP\/2\.0\r$/m)
     expect(text).toMatch(/^Via: SIP\/2\.0\/WSS a1b2c3d4e5f6\.invalid;branch=/m)
     expect(text).toMatch(/^Contact: <sip:alice@a1b2c3d4e5f6\.invalid;transport=ws;ob>\r$/m)
+  })
+
+  it("registers with the instance it was given, and refuses one that is no UUID URN", () => {
+    const instance = "urn:uuid:3f1c2e4d-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+    const given = createCore({
+      address: local,
+      aor: "sip:alice@example.com",
+      random: createRandom(1),
+      instance,
+    })
+    const [text = ""] = texts(given.handle(registerCommand, 0))
+    expect(text).toContain(`+sip.instance="<${instance}>"`)
+    expect(() =>
+      createCore({
+        address: local,
+        aor: "sip:alice@example.com",
+        random: createRandom(1),
+        instance: "x",
+      }),
+    ).toThrow(new TypeError('instance must be a urn:uuid: URN, got "x"'))
+  })
+
+  it("replays a recording of a core that was given its instance", () => {
+    const instance = "urn:uuid:3f1c2e4d-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+    const recorded = createRecordedCore({
+      address: local,
+      aor: "sip:alice@example.com",
+      random: createRandom(1),
+      instance,
+    })
+    recorded.handle(registerCommand, 0)
+    expect(replay(recorded.recording())).toMatchObject({ ok: true })
   })
 
   it("registers a sips: Contact over wss:// for a sips: address of record", () => {

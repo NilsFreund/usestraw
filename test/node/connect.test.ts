@@ -268,7 +268,7 @@ describe("connect", () => {
 
   it("asks for a URL when the variable behind it is unset", async () => {
     await expect(connect(process.env["STRAW_URL_THAT_IS_NOT_SET"])).rejects.toThrow(
-      "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port]",
+      "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port] or wss://…",
     )
   })
 

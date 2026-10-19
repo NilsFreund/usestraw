@@ -170,6 +170,48 @@ describe("resolveOptions", () => {
     ).toThrow(expect.objectContaining({ message: expect.not.stringContaining(SECRET) }))
   })
 
+  it("takes ICE servers for the browser, as a copy", () => {
+    const servers = [
+      { urls: "stun:a.example.com" },
+      { urls: ["stun:a.example.com", "turns:a.example.com"], username: "u", credential: "c" },
+    ]
+    const settings = resolveOptions({
+      uri: "sip:alice@example.com",
+      server: "wss://pbx.example.com",
+      iceServers: servers,
+    })
+    expect(settings.iceServers).toStrictEqual(servers)
+    expect(settings.iceServers?.[0]).not.toBe(servers[0])
+  })
+
+  it.each([
+    ["not a list", "stun:a.example.com"],
+    ["a string entry", ["stun:a.example.com"]],
+    ["no urls", [{}]],
+    ["an empty list of urls", [{ urls: [] }]],
+    ["an http url", [{ urls: "https://a.example.com" }]],
+    ["a STUN url without a server", [{ urls: "stun:" }]],
+    ["a numeric username", [{ urls: "stun:a.example.com", username: 1 }]],
+    ["a numeric credential", [{ urls: "stun:a.example.com", credential: 1 }]],
+    ["TURN without a username", [{ urls: "turn:a.example.com", credential: "c" }]],
+    [
+      "TURN without a credential",
+      [{ urls: ["stun:a.example.com", "turns:a.example.com"], username: "u" }],
+    ],
+  ])("refuses ICE servers with %s", (_, iceServers) => {
+    expect(() =>
+      resolveOptions({
+        uri: "sip:alice@example.com",
+        server: "wss://pbx.example.com",
+        iceServers: iceServers as never,
+      }),
+    ).toThrow(
+      new TypeError(
+        "iceServers must list { urls } with stun:, stuns:, turn: or turns: URLs, TURN with a username and credential",
+      ),
+    )
+  })
+
   it("sends a sips: uri over wss://", () => {
     expect(resolve("sips:alice@example.com", "wss://pbx.example.com").server.transport).toBe("WSS")
   })
@@ -312,7 +354,7 @@ describe("resolveOptions", () => {
     (url) => {
       expect(() => resolveOptions(url)).toThrow(
         new TypeError(
-          "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port]",
+          "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port] or wss://…",
         ),
       )
     },

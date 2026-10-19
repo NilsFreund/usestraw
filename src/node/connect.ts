@@ -18,6 +18,8 @@ import { localAddressTowards, openLink } from "./links"
  * Registers a phone with your SIP server and resolves once it's online. After that it re-registers
  * and reconnects on its own. The URL looks like `tls://user:password@host[:port]`, `udp://…` or
  * `wss://user:password@host[:port][/path]`, with special characters in the password percent-encoded.
+ * Browsers take only `wss://`, on a secure page, and ask for the microphone on the first call or
+ * answer; behind NAT, give them `iceServers`.
  *
  * @example
  * ```ts
@@ -29,6 +31,7 @@ import { localAddressTowards, openLink } from "./links"
  * ```
  * @throws {ConnectError} when the server cannot be reached or refuses the registration
  * @throws {TypeError} for a malformed URL, or when `url` is `undefined`
+ * @throws {DOMException} in a browser that can't make calls, or on a page that isn't secure
  */
 export function connect(url: string | undefined, options?: ConnectUrlOptions): Promise<Phone>
 /**

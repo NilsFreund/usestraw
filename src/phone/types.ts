@@ -140,10 +140,10 @@ export interface RingingCall extends CallBase {
   readonly status: "ringing" | "ended"
   /**
    * Answers the call. Talk through the agent, or through `audio` on the returned call. Resolves to
-   * an {@link UnansweredCall} if the caller gave up first or no audio port was free. In Node it
-   * rejects only for an agent that is already in use. Where a microphone is needed, it also
-   * rejects with a `NotAllowedError` when access is denied, and the call keeps `"ringing"`, so you
-   * can try again.
+   * an {@link UnansweredCall} if the caller gave up first, even while the microphone was being
+   * asked for, or no audio port was free. Rejects for an agent that is already in use. In the
+   * browser it also rejects when the microphone is denied, missing or busy (`NotAllowedError`,
+   * `NotFoundError`, `NotReadableError`), and the call keeps `"ringing"`, so you can try again.
    *
    * @example
    * ```ts
@@ -254,8 +254,8 @@ export interface Phone extends AsyncDisposable {
    * ```
    * @throws {TypeError} for an address it cannot call, or an agent already in use
    * @throws {RangeError} for a timeout that is not a positive integer
-   * @throws {DOMException} `InvalidStateError` once the phone is closing, or `NotAllowedError`
-   *   where a microphone is needed and denied
+   * @throws {DOMException} `InvalidStateError` once the phone is closing, or in the browser when
+   *   the microphone is denied, missing or busy
    * @throws {ConnectError} while the connection to the server is lost
    * @throws the signal's reason when it aborts first, or a socket error when no audio port is free
    */

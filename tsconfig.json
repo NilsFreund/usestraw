@@ -20,5 +20,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  "exclude": ["src/web", "src/browser.ts", "test/web"]
 }

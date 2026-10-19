@@ -23,10 +23,11 @@ export function createRegistration(
   identity: Identity,
   trust: Trust,
   credentials?: Credentials,
+  instance?: string,
 ): Registration {
   const { random } = identity
   const authenticator = createAuthenticator(credentials, random)
-  let registrant = createRegistrant(identity)
+  let registrant = createRegistrant(identity, instance)
   let reachable = identity.address
   let rewriting = true
   let seq = 0

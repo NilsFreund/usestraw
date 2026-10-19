@@ -35,7 +35,7 @@ jobs:
       - run: bun run build
       - name: Size, min+gzip
         run: |
-          for budget in index:50000 core:35000; do
+          for budget in index:50000 core:35000 browser:45000; do
             entry=${budget%%:*} max=${budget##*:}
             bun build "dist/$entry.js" --minify --target=node --outfile="$RUNNER_TEMP/$entry.js" > /dev/null
             size=$(gzip -9c "$RUNNER_TEMP/$entry.js" | wc -c)

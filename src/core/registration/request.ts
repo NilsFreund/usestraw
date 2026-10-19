@@ -14,14 +14,14 @@ export interface Registrant {
 }
 
 // RFC 3261 §10.2: one Call-ID for all registrations to a registrar, CSeq rising by one
-export function createRegistrant(identity: Identity): Registrant {
+export function createRegistrant(identity: Identity, instance?: string): Registrant {
   const { address, aor, random } = identity
   return {
     from: { uri: aor, params: new Map([["tag", createTag(random)]]) },
     to: { uri: aor, params: new Map() },
     callId: createCallId(random),
     contact: createContact(address, aor),
-    instance: isWebSocket(address.transport) ? createInstanceId(random) : undefined,
+    instance: isWebSocket(address.transport) ? (instance ?? createInstanceId(random)) : undefined,
   }
 }
 

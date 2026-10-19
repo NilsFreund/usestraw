@@ -8,6 +8,13 @@ import { isIp } from "../support/ip"
 import { isWebSocket } from "../transport/address"
 import { parseConnectionUrl } from "./url"
 
+/** A STUN or TURN server, as `RTCPeerConnection` takes it. TURN needs a username and credential. */
+export interface IceServer {
+  readonly urls: string | readonly string[]
+  readonly username?: string | undefined
+  readonly credential?: string | undefined
+}
+
 /** TLS settings for a `tls://` server. */
 export interface TlsOptions {
   /** A PEM certificate authority to trust, for servers with a private certificate. */
@@ -58,6 +65,11 @@ export interface ConnectUrlOptions {
   readonly register?: boolean | undefined
   /** The local UDP port, for a trunk that sends calls to a fixed address. Any free one if unset. */
   readonly localPort?: number | undefined
+  /**
+   * STUN and TURN servers for calls in the browser. None by default, which works when the
+   * server's media has a public address. Browser only.
+   */
+  readonly iceServers?: readonly IceServer[] | undefined
 }
 
 /** `connect()` options without a URL. */
@@ -99,6 +111,7 @@ export interface PhoneSettings {
   readonly acceptFrom: "server" | "anyone" | readonly string[]
   readonly register: boolean
   readonly localPort?: number
+  readonly iceServers?: readonly IceServer[]
 }
 
 const SERVER = /^(udp|tls|wss?):\/\/(\[[^\]]*\]|[^:/?#[\]]+)(?::(\d{1,5}))?([/?][^#\s]*)?$/i
@@ -116,10 +129,12 @@ export function resolveOptions(
   const options = typeof url === "string" ? fromUrl(url, extra) : url
   if (!options) {
     throw new TypeError(
-      "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port]",
+      "Missing connection URL (is SIP_URL set?): pass tls://user:password@host[:port] or wss://…",
     )
   }
   const { uri, password, realm, signal, tls, trace = true, maxCalls, register = true } = options
+  const { iceServers } = options
+  if (iceServers !== undefined) checkIceServers(iceServers)
   const { localPort, acceptFrom = "server" } = options
   if (maxCalls !== undefined) checkMaxCalls(maxCalls)
   if (Array.isArray(acceptFrom)) parseAcceptFrom(acceptFrom)
@@ -187,6 +202,7 @@ export function resolveOptions(
     ...(signal ? { signal } : {}),
     ...(maxCalls === undefined ? {} : { maxCalls }),
     ...(tls?.ca === undefined ? {} : { tls: { ca: tls.ca } }),
+    ...(iceServers === undefined ? {} : { iceServers: iceServers.map(copyIceServer) }),
   }
 }
 
@@ -245,6 +261,41 @@ function hint(server: string): string {
   }
   if (/^(?:udp|tls):\/\/[^/]*\//i.test(server)) return "leave out the path"
   return "use udp://host[:port], tls://host[:port] or wss://host[:port][/path]"
+}
+
+const ICE_URL = /^(?:stuns?|turns?):\S+$/
+const TURN = /^turns?:/
+
+function checkIceServers(servers: readonly IceServer[]): void {
+  const valid =
+    Array.isArray(servers) &&
+    servers.every((server: unknown) => {
+      if (typeof server !== "object" || server === null) return false
+      const { urls, username, credential } = server as Record<string, unknown>
+      const list = typeof urls === "string" ? [urls] : urls
+      if (!Array.isArray(list) || list.length === 0) return false
+      if (!list.every((url) => typeof url === "string" && ICE_URL.test(url))) return false
+      if (list.some((url) => TURN.test(url))) {
+        return typeof username === "string" && typeof credential === "string"
+      }
+      return (
+        (username === undefined || typeof username === "string") &&
+        (credential === undefined || typeof credential === "string")
+      )
+    })
+  if (!valid) {
+    throw new TypeError(
+      "iceServers must list { urls } with stun:, stuns:, turn: or turns: URLs, TURN with a username and credential",
+    )
+  }
+}
+
+function copyIceServer({ urls, username, credential }: IceServer): IceServer {
+  return {
+    urls: typeof urls === "string" ? urls : [...urls],
+    ...(username === undefined ? {} : { username }),
+    ...(credential === undefined ? {} : { credential }),
+  }
 }
 
 function checkText(name: string, value: unknown): asserts value is string {

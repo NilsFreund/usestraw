@@ -2,7 +2,7 @@ import { createSocket, type Socket } from "node:dgram"
 import { once } from "node:events"
 import { isIP } from "node:net"
 import { createClock } from "../phone/clock"
-import type { CallAudio } from "../phone/platform"
+import type { RtpAudio } from "../phone/platform"
 import { secureRandom } from "../phone/random"
 import { createMediaEngine, type MediaInput } from "../rtp/engine"
 import { SAMPLE_RATE, SAMPLES_PER_MS } from "../rtp/g711"
@@ -19,7 +19,7 @@ export async function openAudio(
   host: string,
   silent: () => void,
   random: Random = secureRandom,
-): Promise<CallAudio> {
+): Promise<RtpAudio> {
   const socket = await bindEven(host, random)
   const engine = createMediaEngine(random)
   const clock = createClock()

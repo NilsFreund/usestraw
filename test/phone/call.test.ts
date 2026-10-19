@@ -142,6 +142,25 @@ describe("a call's own state", () => {
     expect(call.commands).toStrictEqual([])
   })
 
+  it("sends audio to the answered media only, not to early media", async () => {
+    const update = vi.fn()
+    const call = handle("outgoing", "127.0.0.1", undefined, async () => ({
+      local: { host: "127.0.0.1", port: 4000 },
+      update,
+      sampleRate: 8000,
+      played: 0,
+      readable: new ReadableStream(),
+      writable: new WritableStream(),
+      clear: () => undefined,
+      close: () => undefined,
+    }))
+    await call.open()
+    call.receive({ type: "call", call: "c1", state: "ringing", status: 183, media })
+    expect(update).not.toHaveBeenCalled()
+    call.receive({ type: "call", call: "c1", state: "live", media })
+    expect(update).toHaveBeenCalledExactlyOnceWith(media)
+  })
+
   it("hangs up when its agent was taken by someone else before the answer", async () => {
     const agent = new TransformStream<Int16Array, Int16Array<ArrayBuffer>>()
     const call = handle("outgoing", "127.0.0.1", agent)

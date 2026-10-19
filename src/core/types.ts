@@ -271,6 +271,11 @@ export interface CoreOptions {
    * @default "rtp"
    */
   readonly media?: "rtp" | "sdp" | undefined
+  /**
+   * The RFC 5626 instance id to register with over WebSocket, as `urn:uuid:…`. Keep it across
+   * restarts, so a new registration replaces the old one; a random one when unset.
+   */
+  readonly instance?: string | undefined
 }
 
 /**

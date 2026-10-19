@@ -6,7 +6,7 @@ import { isIntegerIn } from "../support/integer"
 import { isIpv4 } from "../support/ip"
 import { MAX_DELAY } from "../support/time"
 import type { TransportAddress } from "../transport/address"
-import { type CallHandle, type CallSetup, checkAgent, createCall } from "./call"
+import { type CallHandle, type CallSetup, checkAgent, createCall, mediaOf } from "./call"
 import { createInbox } from "./inbox"
 import type { CallAudio } from "./platform"
 import { secureRandom } from "./random"
@@ -84,7 +84,7 @@ export function createCallList(setup: CallListSetup): CallList {
     }
     const named = from.name === undefined ? {} : { callerName: from.name }
     const parties = { from: userOf(from.uri), to: userOf(to.uri), ...named }
-    inbox.push(track({ id, direction: "incoming", ...parties }))
+    inbox.push(track({ id, direction: "incoming", ...parties, offer: event.description }))
   }
 
   // Checked before the phone's state, as fetch checks its arguments first
@@ -112,18 +112,27 @@ export function createCallList(setup: CallListSetup): CallList {
     const timer =
       timeout === undefined ? undefined : setTimeout(() => handle.giveUp("no-answer"), timeout)
     try {
-      const audio = await handle.open().catch((error: unknown) => {
-        void handle.call.end()
-        throw error
-      })
-      if (draining) void handle.call.end()
-      handle.place({ type: "call", call: id, uri, to: server(), media: audio.local })
+      await dial(handle, uri)
       const result = await handle.answered
       if (!result.ok && signal?.aborted) throw signal.reason
       return result
     } finally {
       signal?.removeEventListener("abort", gaveUp)
       clearTimeout(timer)
+    }
+  }
+
+  // A call that ended while the microphone or its offer was on the way just settles as it ended
+  async function dial(handle: CallHandle, uri: string): Promise<void> {
+    try {
+      const audio = await handle.open()
+      if (draining) void handle.call.end()
+      const media = await mediaOf(audio)
+      handle.place({ type: "call", call: handle.call.id, uri, to: server(), media })
+    } catch (error) {
+      if (handle.call.status === "ended") return
+      void handle.call.end()
+      throw error
     }
   }
 

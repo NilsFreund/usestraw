@@ -19,6 +19,8 @@ export function startCore(
     address: first.local,
     aor,
     random: secureRandom,
+    ...(platform.media ? { media: platform.media } : {}),
+    ...(platform.instance ? { instance: platform.instance } : {}),
     ...(credentials ? { credentials } : {}),
     ...(maxCalls === undefined ? {} : { maxCalls }),
     ...(filtered

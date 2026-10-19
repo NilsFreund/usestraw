@@ -1,5 +1,11 @@
-import type { CallEnd, CallEvent, CoreCommand } from "../core/types"
-import type { CallMedia } from "../sdp/types"
+import type {
+  AppMedia,
+  CallEnd,
+  CallEvent,
+  CoreCommand,
+  LocalMedia,
+  RemoteDescription,
+} from "../core/types"
 import { asyncDispose } from "./dispose"
 import { createListeners } from "./listeners"
 import type { CallAudio } from "./platform"
@@ -24,15 +30,19 @@ export interface CallSetup {
   readonly to: string
   readonly callerName?: string
   readonly agent?: Agent
+  readonly offer?: RemoteDescription | undefined
   readonly openAudio: (silent: () => void) => Promise<CallAudio>
   readonly run: (command: CoreCommand) => void
   readonly changed: () => void
 }
 
+// What happens to a call once it exists: everything but the ring that made it
+export type CallUpdate = Exclude<CallEvent, { state: "incoming" }>
+
 export interface CallHandle {
   readonly call: Call
   readonly answered: Promise<LiveCall | UnansweredCall>
-  receive(event: CallEvent): void
+  receive(event: CallUpdate): void
   open(): Promise<CallAudio>
   place(command: CoreCommand): void
   giveUp(reason: CallReason): void
@@ -50,6 +60,26 @@ const STATUSES: Readonly<Record<NonNullable<EndOptions["reason"]>, number>> = {
   busy: 486,
   declined: 603,
 }
+
+// What the core needs for a call's media: our RTP address, or the platform's own SDP
+export async function mediaOf(
+  audio: CallAudio,
+  offer?: RemoteDescription,
+): Promise<LocalMedia | AppMedia> {
+  return "describe" in audio ? { sdp: await audio.describe(offer) } : audio.local
+}
+
+// A browser that may not use the microphone leaves the call ringing for another try
+function isRefusedDevice(error: unknown): error is DOMException {
+  return error instanceof DOMException && DEVICE_ERRORS.has(error.name)
+}
+
+const DEVICE_ERRORS = new Set([
+  "NotAllowedError",
+  "NotFoundError",
+  "NotReadableError",
+  "SecurityError",
+])
 
 export function checkAgent(agent: Agent): void {
   if (agent.readable.locked || agent.writable.locked) {
@@ -101,13 +131,30 @@ export function createCall(setup: CallSetup): CallHandle {
     run(command)
   }
 
-  function receive(event: CallEvent): void {
-    if (event.state === "live") live(event.media)
-    else if (event.state === "ended") finish(event.ended)
+  function receive(event: CallUpdate): void {
+    if (event.state === "ended") finish(event.ended)
+    else if (event.state === "offer") void respond(event.description)
+    else show(event)
   }
 
-  function live(media: CallMedia | undefined): void {
-    if (media) audio?.update(media)
+  function show(event: Extract<CallEvent, { state: "ringing" | "live" }>): void {
+    const { media, description } = event
+    // Plain RTP follows only the answered media: early media would start the silence watch
+    if (event.state === "live" && media && audio && "update" in audio) audio.update(media)
+    if (description && audio && "apply" in audio) {
+      audio.apply(description).catch(() => drop("incompatible"))
+    }
+    if (event.state === "live") live()
+  }
+
+  // A new offer inside the call: the platform answers it, or offers when it brought none
+  async function respond(remote: RemoteDescription | undefined): Promise<void> {
+    if (!audio || !("describe" in audio)) return
+    const sdp = await audio.describe(remote).catch(() => undefined)
+    if (sdp !== undefined && status !== "ended") run({ type: "answer", call: id, media: { sdp } })
+  }
+
+  function live(): void {
     if (status === "live" || status === "ended") return
     ok = true
     set("live")
@@ -141,7 +188,7 @@ export function createCall(setup: CallSetup): CallHandle {
     answer.resolve(call as UnansweredCall)
   }
 
-  // Never rejects for a free agent, so `call.accept(agent)` without await cannot crash the process
+  // Rejects only for a used agent or a refused microphone, which leaves the call ringing for a retry
   function accept(next?: Agent): Promise<LiveCall | UnansweredCall> {
     if (accepting) return accepting
     if (next) {
@@ -163,14 +210,34 @@ export function createCall(setup: CallSetup): CallHandle {
   }
 
   async function answering(): Promise<LiveCall | UnansweredCall> {
-    finishAnswer(await open().catch(() => undefined))
+    let opened: CallAudio | undefined
+    try {
+      opened = await open()
+    } catch (error) {
+      if (isRefusedDevice(error) && status === "answering") return refused(error)
+    }
+    await finishAnswer(opened)
     return answer.promise
   }
 
-  function finishAnswer(opened: CallAudio | undefined): void {
+  function refused(error: DOMException): Promise<never> {
+    opening = undefined
+    accepting = undefined
+    agent = undefined
+    set("ringing")
+    return Promise.reject(error)
+  }
+
+  async function finishAnswer(opened: CallAudio | undefined): Promise<void> {
     if (status !== "answering") return
-    if (opened) run({ type: "accept", call: id, media: opened.local })
-    else run({ type: "end", call: id, status: 503 })
+    if (!opened) {
+      run({ type: "end", call: id, status: 503 })
+      return
+    }
+    const media = await mediaOf(opened, setup.offer).catch(() => undefined)
+    if (status !== "answering") return
+    if (media) run({ type: "accept", call: id, media })
+    else run({ type: "end", call: id, status: 488 })
   }
 
   function end(options: EndOptions = {}): Promise<CallEnded> {

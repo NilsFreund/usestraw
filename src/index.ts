@@ -15,7 +15,7 @@
  */
 export { connect } from "./node/connect"
 export { ConnectError, type ConnectErrorOptions, type ConnectReason } from "./phone/connect-error"
-export type { ConnectOptions, ConnectUrlOptions, TlsOptions } from "./phone/options"
+export type { ConnectOptions, ConnectUrlOptions, IceServer, TlsOptions } from "./phone/options"
 export type { PhoneStatus } from "./phone/status"
 export type {
   Agent,

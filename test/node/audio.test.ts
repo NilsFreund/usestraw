@@ -5,11 +5,11 @@ import { isIP } from "node:net"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { CallMedia } from "../../src/core"
 import { openAudio } from "../../src/node/audio"
-import type { CallAudio } from "../../src/phone/platform"
+import type { RtpAudio } from "../../src/phone/platform"
 import { readRtp } from "../../src/rtp/packet"
 import { pause, tone } from "../helpers"
 
-const opened: CallAudio[] = []
+const opened: RtpAudio[] = []
 const host = "127.0.0.1"
 const turn = () => new Promise((resolve) => setImmediate(resolve))
 
@@ -27,13 +27,13 @@ async function blockEvenPort(): Promise<{ port: number; blocker: Socket }> {
   }
 }
 
-async function open(): Promise<CallAudio> {
+async function open(): Promise<RtpAudio> {
   const audio = await openAudio(host, () => undefined)
   opened.push(audio)
   return audio
 }
 
-function towards(audio: CallAudio, overrides: Partial<CallMedia> = {}): CallMedia {
+function towards(audio: RtpAudio, overrides: Partial<CallMedia> = {}): CallMedia {
   return {
     remote: audio.local,
     codec: "PCMU",

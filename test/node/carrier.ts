@@ -9,7 +9,7 @@ import {
   type TransportAddress,
 } from "../../src/core"
 import { openAudio } from "../../src/node/audio"
-import type { CallAudio } from "../../src/phone/platform"
+import type { RtpAudio } from "../../src/phone/platform"
 import { createRandom } from "../../src/simulation/random"
 import { registrar } from "../registrar"
 
@@ -42,7 +42,7 @@ export async function startCarrier(answer: Answer = "echo"): Promise<Carrier> {
   const address: TransportAddress = { transport: "UDP", host, port: socket.address().port }
   const registry = registrar()(createRandom(9))
   const far = createCore({ address, aor: `sip:bob@${host}`, random: createRandom(11) })
-  const audios = new Map<string, CallAudio>()
+  const audios = new Map<string, RtpAudio>()
   const events: CoreEvent[] = []
   const methods: string[] = []
   const ended = new Map<string, CallEnd>()
@@ -101,7 +101,7 @@ export async function startCarrier(answer: Answer = "echo"): Promise<Carrier> {
     }
   }
 
-  async function echo(call: string): Promise<CallAudio> {
+  async function echo(call: string): Promise<RtpAudio> {
     const audio = await openAudio(host, () => undefined)
     audios.set(call, audio)
     void audio.readable.pipeTo(audio.writable).catch(() => undefined)

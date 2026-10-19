@@ -85,6 +85,27 @@
       }
     },
     {
+      "includes": ["src/web/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Buffer": "Use Uint8Array: this is the browser platform.",
+                  "process": "This is the browser platform: take what it needs from the settings."
+                }
+              }
+            }
+          },
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["src/node/**"],
       "linter": {
         "rules": {
@@ -98,7 +119,7 @@
       }
     },
     {
-      "includes": ["src/**", "!src/node/**", "!src/index.ts"],
+      "includes": ["src/**", "!src/node/**", "!src/web/**", "!src/index.ts", "!src/browser.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -109,6 +130,30 @@
                   {
                     "group": ["**/node/*", "**/node"],
                     "message": "Only src/node and the entry files may import the Node platform."
+                  },
+                  {
+                    "group": ["**/web/*", "**/web"],
+                    "message": "Only src/web and the entry files may import the browser platform."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/web/**", "src/browser.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/node/*", "**/node"],
+                    "message": "The browser platform can't use the Node one."
                   }
                 ]
               }
@@ -138,11 +183,15 @@
                 "patterns": [
                   {
                     "group": ["**/node/*", "**/node"],
-                    "message": "The protocol layers stay below src/phone and src/node."
+                    "message": "The protocol layers stay below src/phone and the platforms."
                   },
                   {
                     "group": ["**/phone/*", "**/phone"],
-                    "message": "The protocol layers stay below src/phone and src/node."
+                    "message": "The protocol layers stay below src/phone and the platforms."
+                  },
+                  {
+                    "group": ["**/web/*", "**/web"],
+                    "message": "The protocol layers stay below src/phone and the platforms."
                   }
                 ]
               }

@@ -42,7 +42,7 @@
     "dev": "tsdown --watch",
     "test": "vitest",
     "coverage": "vitest run --coverage",
-    "typecheck": "tsc && tsc -p tsconfig.neutral.json && tsc -p examples",
+    "typecheck": "tsc && tsc -p tsconfig.neutral.json && tsc -p tsconfig.web.json && tsc -p examples",
     "lint": "biome check",
     "format": "biome check --write",
     "check": "biome check && bun run typecheck && vitest run --coverage",

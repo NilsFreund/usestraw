@@ -37,6 +37,10 @@ export function createInstanceId(random: Random): string {
   return `urn:uuid:${parts.join("-")}`
 }
 
+export function isInstanceId(value: string): boolean {
+  return /^urn:uuid:[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value)
+}
+
 export function createCnonce(random: Random): string {
   return randomToken(random, 16)
 }

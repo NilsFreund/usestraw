@@ -5,6 +5,7 @@ import type { MediaAddress } from "../sdp/types"
 import { isIntegerIn } from "../support/integer"
 import { familyOf, isIp, isUnspecified, parseRange, type Range } from "../support/ip"
 import { isAddress, isWebSocket, type TransportAddress } from "../transport/address"
+import { isInstanceId } from "./ids"
 import type { AppMedia, Credentials, LocalMedia } from "./types"
 
 export function checkAddress(address: TransportAddress): void {
@@ -122,6 +123,12 @@ export function parseAcceptFrom(ranges: readonly string[]): Range[] {
     throw new TypeError(`acceptFrom must list IP addresses or CIDR ranges, got ${show(ranges)}`)
   }
   return parsed.filter((range) => range !== undefined)
+}
+
+export function checkInstance(instance: string): void {
+  if (typeof instance !== "string" || !isInstanceId(instance)) {
+    throw new TypeError(`instance must be a urn:uuid: URN, got ${show(instance)}`)
+  }
 }
 
 export const MAX_CALLS = 100

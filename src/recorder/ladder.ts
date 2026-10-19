@@ -5,6 +5,7 @@ import type { TransportAddress } from "../transport/address"
 import { decode } from "./codec"
 import type { RecordedStep } from "./recorder"
 
+const OFF = new Set(["", "0", "false", "off"])
 const UNSAFE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu
 const WIDTH = 160
 const decoder = new TextDecoder()
@@ -17,6 +18,18 @@ export function ladder(recording: string): string {
     .filter((line) => line !== "")
     .flatMap(drawLine)
     .join("\n")
+}
+
+// STRAW_DEBUG draws each step as it happens, unless it's empty or says no
+export function ladderPrinter(
+  setting: string | null | undefined,
+  write: (text: string) => void,
+): ((step: RecordedStep) => void) | undefined {
+  if (OFF.has((setting ?? "").toLowerCase())) return undefined
+  return (step) => {
+    const lines = formatStep(step)
+    if (lines.length > 0) write(lines.join("\n"))
+  }
 }
 
 export function formatStep(step: RecordedStep): string[] {
