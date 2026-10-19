@@ -109,10 +109,11 @@ export function createCallList(setup: CallListSetup): CallList {
     const handle = track({ id, direction: "outgoing", ...parties })
     const gaveUp = () => handle.giveUp("cancelled")
     signal?.addEventListener("abort", gaveUp, { once: true })
-    const timer =
-      timeout === undefined ? undefined : setTimeout(() => handle.giveUp("no-answer"), timeout)
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await dial(handle, uri)
+      // The ring time starts once the call went out, not while a browser asks for the microphone
+      if (timeout !== undefined) timer = setTimeout(() => handle.giveUp("no-answer"), timeout)
       const result = await handle.answered
       if (!result.ok && signal?.aborted) throw signal.reason
       return result

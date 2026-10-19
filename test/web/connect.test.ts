@@ -91,6 +91,35 @@ describe("connect in the browser", () => {
     expect(phone.status).toBe("online")
   })
 
+  it("lends the tab's saved identity to one phone until it closed, or failed to connect", async () => {
+    const server = await wsRegistrar()
+    cleanups.push(() => server.close())
+    vi.stubGlobal("RTCPeerConnection", FakePeer)
+    vi.stubGlobal("MediaStream", FakeStream)
+    vi.stubGlobal("navigator", { mediaDevices: {}, locks: fakeLocks() })
+    vi.stubGlobal("localStorage", fakeStorage())
+    const url = (password: string) => `ws://alice:${password}@127.0.0.1:${server.port}/ws`
+    const instance = () => {
+      const last = server.registrar.registers.at(-1)
+      return last?.contact === "*" ? undefined : last?.contact[0]?.params.get("+sip.instance")
+    }
+    await expect(connect(url("wrong"))).rejects.toMatchObject({ reason: "wrong-password" })
+    const saved = instance()
+    const first = await connect(url("secret"))
+    expect(instance()).toBe(saved)
+    await expect(first.call("bob")).rejects.toThrow(TypeError)
+    const second = await connect(url("secret"))
+    expect(instance()).not.toBe(saved)
+    await second.close()
+    const third = await connect(url("secret"))
+    expect(instance()).not.toBe(saved)
+    await first.close()
+    await third.close()
+    const fourth = await connect(url("secret"))
+    cleanups.push(() => fourth.close())
+    expect(instance()).toBe(saved)
+  })
+
   it("refuses a page that can't make calls before it connects", async () => {
     vi.stubGlobal("isSecureContext", false)
     await expect(connect("wss://alice:secret@pbx.example.com/ws")).rejects.toMatchObject({

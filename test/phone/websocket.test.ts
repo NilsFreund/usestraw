@@ -142,6 +142,19 @@ describe("openWebSocket", () => {
     ])
   })
 
+  it("drops a server that sends a message bigger than SIP allows, before reading it", async () => {
+    const { link, receive, close } = await started()
+    socket().message(new ArrayBuffer(65_535))
+    socket().message("x".repeat(65_535))
+    expect(receive).toHaveBeenCalledTimes(2)
+    socket().message(new ArrayBuffer(65_536))
+    expect(socket().closes).toEqual([4002])
+    expect(close).toHaveBeenCalledWith(new Error("The server sent a message over 65535 bytes"))
+    socket().message("x".repeat(65_536))
+    expect(receive).toHaveBeenCalledTimes(2)
+    expect(link.remote.transport).toBe("WSS")
+  })
+
   it("sends UTF-8 as text and anything else as binary", async () => {
     const link = await open()
     link.send(text("REGISTER ✓"), link.remote)

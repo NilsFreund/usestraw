@@ -1,5 +1,6 @@
 import { randomToken } from "../core/ids"
 import { formatHost } from "../message/fields/host"
+import { MAX_MESSAGE_SIZE } from "../message/limits"
 import type { Random } from "../support/random"
 import type { TransportAddress } from "../transport/address"
 import type { Server } from "./options"
@@ -100,6 +101,12 @@ function startLink(socket: WebSocket, server: Server, host: string): Link {
 
   socket.addEventListener("message", ({ data }: { readonly data: string | ArrayBuffer }) => {
     if (!open) return
+    // RFC 7118 sets no limit, so a SIP message's own keeps a server from filling the memory
+    if ((typeof data === "string" ? data.length : data.byteLength) > MAX_MESSAGE_SIZE) {
+      socket.close(4002)
+      finish(new Error(`The server sent a message over ${MAX_MESSAGE_SIZE} bytes`))
+      return
+    }
     const bytes = typeof data === "string" ? encoder.encode(data) : new Uint8Array(data)
     if (handlers) receive(bytes)
     else early.push(bytes)

@@ -1,5 +1,6 @@
 /**
- * Make and take phone calls from Node, with each call's audio as Web Streams of 8 kHz PCM.
+ * Make and take phone calls from Node and the browser, with each call's audio as Web Streams of 8 kHz
+ * PCM.
  *
  * @example
  * ```ts

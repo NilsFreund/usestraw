@@ -181,18 +181,25 @@ function stop(microphone: MediaStream | undefined): void {
   for (const track of microphone?.getTracks() ?? []) track.stop()
 }
 
-// Calls carry audio only, so the answer refuses any video the far end offered
+// A call carries one audio stream, so the answer refuses video and any more audio on offer
 function audioOnly(peer: RTCPeerConnection): void {
+  let audio = false
   for (const transceiver of peer.getTransceivers()) {
-    if (transceiver.receiver.track.kind !== "audio") transceiver.stop()
+    if (transceiver.receiver.track.kind === "audio" && !audio) audio = true
+    else transceiver.stop()
   }
 }
 
-// A rollback undoes whichever side began the offer the call no longer waits on
+// A rollback undoes whichever side began the offer the call no longer waits on; one that lost the
+// race to a finished answer has nothing left to undo
 async function applied(peer: RTCPeerConnection, remote: RemoteDescription): Promise<void> {
   if (remote.type !== "rollback") return peer.setRemoteDescription(remote)
-  if (peer.signalingState === "have-local-offer") return peer.setLocalDescription(remote)
-  if (peer.signalingState === "have-remote-offer") return peer.setRemoteDescription(remote)
+  try {
+    if (peer.signalingState === "have-local-offer") await peer.setLocalDescription(remote)
+    else if (peer.signalingState === "have-remote-offer") await peer.setRemoteDescription(remote)
+  } catch (error) {
+    if (peer.signalingState !== "stable") throw error
+  }
 }
 
 function gathered(peer: RTCPeerConnection): Promise<void> {

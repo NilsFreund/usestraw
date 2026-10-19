@@ -107,16 +107,35 @@ describe("openPeerAudio", () => {
     await failed
   })
 
-  it("answers with audio alone, refusing whatever else the far end offered", async () => {
+  it("answers with one audio stream, refusing whatever else the far end offered", async () => {
     const audio = await openPeerAudio(fakeMedia(), [], () => undefined, TALK)
     const voice = new FakeTransceiver("audio")
     const video = new FakeTransceiver("video")
-    peer().transceivers.push(voice, video)
+    const more = new FakeTransceiver("audio")
+    peer().transceivers.push(voice, video, more)
     await audio.describe()
     expect(video.stopped).toBe(false)
     await audio.apply({ type: "rollback" })
     await audio.describe(offer)
-    expect([voice.stopped, video.stopped]).toStrictEqual([false, true])
+    expect([voice.stopped, video.stopped, more.stopped]).toStrictEqual([false, true, true])
+  })
+
+  it("lets a rollback that lost the race to a finished answer pass, and no other failure", async () => {
+    const audio = await openPeerAudio(fakeMedia(), [], () => undefined, TALK)
+    const racing = peer()
+    racing.signalingState = "have-remote-offer"
+    racing.setRemoteDescription = async () => {
+      racing.signalingState = "stable"
+      throw new DOMException("nothing to roll back", "InvalidStateError")
+    }
+    await expect(audio.apply({ type: "rollback" })).resolves.toBeUndefined()
+    racing.signalingState = "have-remote-offer"
+    racing.setRemoteDescription = async () => {
+      throw new DOMException("closed", "InvalidStateError")
+    }
+    await expect(audio.apply({ type: "rollback" })).rejects.toMatchObject({
+      name: "InvalidStateError",
+    })
   })
 
   it("applies answers and rolls back whichever side began", async () => {

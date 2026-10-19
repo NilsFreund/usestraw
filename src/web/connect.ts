@@ -23,7 +23,7 @@ import { browserMedia, openPeerAudio, type WebMedia } from "./peer"
  * const phone = await connect("wss://alice:secret@pbx.example.com/ws")
  * ```
  * @throws {ConnectError} when the server cannot be reached or refuses the registration
- * @throws {TypeError} for a malformed URL or a server that is not `wss://`
+ * @throws {TypeError} for a malformed URL or a server that is not `wss://` (`ws://` on localhost)
  * @throws {DOMException} in a browser that can't make calls, or on a page that isn't secure
  */
 export function connect(url: string | undefined, options?: ConnectUrlOptions): Promise<Phone>
@@ -33,8 +33,20 @@ export async function connect(
   options?: ConnectUrlOptions,
 ): Promise<Phone> {
   const settings = resolveOptions(target, options)
-  const { phone } = await connectPhone(settings, await webPlatform(settings))
-  return phone
+  const platform = await webPlatform(settings)
+  try {
+    const { phone } = await connectPhone(settings, platform)
+    // Once this phone unregistered, the next one in the tab may take the saved identity
+    const stop = phone.subscribe(() => {
+      if (phone.status !== "closed") return
+      stop()
+      platform.release()
+    })
+    return phone
+  } catch (error) {
+    platform.release()
+    throw error
+  }
 }
 
 export async function webPlatform(
@@ -42,14 +54,14 @@ export async function webPlatform(
   media: WebMedia = browserMedia(),
   storage: Storage | undefined = browserStorage(),
   locks: LockManager | undefined = browserLocks(),
-): Promise<Platform> {
+): Promise<Platform & { readonly release: () => void }> {
   const { server, iceServers = [] } = settings
   if (!isWebSocket(server.transport)) {
     throw new TypeError(
       "Browsers reach SIP only over WebSocket: use wss://user:password@host[:port][/path]",
     )
   }
-  const { host, instance } = await identityFor(storage, locks, secureRandom)
+  const { host, instance, release } = await identityFor(storage, locks, secureRandom)
   return {
     connect: (signal) => openWebSocket(server, host, signal),
     openAudio: (_, silent, options) =>
@@ -57,5 +69,6 @@ export async function webPlatform(
     debug: webDebug(storage),
     media: "sdp",
     instance,
+    release,
   }
 }

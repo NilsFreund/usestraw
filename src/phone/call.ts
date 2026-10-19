@@ -154,7 +154,9 @@ export function createCall(setup: CallSetup): CallHandle {
   async function respond(remote: RemoteDescription | undefined): Promise<void> {
     if (!audio || !("describe" in audio)) return
     const sdp = await audio.describe(remote).catch(() => undefined)
-    if (sdp !== undefined && status !== "ended") run({ type: "answer", call: id, media: { sdp } })
+    // An answer the core refuses leaves the offer to time out, refused with 488
+    if (sdp !== undefined && status !== "ended")
+      attempt({ type: "answer", call: id, media: { sdp } })
   }
 
   function live(): void {
@@ -240,8 +242,19 @@ export function createCall(setup: CallSetup): CallHandle {
     }
     const media = await mediaOf(opened, setup.offer).catch(() => undefined)
     if (status !== "answering") return
-    if (media) run({ type: "accept", call: id, media })
-    else run({ type: "end", call: id, status: 488 })
+    if (!media || !attempt({ type: "accept", call: id, media })) {
+      run({ type: "end", call: id, status: 488 })
+    }
+  }
+
+  // The core throws for media it won't send, such as an SDP over its size limit
+  function attempt(command: CoreCommand): boolean {
+    try {
+      run(command)
+      return true
+    } catch {
+      return false
+    }
   }
 
   function end(options: EndOptions = {}): Promise<CallEnded> {

@@ -52,6 +52,7 @@ function handle(
   audio: FakeAudio | CallSetup["openAudio"],
   direction: CallSetup["direction"] = "incoming",
   remote: RemoteDescription | null = offer,
+  refused?: CoreCommand["type"],
 ) {
   const commands: CoreCommand[] = []
   const created = createCall({
@@ -61,7 +62,10 @@ function handle(
     to: "alice",
     offer: remote ?? undefined,
     openAudio: typeof audio === "function" ? audio : async () => audio,
-    run: (command) => commands.push(command),
+    run: (command) => {
+      if (command.type === refused) throw new TypeError("The SDP is longer than 32768 bytes")
+      commands.push(command)
+    },
     changed: () => undefined,
   })
   return { ...created, commands, ringing: created.call as RingingCall }
@@ -132,6 +136,22 @@ describe("a call whose audio makes its own SDP", () => {
     await expect
       .poll(() => call.commands)
       .toStrictEqual([{ type: "accept", call: "c1", media: { sdp: "v=0\r\noffer" } }])
+  })
+
+  it("turns the call away with 488 when the core won't send the answer the platform made", async () => {
+    const call = handle(fakeAudio(), "incoming", offer, "accept")
+    void call.ringing.accept()
+    await expect.poll(() => call.commands).toStrictEqual([{ type: "end", call: "c1", status: 488 }])
+  })
+
+  it("leaves an offer inside the call to time out when the core won't send its answer", async () => {
+    const audio = fakeAudio()
+    const call = handle(audio, "outgoing", offer, "answer")
+    await call.open()
+    call.receive({ type: "call", call: "c1", state: "offer", description: offer })
+    await expect.poll(() => audio.described).toHaveLength(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(call.commands).toStrictEqual([])
   })
 
   it("turns the call away with 488 when the offer cannot be used", async () => {

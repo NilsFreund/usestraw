@@ -129,6 +129,26 @@ describe("masking", () => {
     expect(roundTrip(message)).toBe(message)
   })
 
+  it("hides ICE passwords and SDES keys in bodies and SDP strings, keeping their length", () => {
+    const sdp = [
+      "v=0",
+      "a=ice-ufrag:keep",
+      "a=ice-pwd:asd88fgpdd777uzjYhagZg",
+      "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:PS1uQCVeeCFCanVmcjkpPywjNWhcYD0mXXtxaVBR|2^20|1:32",
+      "",
+    ].join("\r\n")
+    const masked = sdp
+      .replace("asd88fgpdd777uzjYhagZg", "x".repeat(22))
+      .replace("PS1uQCVeeCFCanVmcjkpPywjNWhcYD0mXXtxaVBR", "x".repeat(40))
+    const message = `INVITE sip:a@b SIP/2.0\r\nContent-Length: ${sdp.length}\r\n\r\n${sdp}`
+    expect(roundTrip(message)).toBe(message.replace(sdp, masked))
+    expect(decode(encode({ media: { sdp }, description: { type: "offer", sdp } }))).toStrictEqual({
+      media: { sdp: masked },
+      description: { type: "offer", sdp: masked },
+    })
+    expect(decode(encode({ note: sdp }))).toStrictEqual({ note: sdp })
+  })
+
   it("masks error texts that quote a hash", () => {
     expect(maskSecrets('Invalid header "Digest response=\\"6629fae4\\""')).toBe(
       'Invalid header "Digest response="masked"',

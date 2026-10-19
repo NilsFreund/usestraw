@@ -8,7 +8,9 @@ import { type CalleeOptions, callee } from "../callee"
 import { alice, bob, sdp } from "../helpers"
 
 // The app's SDP stands in for what an RTCPeerConnection makes; a G.711 callee can play it
-const ours = (version = 1) => sdp({ host: "192.0.2.10", port: 40_000, formats: [0], version })
+// The ICE password is masked in the recording, which still has to replay
+const ours = (version = 1) =>
+  `${sdp({ host: "192.0.2.10", port: 40_000, formats: [0], version })}a=ice-pwd:asd88fgpdd777uzjYhagZg\r\n`
 
 function setup(options: CalleeOptions, internet: LinkConditions, seed: number) {
   const simulation = createSimulation({ seed, internet })

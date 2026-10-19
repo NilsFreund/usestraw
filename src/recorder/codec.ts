@@ -7,10 +7,18 @@ const SECRET_HEADER = /^(?:proxy-)?(?:authorization|authentication-info)$/i
 const SECRET_LINE =
   /^((?:proxy-)?(?:authorization|authentication-info)[ \t]*:)((?:[^\r\n]|\r?\n[ \t])*)/gim
 const SECRET_PARAM = /(\b(?:response|rspauth)[ \t]*=[ \t]*)(?:"[^"]*"|[^,\s]*)/gi
+const ICE_PASSWORD = /^(a=ice-pwd:)([^\r\n]*)/gim
+const SDES_KEY = /(\binline:)([^\s|;]*)/gi
 
 // RFC 7616 §3.4 response and §3.5 rspauth are hashes of the password, so recordings never keep them
 export function maskSecrets(text: string): string {
   return text.replace(SECRET_PARAM, '$1"masked"')
+}
+
+// RFC 8839 ice-pwd and RFC 4568 SDES keys guard the call's media; same length keeps Content-Length
+function maskMedia(text: string): string {
+  const blank = (_secret: string, name: string, value: string) => name + "x".repeat(value.length)
+  return text.replace(ICE_PASSWORD, blank).replace(SDES_KEY, blank)
 }
 
 export function encode(value: unknown): string {
@@ -22,6 +30,7 @@ export function encode(value: unknown): string {
       return { $number: String(raw === 0 ? "-0" : raw) }
     }
     if (isSecretHeader(raw)) return { ...raw, value: maskSecrets(raw.value) }
+    if (key === "sdp" && typeof raw === "string") return maskMedia(raw)
     return item
   })
 }
@@ -59,12 +68,11 @@ function maskMessage(bytes: Uint8Array): Uint8Array {
   const text = latin1(bytes)
   const end = text.search(HEAD_END)
   const head = end === -1 ? text : text.slice(0, end)
-  const masked = head.replace(
-    SECRET_LINE,
-    (_line, name: string, rest: string) => name + maskSecrets(rest),
-  )
-  if (masked === head) return bytes
-  return Uint8Array.from(masked + text.slice(head.length), (char) => char.charCodeAt(0))
+  const masked =
+    head.replace(SECRET_LINE, (_line, name: string, rest: string) => name + maskSecrets(rest)) +
+    maskMedia(text.slice(head.length))
+  if (masked === text) return bytes
+  return Uint8Array.from(masked, (char) => char.charCodeAt(0))
 }
 
 function latin1(bytes: Uint8Array): string {

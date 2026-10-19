@@ -196,7 +196,7 @@ export type Call = RingingCall | AnsweringCall | CallingCall | LiveCall | EndedC
 export interface CallOptions {
   /** Talks for you once the call is answered. In the browser it takes the microphone's place. */
   readonly agent?: Agent | undefined
-  /** How long to ring, in ms, before giving up with `reason: "no-answer"`. */
+  /** How long to ring, in ms, from when the call goes out, before giving up as `"no-answer"`. */
   readonly timeout?: number | undefined
   /** Cancels the call like `fetch` does. No effect once the call is answered. */
   readonly signal?: AbortSignal | undefined

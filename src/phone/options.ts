@@ -50,8 +50,8 @@ export interface ConnectUrlOptions {
   readonly maxCalls?: number | undefined
   /**
    * Who may call this phone over UDP: your SIP server, `"anyone"` who finds its port, or the server
-   * plus a list of IPs and CIDR ranges, like your trunk's signaling addresses. Over TLS only the
-   * server can reach it anyway.
+   * plus a list of IPs and CIDR ranges, like your trunk's signaling addresses. Over TLS and WebSocket
+   * only the server can reach it anyway.
    *
    * @default "server"
    */
@@ -79,6 +79,7 @@ export interface ConnectOptions extends ConnectUrlOptions {
   /**
    * `tls://host[:port]` (port 5061 by default), `udp://host[:port]` (5060) or
    * `wss://host[:port][/path]` (443). Defaults to the domain of `uri`, over UDP, or TLS for `sips:`.
+   * Browsers need `wss://`.
    */
   readonly server?: string | undefined
 }

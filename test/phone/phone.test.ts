@@ -778,6 +778,39 @@ describe("phone and its calls", () => {
     expect(phone.status).toBe("closed")
   })
 
+  it("rings for the whole timeout, however long the microphone took", async () => {
+    const network = memoryNetwork()
+    let grant: (() => void) | undefined
+    const phone = await startOn(network, settings(), {
+      openAudio: (host) =>
+        new Promise((resolve) => {
+          grant = () =>
+            resolve({
+              local: { host, port: 4000 },
+              update: () => undefined,
+              sampleRate: 8000,
+              played: 0,
+              readable: new ReadableStream(),
+              writable: new WritableStream(),
+              clear: () => undefined,
+              close: () => undefined,
+            })
+        }),
+    })
+    let reason: string | undefined
+    void phone.call("bob", { timeout: 5000 }).then((call) => {
+      reason = call.reason ?? "answered"
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(reason).toBeUndefined()
+    grant?.()
+    await vi.advanceTimersByTimeAsync(4_900)
+    expect(reason).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(reason).toBe("no-answer")
+    await phone.close()
+  })
+
   it("lets a call that is being answered finish while it drains", async () => {
     const network = memoryNetwork()
     const phone = await startOn(network, settings(), { openAudio: () => new Promise(() => {}) })

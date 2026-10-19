@@ -206,7 +206,7 @@ function unsupported(): DOMException {
 // CSP: a worklet module is a script, and 'self' never covers blob: URLs
 function blocked(error: unknown): DOMException {
   return new DOMException(
-    `The browser would not load the audio worklet that call.audio needs (${String(error)}): if the page has a Content-Security-Policy, allow blob: in script-src`,
+    `The browser would not load the audio worklet that call.audio needs (${String(error)}): if the page has a Content-Security-Policy, allow blob: in script-src (or script-src-elem)`,
     "SecurityError",
   )
 }
