@@ -12,7 +12,7 @@
   <a href="https://github.com/NilsFreund/usestraw/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
-Make and take phone calls from Node. The audio comes as Web Streams.
+Make and take phone calls from Node and the browser. The audio comes as Web Streams.
 
 ```ts
 import { connect } from "usestraw"
@@ -28,7 +28,7 @@ Put your voice agent where the `TransformStream` is, and it answers the phone.
 
 - Zero dependencies, under 50 kB min+gzip, 100% test coverage.
 - `STRAW_DEBUG=1` prints the SIP traffic, and every phone keeps a replayable trace.
-- Hand-tested with real calls through Kamailio and FreeSWITCH.
+- Hand-tested with real calls through Kamailio and FreeSWITCH, and from Chrome.
 
 ## Install
 
@@ -36,7 +36,7 @@ Put your voice agent where the `TransformStream` is, and it answers the phone.
 npm install usestraw
 ```
 
-You need Node 22.12+ (TypeScript 5.7+ for the types) and a SIP account from your provider or PBX.
+You need Node 22.12+ or a current browser (TypeScript 5.7+ for the types), and a SIP account from your provider or PBX. Browsers need one that speaks SIP over WebSocket and WebRTC.
 
 ## Calling out
 

@@ -21,7 +21,7 @@ Everything the [README](README.md) leaves out. The JSDoc has every option in det
 const phone = await connect("tls://alice:secret@sip.example.com")
 ```
 
-`tls://` defaults to port 5061, `udp://` to 5060. Prefer TLS. Percent-encode special characters in the password, or pass it as `{ password }`. When your SIP domain and the server differ, or your provider has a separate auth user:
+`tls://` defaults to port 5061, `udp://` to 5060 and `wss://` to 443, with an optional path like `wss://alice:secret@sip.example.com/ws`. Prefer TLS or WebSocket over TLS; `ws://` works only for localhost, since it would send the password in the clear. Percent-encode special characters in the password, or pass it as `{ password }`. When your SIP domain and the server differ, or your provider has a separate auth user:
 
 ```ts
 const phone = await connect({
@@ -49,7 +49,7 @@ Don't `await` a whole call inside the loop, or the next caller waits. `accept()`
 
 ## Making calls
 
-Like `fetch`, `phone.call()` resolves for busy and unanswered calls too, so check `ok`. It rejects for a bad address, a closed phone, an aborted `signal`, or no free audio port. Numbers can look like `"+44 20 7946-0123"`, `"+44 (0)20 7946 0123"` or `"tel:+442079460123"`; user names and `sip:` addresses work too.
+Like `fetch`, `phone.call()` resolves for busy and unanswered calls too, so check `ok`. It rejects for a bad address, a closed phone, an aborted `signal`, no free audio port, or in the browser a refused microphone. The `timeout` counts from when the call goes out. Numbers can look like `"+44 20 7946-0123"`, `"+44 (0)20 7946 0123"` or `"tel:+442079460123"`; user names and `sip:` addresses work too.
 
 ```ts
 const call = await phone.call("+44 20 7946 0123", { timeout: 30_000, signal })
@@ -99,25 +99,41 @@ const snapshot = useSyncExternalStore(phone.subscribe, () => phone.toJSON())
 
 ## Browsers
 
-The same `import { connect } from "usestraw"` picks the browser build. It registers over `wss://` (RFC 7118) and calls through WebRTC, one peer connection per call:
+The same `import { connect } from "usestraw"` picks the browser build. It registers over `wss://` (RFC 7118) and calls through WebRTC, one peer connection per call. So the server has to speak both SIP over WebSocket and WebRTC media (ICE and DTLS-SRTP), as Asterisk with `webrtc=yes`, FreeSWITCH, or Kamailio with rtpengine do.
 
 ```ts
 const phone = await connect({
   uri: "sip:alice@example.com",
-  password,
+  password, // this user's own SIP password, from your backend
   server: "wss://edge.example.com/ws",
   iceServers: [{ urls: "stun:stun.example.com" }],
 })
+
+let current: Call | undefined
+callButton.onclick = async () => {
+  current = await phone.call(numberInput.value) // the first call asks for the microphone
+}
+hangUpButton.onclick = () => void current?.end()
+
+for await (const call of phone.incoming) {
+  current = call
+  answerButton.onclick = () => void call.accept()
+}
 ```
 
+Start calls and answers from a click, which lets the browser use the microphone and the speakers.
+
 - The page has to be secure: https, or localhost while you develop.
+- The page holds the SIP password, so give every user their own account and fetch it from your backend. Never ship one in the bundle.
 - Without an agent, the first call or answer asks for the microphone. A refusal rejects `accept()` with `NotAllowedError`, and the call keeps ringing for another try.
 - Behind NAT, pass `iceServers`. TURN servers need a `username` and `credential`.
-- One tab at a time keeps its Contact across reloads, so the registrar replaces the old binding. Other tabs register beside it.
+- One phone in one tab at a time keeps its Contact across reloads, so the registrar replaces the old binding. Other tabs, and a second phone in the same tab, register beside it.
 - `call.audio` is the same 8 kHz PCM as in Node. What you write plays along with the microphone. An agent takes the microphone's place, so the browser never asks for it, and the far end still plays through the speakers.
-- Under a Content-Security-Policy, `call.audio` needs `blob:` in `script-src` for its AudioWorklet. Otherwise a call or answer with an agent rejects with `SecurityError` before it goes out, and an incoming call keeps ringing.
+- Under a Content-Security-Policy, allow the `wss://` server in `connect-src`. `call.audio` also needs `blob:` in `script-src` (or `script-src-elem`, if you set it) for its AudioWorklet; otherwise a call or answer with an agent rejects with `SecurityError` before it goes out, and an incoming call keeps ringing.
 - Browsers start audio only after the user clicked on the page (Safari: shortly before). An agent that answers before that hears nothing, and what it writes waits for the next click or key press.
-- `localStorage.STRAW_DEBUG = "1"` prints the ladder in the console.
+- A closed tab's registration lasts until it expires, unless the server drops it with the connection.
+- `localStorage.STRAW_DEBUG = "1"`, then a reload, prints the ladder in the console.
+- Hand-tested in Chrome. Firefox and Safari follow the same standards but haven't been tried on real calls yet.
 
 ## Trunks
 
@@ -152,7 +168,7 @@ const phone = await connect({
 | `"refused"` | Registration denied for good, e.g. 403. Some servers answer a wrong password with 403. |
 | `"unavailable"` | The server can't register you right now, e.g. 503. |
 | `"no-answer"` | No response. Check host, port and transport, and that a trunk allows your IP. |
-| `"network"` | The connection failed, or the TLS certificate isn't trusted. Use `tls.ca` for a private CA. |
+| `"network"` | The connection failed, or the TLS certificate isn't trusted. Use `tls.ca` for a private CA, or `NODE_EXTRA_CA_CERTS` with `wss://`. |
 
 Once online, the phone re-registers and reconnects on its own. While it is down, `status` is `"reconnecting"`, `error` says why and `retryAt` says when it tries again. While the connection itself is lost, `phone.call()` throws that error. Running calls keep going when the server keeps them.
 
@@ -175,7 +191,7 @@ $ STRAW_DEBUG=1 node examples/call.ts "+44 20 7946 0123"
     0.012  ● call live PCMU to 198.51.100.7:18610
 ```
 
-`phone.trace` holds the latest 512 KB of SIP traffic, timers and random draws, with password hashes masked. Attach it to bug reports. `ladder(trace)` from `usestraw/core` draws it like above, and `replay(trace)` reruns it to check the same outputs come out. Replays need the usestraw version that made the trace, and a trace that grew past 512 KB still draws but no longer replays. `trace: false` turns it off.
+`phone.trace` holds the latest 512 KB of SIP traffic, timers and random draws, with password hashes, ICE passwords and SDES keys masked. Attach it to bug reports. `ladder(trace)` from `usestraw/core` draws it like above, and `replay(trace)` reruns it to check the same outputs come out. Replays need the usestraw version that made the trace, and a trace that grew past 512 KB still draws but no longer replays. `trace: false` turns it off.
 
 ## Limits
 
@@ -190,7 +206,7 @@ $ STRAW_DEBUG=1 node examples/call.ts "+44 20 7946 0123"
 - **No TLS server,** so a trunk without registration calls in over UDP.
 - **No hold, transfer, TCP or video** yet.
 
-**Asterisk** (not hand-tested yet): these PJSIP settings fit Straw behind NAT and across reconnects. `dtmf_mode=auto` keeps key presses in-band.
+**Asterisk** (not hand-tested yet): these PJSIP settings fit Straw in Node behind NAT and across reconnects. `dtmf_mode=auto` keeps key presses in-band. For browsers, the endpoint needs `webrtc=yes` and a `wss` transport instead.
 
 ```ini
 [straw]
@@ -211,7 +227,7 @@ remove_existing=yes
 
 ## Security
 
-- `tls://` verifies certificates. Use `tls.ca` for a private CA.
+- `tls://` and `wss://` verify certificates. Use `tls.ca` for a private CA with `tls://`, and `NODE_EXTRA_CA_CERTS` with `wss://` in Node.
 - Over UDP only your SIP server may start calls; strangers who find the port get no answer. `acceptFrom` adds IPs and CIDR ranges, or allows `"anyone"` for direct IP calls.
 - Straw answers digest challenges only for the realms your server used when registering, never with a weaker hash, and never inside a call. Without registration, or when the registrar never asked for a password, it answers any realm on an outgoing call unless you set `realm`. Use a long random SIP password.
 - An incoming call starts sending audio only once the caller confirmed it, so a forged call cannot aim your audio at someone else. Straw hangs up when nothing comes back for a minute while it sends.
@@ -222,13 +238,13 @@ Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
 
 ## Where Straw fits
 
-Straw is a SIP phone, not a server. SIP runs in a pure state machine with no sockets or clocks, which is what makes replays work and lets the tests simulate loss, NAT and roaming in milliseconds. It speaks RFC 3261 and 6026 (SIP), 7616 and 8760 (digest), 3264 and 8866 (SDP), 3550 and 3551 (RTP).
+Straw is a SIP phone, not a server. SIP runs in a pure state machine with no sockets or clocks, which is what makes replays work and lets the tests simulate loss, NAT and roaming in milliseconds. It speaks RFC 3261 and 6026 (SIP), 7118 and 5626 (WebSocket and outbound), 7616 and 8760 (digest), 3264 and 8866 (SDP), 3550 and 3551 (RTP).
 
 | You want to | Use |
 | --- | --- |
-| Make and take calls from Node with your own SIP account, audio in your code | Straw |
+| Make and take calls from Node or the browser with your own SIP account, audio in your code | Straw |
 | Let a platform bridge calls to your agent | Twilio Media Streams, LiveKit SIP or Jambonz |
-| Build a browser softphone today | SIP.js or JsSIP |
+| Build a full browser softphone today, with hold, transfer and DTMF | SIP.js or JsSIP |
 | Build a SIP proxy, registrar or B2BUA | drachtio, Kamailio or OpenSIPS |
 | Run a PBX | Asterisk or FreeSWITCH |
 

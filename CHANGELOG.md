@@ -4,12 +4,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 
 ## [Unreleased]
 
+## [0.2.0-rc.0] - 2026-10-19
+
+Browsers join Node: the same phone registers over WebSocket and calls through WebRTC, with the audio as the same PCM streams.
+
 ### Added
 
-- SIP over WebSocket (RFC 7118) in Node: `wss://user:password@host[:port][/path]` URLs and `wss://` servers, `ws://` for localhost only. The phone registers as a random `.invalid` host with `transport=ws` and an RFC 5626 instance id (`;ob` on dialog Contacts, one plain retry after 439), keeps that Contact across reconnects, sends CRLF keepalives and drops a server that stops answering them, and sends audio from the interface that reaches the server.
-- Browsers: `import { connect } from "usestraw"` picks the browser build, which registers over `wss://` and makes calls through WebRTC, with the microphone asked for on the first call or answer. A refused microphone keeps an incoming call ringing for another try. `iceServers` passes STUN and TURN servers on. One tab at a time keeps its Contact and instance across reloads, so the registrar replaces the old binding; other tabs register beside it. `localStorage.STRAW_DEBUG = "1"` prints the ladder to the console. `call.audio` is the same 8 kHz PCM as in Node, from an AudioWorklet built only when the app uses it: written audio plays along with the microphone, and an agent takes the microphone's place, so the browser never asks for it. A call or answer with an agent rejects before it goes out when the page can't run `call.audio` (a Content-Security-Policy needs `blob:` in `script-src`).
+- Browsers: `import { connect } from "usestraw"` picks the browser build, which registers over `wss://` and calls through WebRTC. It asks for the microphone on the first call or answer, and a refused microphone keeps an incoming call ringing for another try. `iceServers` passes STUN and TURN servers on. One phone in one tab at a time keeps its registration across reloads; other tabs and phones register beside it. `call.audio` is the same 8 kHz PCM as in Node: what you write plays along with the microphone, and an agent takes the microphone's place, so the browser never asks for it. A call or answer with an agent rejects before it goes out when the page can't run `call.audio` (a Content-Security-Policy needs `blob:` in `script-src`). `localStorage.STRAW_DEBUG = "1"` prints the ladder to the console.
+- SIP over WebSocket in Node too: `wss://user:password@host[:port][/path]` URLs and `wss://` servers, `ws://` for localhost only. Reconnects keep the registration, and a server that stops answering keepalives, or sends a message over 64 KB, gets replaced by a new connection (RFC 7118, RFC 5626).
+- The `IceServer` type for `iceServers`.
 - `usestraw/core`: `instance` sets the RFC 5626 instance id to register with over WebSocket.
 - `usestraw/core`: `media: "sdp"` lets the app make the SDP, as WebRTC does. Calls take `{ sdp }`; events carry the far end's SDP as a `description` shaped like `RTCSessionDescriptionInit` (`offer`, `pranswer`, `answer`, `rollback`). A byte-identical refresh gets the same SDP back, any other offer inside a call, or a re-INVITE without one, becomes an `offer` event for an `answer` command, refused with 488 and rolled back when none comes within 10 s or the far end cancels.
+
+### Changed
+
+- In the browser, `connect()` makes calls instead of rejecting with `NotSupportedError`.
+- The `timeout` of `phone.call()` counts from when the call goes out, so a microphone prompt doesn't use up the ring time.
+- Traces also mask ICE passwords and SDES keys, at the same length, so they still replay.
+- `usestraw/core`: with `media: "sdp"`, a `CallEvent` can have the new state `"offer"`, so exhaustive switches need a branch for it.
 
 ## [0.1.0-rc.0] - 2026-10-12
 
@@ -35,5 +47,6 @@ The first release candidate: make and take phone calls from Node, with the audio
 - `usestraw/core`: the sans-I/O SIP core, experimental until the browser softphone settles it.
 - `usestraw/node` for the Node build, and a browser placeholder whose `connect()` rejects with `NotSupportedError` until 0.2.
 
-[Unreleased]: https://github.com/NilsFreund/usestraw/compare/v0.1.0-rc.0...HEAD
+[Unreleased]: https://github.com/NilsFreund/usestraw/compare/v0.2.0-rc.0...HEAD
+[0.2.0-rc.0]: https://github.com/NilsFreund/usestraw/compare/v0.1.0-rc.0...v0.2.0-rc.0
 [0.1.0-rc.0]: https://github.com/NilsFreund/usestraw/releases/tag/v0.1.0-rc.0

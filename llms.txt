@@ -9,7 +9,7 @@ Straw is a SIP user agent, not a server or proxy. It registers with any SIP prov
 ```ts
 import { connect, ConnectError, type Agent, type Call, type LiveCall, type RingingCall } from "usestraw" // "usestraw/node" in jsdom tests or Electron's main process
 
-const phone = await connect(process.env.SIP_URL) // "tls://user:password@host[:port]" or "udp://…"
+const phone = await connect(process.env.SIP_URL) // "tls://user:password@host[:port]", "udp://…" or "wss://user:password@host[:port][/path]"
 const phone2 = await connect({ uri: "sip:+442079460456@sip.example.com", password, server: "tls://edge.example.com" })
 
 for await (const call of phone.incoming) void call.accept(createAgent()) // RingingCall → LiveCall | UnansweredCall
@@ -30,7 +30,7 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - Call fields: `id` (opaque), `direction`, `from`, `to`, `callerName`, `status` ("ringing" | "answering" | "calling" | "live" | "ended"), `ok`, `reason`, `ended`, `subscribe(listener)`, `toJSON()`.
 - Call reasons: hangup, cancelled, answered-elsewhere, busy, declined, not-found, no-answer, unavailable, rejected, unauthorized, incompatible, dropped. New reasons may come in minor versions: keep a default branch.
 - `connect()` rejects with `ConnectError`; switch on `error.reason`: wrong-password, password-missing, unsupported-auth, refused, unavailable, no-answer, network.
-- Options of `connect`: `password`, `authUser`, `realm` (the one digest realm to answer; set it with `register: false`), `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100), `acceptFrom` ("server" by default, "anyone" for direct IP calls, or IPs and CIDR ranges allowed besides the server, over UDP), `register` (false for an IP-authenticated trunk: connect only pings the server, then once a minute), `localPort` (fixed local UDP port for the trunk to call).
+- Options of `connect`: `password`, `authUser`, `realm` (the one digest realm to answer; set it with `register: false`), `tls: { ca }`, `signal`, `trace` (default true), `maxCalls` (default 100), `acceptFrom` ("server" by default, "anyone" for direct IP calls, or IPs and CIDR ranges allowed besides the server, over UDP), `register` (false for an IP-authenticated trunk: connect only pings the server, then once a minute), `localPort` (fixed local UDP port for the trunk to call), `iceServers` (STUN and TURN for browsers). `tls`, `acceptFrom`, `register` and `localPort` are for Node over TLS or UDP.
 
 ## Pitfalls
 
@@ -43,14 +43,17 @@ await phone.close({ drain: true, signal: AbortSignal.timeout(60_000) })
 - A call whose far end sends no audio for 60 s is hung up with `reason: "dropped"` (in the browser, when the connection fails).
 - The phone reconnects on its own: `status` goes `"reconnecting"` and back to `"online"`; `phone.incoming` and running calls stay open meanwhile, and `call()` throws the `ConnectError` while the connection itself is lost.
 - Readers that fall behind lose the oldest frames. Keep reading or cancel the stream.
+- Browsers need a secure page (https or localhost), or `connect()` rejects with `SecurityError`, and a server that speaks SIP over WebSocket and WebRTC media. The page holds the SIP password: one account per user, fetched from your backend.
+- `ws://` works only for localhost. `tls.ca` with `wss://` throws a TypeError: use `NODE_EXTRA_CA_CERTS` in Node.
+- One phone in one tab at a time keeps its identity across reloads; other tabs and phones register beside it.
 - In the browser, a call or answer without an agent asks for the microphone; a refusal rejects with `NotAllowedError` (`NotFoundError`, `NotReadableError`) and an incoming call keeps ringing. With an agent the microphone stays off.
-- Browser `call.audio` needs `blob:` in the page's CSP `script-src`, or `call()` and `accept()` with an agent reject with `SecurityError` (`NotSupportedError` without an AudioWorklet). Audio starts only after a click on the page: an agent that answers before one hears nothing, and its writes wait for the next click.
+- Browser `call.audio` needs `blob:` in the page's CSP `script-src` (or `script-src-elem`), and the `wss://` server in `connect-src`, or `call()` and `accept()` with an agent reject with `SecurityError` (`NotSupportedError` without an AudioWorklet). Audio starts only after a click on the page: an agent that answers before one hears nothing, and its writes wait for the next click.
 - `await using` runs on Node 24. On Node 22 only a compiler that lowers it handles it (TypeScript with a target below ESNext), not type stripping; otherwise call `phone.close()` yourself.
 
 ## Debugging
 
-- `STRAW_DEBUG=1` prints a SIP ladder to stderr.
-- `phone.trace` holds the latest 512 KB of SIP traffic, password hashes masked. `ladder(trace)` draws it and `replay(trace)` reruns it on the same usestraw version, both from `usestraw/core`.
+- `STRAW_DEBUG=1` prints a SIP ladder to stderr; in the browser, `localStorage.STRAW_DEBUG = "1"` and a reload print it to the console.
+- `phone.trace` holds the latest 512 KB of SIP traffic, password hashes and media keys masked. `ladder(trace)` draws it and `replay(trace)` reruns it on the same usestraw version, both from `usestraw/core`.
 
 ## Docs
 

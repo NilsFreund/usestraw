@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>usestraw: SIP without the hangover</title>
-    <meta name="description" content="A modern SIP stack for voice apps and AI agents. Make and take phone calls from Node, with the audio as Web Streams.">
+    <meta name="description" content="A modern SIP stack for voice apps and AI agents. Make and take phone calls from Node and the browser, with the audio as Web Streams.">
     <meta name="color-scheme" content="light dark">
     <link rel="canonical" href="https://usestraw.dev/">
     <link rel="icon" href="/favicon.png" type="image/png">
@@ -99,7 +99,7 @@
         <div class="note">
           <h2>The whole app</h2>
           <p>Put your voice agent where the <code>TransformStream</code> is, and it answers the phone. Calling out works like <code>fetch</code>, and every call says why it ended.</p>
-          <p class="muted">0.1 runs in Node 22.12 and up and speaks G.711. No SRTP, DTMF, hold or transfer yet; the browser comes next. <a href="https://github.com/NilsFreund/usestraw/blob/main/GUIDE.md#limits">All limits</a></p>
+          <p class="muted">Runs in Node 22.12 and up, and in browsers over WebSocket and WebRTC. Node speaks G.711, without SRTP. No DTMF, hold or transfer yet. <a href="https://github.com/NilsFreund/usestraw/blob/main/GUIDE.md#limits">All limits</a></p>
         </div>
       </section>
     </main>
