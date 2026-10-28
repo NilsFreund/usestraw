@@ -141,22 +141,22 @@ function opened(socket: WebSocket, signal: AbortSignal | undefined): Promise<voi
     reject(signal?.reason)
     socket.close()
   }
-  const fail = (event: Closing) => reject(closedBy(event))
+  // Node 22 reports a failed handshake only as an error, never with the close that follows it
+  const fail = () => reject(new Error(`The WebSocket did not open; ${LOOK}`))
   socket.addEventListener("open", () => resolve(), { once: true })
+  socket.addEventListener("error", fail, { once: true })
   socket.addEventListener("close", fail, { once: true })
   signal?.addEventListener("abort", abort, { once: true })
-  return promise.finally(() => {
-    socket.removeEventListener("close", fail)
-    signal?.removeEventListener("abort", abort)
-  })
+  return promise.finally(() => signal?.removeEventListener("abort", abort))
 }
 
 // Browsers hide why a WebSocket failed, so the message says where to look
+const LOOK =
+  "check the address, the path, the certificate and that the server speaks SIP over WebSocket"
+
 function closedBy(event: Closing): Error {
   const reason = event.reason ? `: ${event.reason}` : ""
-  return new Error(
-    `The WebSocket closed (${event.code}${reason}); check the address, the path, the certificate and that the server speaks SIP over WebSocket`,
-  )
+  return new Error(`The WebSocket closed (${event.code}${reason}); ${LOOK}`)
 }
 
 // RFC 7118 §4.2: SIP that is valid UTF-8 goes as text, anything else as binary

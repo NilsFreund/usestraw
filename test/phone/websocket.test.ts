@@ -116,10 +116,16 @@ describe("openWebSocket", () => {
   it("says where to look, without the URL, when the socket closes before it opens", async () => {
     const opening = openWebSocket(server, "a1b2c3.invalid", undefined, Socket)
     socket().closed(1006)
-    await expect(opening).rejects.toThrow(new Error(`The WebSocket closed (1006); ${looking}`))
+    await expect(opening).rejects.toThrow(new Error(`The WebSocket did not open; ${looking}`))
   })
 
-  it("stops at an abort, before or while opening", async () => {
+  it("gives up on an error alone, as Node 22 sends for a failed handshake", async () => {
+    const opening = openWebSocket(server, "a1b2c3.invalid", undefined, Socket)
+    socket().dispatchEvent(new Event("error"))
+    await expect(opening).rejects.toThrow(new Error(`The WebSocket did not open; ${looking}`))
+  })
+
+  it("stops at an abort, before or while opening, but not after", async () => {
     const before = new AbortController()
     before.abort(new Error("gone"))
     await expect(openWebSocket(server, "x.invalid", before.signal, Socket)).rejects.toThrow("gone")
@@ -128,6 +134,12 @@ describe("openWebSocket", () => {
     during.abort(new Error("later"))
     await expect(opening).rejects.toThrow("later")
     expect(socket().closes).toEqual([undefined])
+    const after = new AbortController()
+    const opened = openWebSocket(server, "x.invalid", after.signal, Socket)
+    socket().opened()
+    await opened
+    after.abort()
+    expect(socket().closes).toEqual([])
   })
 
   it("passes on text and binary messages, also those that came before start", async () => {
