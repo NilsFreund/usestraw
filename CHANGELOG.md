@@ -4,7 +4,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions: [Sem
 
 ## [Unreleased]
 
-## [0.2.0-rc.0] - 2026-10-19
+## [0.2.0-rc.0] - 2026-10-30
 
 Browsers join Node: the same phone registers over WebSocket and calls through WebRTC, with the audio as the same PCM streams.
 
